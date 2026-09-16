@@ -1,0 +1,63 @@
+{
+  "entities": {
+    "User": {
+      "collection": "users",
+      "fields": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "provider": { "type": "string" },
+        "isGuest": { "type": "boolean" },
+        "coins": { "type": "number" },
+        "isAdFree": { "type": "boolean" },
+        "adFreePlan": { "type": "string" },
+        "adFreeBillingDate": { "type": "string" },
+        "adFreeRecurring": { "type": "boolean" },
+        "scoreboardUnlocked": { "type": "boolean" },
+        "diceColors": { "type": "array" },
+        "avatar": { "type": "object" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "UserFile": {
+      "collection": "users/{userId}/files",
+      "fields": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "size": { "type": "number" },
+        "type": { "type": "string" },
+        "uploadDate": { "type": "string" },
+        "dataUrl": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    },
+    "EmailSubscriber": {
+      "collection": "emailSubscribers",
+      "fields": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "userId": { "type": "string" },
+        "country": { "type": "string" },
+        "agreedAt": { "type": "string" },
+        "verified": { "type": "boolean" },
+        "verifiedAt": { "type": "string" },
+        "consentVersion": { "type": "string" },
+        "source": { "type": "string" }
+      }
+    },
+    "Friend": {
+      "collection": "users/{userId}/friends",
+      "fields": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "color": { "type": "string" },
+        "image": { "type": "string" },
+        "status": { "type": "string" },
+        "addedAt": { "type": "string" },
+        "userId": { "type": "string" }
+      }
+    }
+  }
+}

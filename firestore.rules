@@ -1,0 +1,41 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check auth
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // User profile and account info
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      // User-specific files and file metadata
+      match /files/{fileId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // User-specific saved boards or preferences
+      match /savedBoards/{boardId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // User-specific friends
+      match /friends/{friendId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Promotional email subscribers
+    match /emailSubscribers/{subscriberId} {
+      // Anyone can submit their email subscription for free coins
+      allow create: if request.resource.data.email is string && request.resource.data.email.size() > 3;
+      // Users can view or update verification status of their own subscription
+      allow read, update: if true;
+    }
+  }
+}

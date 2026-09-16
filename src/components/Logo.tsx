@@ -1,0 +1,63 @@
+import React, { useState } from 'react';
+
+interface LogoProps {
+  className?: string;
+  size?: 'sm' | 'md' | 'lg';
+}
+
+export const ColorRunLogo: React.FC<LogoProps> = ({ className = '', size = 'md' }) => {
+  const [imgError, setImgError] = useState(false);
+
+  const sizeStyles = {
+    sm: 'h-9 max-h-9',
+    md: 'h-13 max-h-13',
+    lg: 'h-20 max-h-20',
+  }[size];
+
+  if (imgError) {
+    return (
+      <div className={`flex flex-col items-center justify-center font-black tracking-tight select-none ${className}`}>
+        <div className="flex items-center gap-1.5 text-2xl sm:text-3xl font-black drop-shadow-md">
+          <span className="text-[#e5352f] drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">COLOR</span>
+          <span className="text-[#1f7fd6] drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">RUN</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src="/assets/img/cr-logo.png"
+      alt="Color Run"
+      onError={() => setImgError(true)}
+      className={`object-contain block mx-auto select-none filter drop-shadow-[0_3px_5px_rgba(0,0,0,0.35)] ${sizeStyles} ${className}`}
+      draggable={false}
+    />
+  );
+};
+
+export const DGLogo: React.FC<{ className?: string; size?: 'xs' | 'sm' | 'md'; textColor?: string }> = ({
+  className = '',
+  size = 'xs',
+  textColor = 'text-white',
+}) => {
+  const sizeStyles = {
+    xs: 'w-14 sm:w-16 max-h-7',
+    sm: 'w-20',
+    md: 'w-28',
+  }[size];
+
+  return (
+    <div className={`flex flex-col items-center justify-center gap-0.5 ${className}`}>
+      <img
+        src="/assets/img/dg-logo.png"
+        alt="Data Games Lab"
+        className={`object-contain block ${sizeStyles} select-none filter drop-shadow-[0_1px_3px_rgba(0,0,0,0.2)]`}
+        draggable={false}
+      />
+      <div className={`text-[9px] sm:text-[10px] font-extrabold tracking-wider sm:tracking-widest uppercase drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] ${textColor}`}>
+        © DATA GAMES LAB LLC™
+      </div>
+    </div>
+  );
+};
