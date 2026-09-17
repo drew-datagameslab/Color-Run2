@@ -100,3 +100,49 @@
   z-index: 0;
   pointer-events: none;
 }
+
+/* ----------------------------------------------------
+   3D DICE BOUNCE & SHADOW KEYFRAMES FOR DAILY BONUS
+   ---------------------------------------------------- */
+@keyframes diceBounceRed {
+  0% { transform: translateY(0px) scale(1); }
+  20% { transform: translateY(-44px) scale(1.08); }
+  46% { transform: translateY(0px) scale(0.95); }
+  66% { transform: translateY(-20px) scale(1.04); }
+  82% { transform: translateY(0px) scale(0.98); }
+  92% { transform: translateY(-6px) scale(1.01); }
+  100% { transform: translateY(0px) scale(1); }
+}
+
+@keyframes diceBounceBlue {
+  0% { transform: translateY(0px) scale(1); }
+  22% { transform: translateY(-48px) scale(1.1); }
+  48% { transform: translateY(0px) scale(0.94); }
+  68% { transform: translateY(-22px) scale(1.05); }
+  85% { transform: translateY(0px) scale(0.98); }
+  94% { transform: translateY(-7px) scale(1.01); }
+  100% { transform: translateY(0px) scale(1); }
+}
+
+@keyframes diceShadow {
+  0% { transform: scale(1); opacity: 0.65; }
+  20% { transform: scale(0.55); opacity: 0.2; }
+  46% { transform: scale(1.15); opacity: 0.85; }
+  66% { transform: scale(0.75); opacity: 0.35; }
+  82% { transform: scale(1.05); opacity: 0.75; }
+  92% { transform: scale(0.92); opacity: 0.55; }
+  100% { transform: scale(1); opacity: 0.65; }
+}
+
+.animate-dice-bounce-red {
+  animation: diceBounceRed 1.6s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+}
+
+.animate-dice-bounce-blue {
+  animation: diceBounceBlue 1.6s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+}
+
+.animate-dice-shadow {
+  animation: diceShadow 1.6s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+}
+

@@ -6,7 +6,7 @@ import { Users, Loader2, ArrowLeft, Bot, Sparkles, CheckCircle2 } from 'lucide-r
 import { calculatePayouts } from './PickGameScreen';
 
 interface MatchmakingScreenProps {
-  playerCount: 4 | 6 | 8;
+  playerCount: 2 | 4 | 6 | 8;
   buyIn: number;
   tier: 'standard' | 'double' | 'high_roller';
   user: UserAccount;
@@ -15,18 +15,19 @@ interface MatchmakingScreenProps {
   onCancel: () => void;
 }
 
-const ONLINE_OPPONENTS_POOL = [
-  { name: 'LuckyAce', color: '#1f7fd6' },
-  { name: 'NeonDash', color: '#8e44c9' },
-  { name: 'StarRoller', color: '#e58a1f' },
-  { name: 'VegasPro', color: '#2f9a4f' },
-  { name: 'RubyRunner', color: '#d61f7a' },
-  { name: 'AceKing', color: '#0984e3' },
-  { name: 'GoldenDice', color: '#d9ba6d' },
-];
+const BOT_NAMES = ['Ava', 'Pixel', 'Chip', 'Byte', 'Vector', 'Nova', 'Key', 'Mouse'];
+const BOT_COLORS = ['#1f7fd6', '#e58a1f', '#8e44c9', '#0d4d23', '#d61f7a', '#00b894', '#0984e3', '#34495e'];
 
-const BOT_NAMES = ['Pixel', 'Byte', 'Spark', 'Volt', 'Chip', 'Dash', 'Echo', 'Nova'];
-const BOT_COLORS = ['#34495e', '#7f8c8d', '#2c3e50', '#95a5a6', '#16a085', '#27ae60'];
+const ONLINE_OPPONENTS_POOL = [
+  { name: 'Ava', color: '#1f7fd6' },
+  { name: 'Pixel', color: '#8e44c9' },
+  { name: 'Chip', color: '#e58a1f' },
+  { name: 'Byte', color: '#0d4d23' },
+  { name: 'Vector', color: '#d61f7a' },
+  { name: 'Nova', color: '#0984e3' },
+  { name: 'Key', color: '#00b894' },
+  { name: 'Mouse', color: '#34495e' },
+];
 
 export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   playerCount,
@@ -96,8 +97,8 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
           const next = [...prev];
           next[targetSlot] = {
             name: opponent.name,
-            type: 'human',
-            isOnlinePlayer: true,
+            type: 'cpu',
+            isOnlinePlayer: false,
             color: opponent.color,
             diceColors: ['blue', 'red'],
             isReady: true,
@@ -195,6 +196,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
         tier,
         payoutMultiplier: mult,
         payouts,
+        adPlayedDuringMatchmaking: true,
         colorA: userDiceColors[0],
         colorB: userDiceColors[1],
         slots: finalSlots,
@@ -273,6 +275,39 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
         <p className="text-[11px] text-[#735c46] text-center mb-4">
           Filled: {filledCount} of {playerCount} slots
         </p>
+
+        {/* 10-second Ad Banner during the 15s Matchmaking Lobby for non-ad-free players */}
+        {!user.isAdFree && (
+          <div className="w-full mb-3 bg-gradient-to-r from-[#2b170a] to-[#452712] border-2 border-[#f2c14e]/70 rounded-2xl p-2.5 text-[#faf4e6] shadow-md flex items-center justify-between gap-2.5 animate-fade-in">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#e58a1f] to-[#b3630a] flex items-center justify-center shrink-0 text-lg shadow-xs">
+              🎲
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[8px] uppercase tracking-wider font-black bg-[#f2c14e] text-[#2b170a] px-1 py-0.2 rounded font-mono">
+                  AD
+                </span>
+                <span className="text-[11px] font-black text-[#faf4e6] truncate">
+                  Color Run: Home Edition
+                </span>
+              </div>
+              <p className="text-[10px] text-[#d8c8a7] truncate leading-tight">
+                12 custom carved dice &amp; tabletop playmat
+              </p>
+            </div>
+            <div className="text-right shrink-0">
+              {secondsLeft > 5 ? (
+                <span className="text-[10px] font-mono font-bold text-[#f2c14e] bg-black/40 px-2 py-0.5 rounded-full border border-[#f2c14e]/30">
+                  Ad: {secondsLeft - 5}s
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold text-[#2f9a4f] bg-black/40 px-2 py-0.5 rounded-full border border-[#2f9a4f]/50">
+                  ✓ Ad Done
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Slots Grid */}
         <div className="w-full grid grid-cols-2 gap-2">

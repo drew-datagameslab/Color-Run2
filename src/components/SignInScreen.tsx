@@ -8,20 +8,25 @@ import {
   signInWithApple,
   signInAsGuest,
 } from '../lib/firebase';
-import { Loader2, Mail, Lock, User, ShieldCheck, ArrowRight, Sparkles } from 'lucide-react';
+import { redeemReferralCode, registerUserPhoneNumber } from '../lib/referrals';
+import { Loader2, Mail, Lock, User, ShieldCheck, ArrowRight, Sparkles, Gift, Ticket, Phone } from 'lucide-react';
 
 interface SignInScreenProps {
   onSignedIn: (user: UserAccount) => void;
   onPlayGuest: () => void;
+  onToast?: (msg: string) => void;
 }
 
 export const SignInScreen: React.FC<SignInScreenProps> = ({
   onSignedIn,
   onPlayGuest,
+  onToast,
 }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -77,6 +82,26 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
     try {
       if (isSignUp) {
         const user = await signUpWithEmail(cleanEmail, password, displayName);
+        if (phoneNumber.trim()) {
+          user.phoneNumber = phoneNumber.trim();
+          try {
+            await registerUserPhoneNumber(user, phoneNumber.trim());
+          } catch (err) {
+            console.warn('Could not register phone number on sign up:', err);
+          }
+        }
+        if (referralCode.trim()) {
+          try {
+            const refRes = await redeemReferralCode(referralCode.trim(), user);
+            if (refRes.success && onToast) {
+              onToast(`🎉 Referral bonus applied! +300 Coins added, and ${refRes.inviterName} was added as your friend!`);
+            } else if (!refRes.success && onToast) {
+              onToast(`Note: ${refRes.message}`);
+            }
+          } catch (err) {
+            console.warn('Referral redeem on signup error:', err);
+          }
+        }
         onSignedIn(user);
       } else {
         const user = await signInWithEmail(cleanEmail, password);
@@ -95,6 +120,14 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
     setLoading(true);
     try {
       const user = await signInWithGoogle();
+      if (referralCode.trim()) {
+        try {
+          const refRes = await redeemReferralCode(referralCode.trim(), user);
+          if (refRes.success && onToast) {
+            onToast(`🎉 Referral bonus applied! +300 Coins added, and ${refRes.inviterName} was added as your friend!`);
+          }
+        } catch {}
+      }
       onSignedIn(user);
     } catch (err: any) {
       console.error('Google auth error:', err);
@@ -109,6 +142,14 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
     setLoading(true);
     try {
       const user = await signInWithApple();
+      if (referralCode.trim()) {
+        try {
+          const refRes = await redeemReferralCode(referralCode.trim(), user);
+          if (refRes.success && onToast) {
+            onToast(`🎉 Referral bonus applied! +300 Coins added, and ${refRes.inviterName} was added as your friend!`);
+          }
+        } catch {}
+      }
       onSignedIn(user);
     } catch (err: any) {
       console.error('Apple auth error:', err);
@@ -214,16 +255,29 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
         <form onSubmit={handleEmailAuth} className="w-full space-y-1.5 mt-1">
           {/* Display name field when creating account */}
           {isSignUp && (
-            <div className="relative">
-              <User className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[#9c8a74]" />
-              <input
-                type="text"
-                placeholder="Roller Nickname (e.g. Lucky Ace)"
-                value={displayName}
-                onChange={e => setDisplayName(e.target.value)}
-                className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white border border-[#d8c89f] rounded-lg text-[#2e2316] placeholder-[#9c8a74] focus:outline-hidden focus:ring-2 focus:ring-[#2f9a4f]"
-              />
-            </div>
+            <>
+              <div className="relative">
+                <User className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[#9c8a74]" />
+                <input
+                  type="text"
+                  placeholder="Roller Nickname (e.g. Lucky Ace)"
+                  value={displayName}
+                  onChange={e => setDisplayName(e.target.value)}
+                  className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white border border-[#d8c89f] rounded-lg text-[#2e2316] placeholder-[#9c8a74] focus:outline-hidden focus:ring-2 focus:ring-[#2f9a4f]"
+                />
+              </div>
+
+              <div className="relative">
+                <Phone className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[#9c8a74]" />
+                <input
+                  type="tel"
+                  placeholder="Phone Number (Optional - for Friend Invites)"
+                  value={phoneNumber}
+                  onChange={e => setPhoneNumber(e.target.value)}
+                  className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white border border-[#d8c89f] rounded-lg text-[#2e2316] placeholder-[#9c8a74] focus:outline-hidden focus:ring-2 focus:ring-[#2f9a4f]"
+                />
+              </div>
+            </>
           )}
 
           <div className="relative">
@@ -250,6 +304,35 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
               className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white border border-[#d8c89f] rounded-lg text-[#2e2316] placeholder-[#9c8a74] focus:outline-hidden focus:ring-2 focus:ring-[#2f9a4f]"
             />
           </div>
+
+          {/* Referral Code Container on Sign-Up screen */}
+          {isSignUp && (
+            <div className="p-2.5 bg-[#f5ede0] border border-[#d8c89f] rounded-xl space-y-1 text-left">
+              <div className="flex items-center justify-between text-[11px] font-black text-[#5c442c]">
+                <span className="flex items-center gap-1.5">
+                  <Gift className="w-3.5 h-3.5 text-[#e58a1f]" />
+                  <span>Referral Code (Optional)</span>
+                </span>
+                <span className="text-[9px] bg-[#2f9a4f] text-white px-1.5 py-0.2 rounded-full font-black uppercase tracking-wider">
+                  +300 Coins
+                </span>
+              </div>
+              <div className="relative">
+                <Ticket className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[#9c8a74]" />
+                <input
+                  type="text"
+                  placeholder="8-digit code (e.g. CR849201)"
+                  value={referralCode}
+                  onChange={e => setReferralCode(e.target.value.toUpperCase())}
+                  maxLength={12}
+                  className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white border border-[#d8c89f] rounded-lg text-[#2e2316] font-mono font-bold tracking-wider placeholder-[#9c8a74] focus:outline-hidden focus:ring-2 focus:ring-[#2f9a4f] uppercase"
+                />
+              </div>
+              <p className="text-[10px] text-[#7a6249] leading-tight">
+                Enter an 8-digit invite code to get a 300 coin bonus and automatically connect as friends!
+              </p>
+            </div>
+          )}
 
           {errorMsg && (
             <div className="p-1.5 bg-red-50 border border-red-200 rounded-md text-[11px] text-red-700 font-medium text-center">
@@ -299,7 +382,7 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
         </div>
       </div>
 
-      <DGLogo className="mt-2" size="xs" textColor="text-white" />
+      <DGLogo className="mt-2.5" size="login" textColor="text-white" />
     </div>
   );
 };

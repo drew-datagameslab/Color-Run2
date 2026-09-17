@@ -6,6 +6,7 @@ export interface Die {
   value: number; // 1 to 6
   zone: 'active' | 'saved';
   selected: boolean;
+  slotIndex?: number;
 }
 
 export interface ScoreSet {
@@ -65,6 +66,7 @@ export interface GameSettings {
   buyIn?: number;
   payoutMultiplier?: number;
   payouts?: number[];
+  adPlayedDuringMatchmaking?: boolean;
   slots: Array<{
     name: string;
     type: 'human' | 'cpu';
@@ -85,6 +87,7 @@ export interface UserAccount {
   uid: string;
   name: string;
   email: string | null;
+  phoneNumber?: string;
   provider: 'guest' | 'email' | 'google' | 'apple';
   avatar: UserAvatar;
   scoreboardUnlocked: boolean;

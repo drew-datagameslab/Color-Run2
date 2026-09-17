@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   LogOut,
@@ -11,6 +11,7 @@ import {
   VolumeX,
   ShieldCheck,
   Trophy,
+  AlertTriangle,
 } from 'lucide-react';
 import { UserAccount, ShopSettings } from '../types/game';
 import { getSoundVolume, setSoundVolume } from '../lib/audio';
@@ -28,6 +29,7 @@ interface MenuModalProps {
   onOpenProfile: () => void;
   onOpenRules: () => void;
   onOpenScoreboard: () => void;
+  onOpenChallengeFriends?: () => void;
   onLogOut?: () => void;
   onUpdateShop: (shop: ShopSettings) => void;
   onToast: (msg: string) => void;
@@ -46,10 +48,19 @@ export const MenuModal: React.FC<MenuModalProps> = ({
   onOpenProfile,
   onOpenRules,
   onOpenScoreboard,
+  onOpenChallengeFriends,
   onLogOut,
   onUpdateShop,
   onToast,
 }) => {
+  const [showLeaveWarning, setShowLeaveWarning] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setShowLeaveWarning(false);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const isPlaying = currentScreen === 'play';
@@ -63,7 +74,8 @@ export const MenuModal: React.FC<MenuModalProps> = ({
     });
   };
 
-  const handleLeaveGameClick = () => {
+  const handleConfirmLeave = () => {
+    setShowLeaveWarning(false);
     onClose();
     onLeaveGame();
   };
@@ -107,20 +119,46 @@ export const MenuModal: React.FC<MenuModalProps> = ({
 
         {/* Menu Items List */}
         <div className="p-3 flex flex-col gap-2">
-          {/* If currently playing a game: Leave Game button */}
-          {isPlaying && (
-            <button
-              onClick={handleLeaveGameClick}
-              className="w-full py-2.5 px-3.5 bg-[#e5352f] hover:bg-[#c9241e] text-white rounded-xl font-black text-xs flex items-center gap-2.5 shadow-md active:scale-98 transition-all cursor-pointer border-b-2 border-[#8c120e]"
-            >
-              <LogOut className="w-4 h-4" />
-              <div className="flex flex-col text-left">
-                <span>LEAVE GAME</span>
-                <span className="text-[10px] font-normal text-white/90">
-                  Return to Main Menu
-                </span>
+          {/* If currently playing a game: Leave Game button or Forfeit Warning */}
+          {isPlaying && showLeaveWarning ? (
+            <div className="bg-[#fff3f2] border-2 border-[#e5352f] rounded-2xl p-3.5 shadow-md flex flex-col gap-2.5 animate-fade-in text-center">
+              <div className="flex items-center justify-center gap-1.5 text-[#e5352f] font-black text-sm uppercase">
+                <AlertTriangle className="w-4 h-4 text-[#e5352f]" />
+                <span>Forfeit Warning</span>
               </div>
-            </button>
+              <p className="text-xs font-bold text-[#4a3622] leading-relaxed">
+                If you leave the game now, you will forfeit your buy-in.
+              </p>
+              <div className="flex flex-col gap-2 mt-1">
+                <button
+                  onClick={handleConfirmLeave}
+                  className="w-full py-2.5 px-3 bg-[#e5352f] hover:bg-[#c9241e] text-white rounded-xl font-black text-xs shadow-md active:scale-98 transition-all cursor-pointer border-b-2 border-[#8c120e]"
+                >
+                  Continue to Main Menu
+                </button>
+                <button
+                  onClick={() => setShowLeaveWarning(false)}
+                  className="w-full py-2.5 px-3 bg-[#2f9a4f] hover:bg-[#268a48] text-white rounded-xl font-black text-xs shadow-xs active:scale-98 transition-all cursor-pointer border-b-2 border-[#1c6a35]"
+                >
+                  Stay in Room
+                </button>
+              </div>
+            </div>
+          ) : (
+            isPlaying && (
+              <button
+                onClick={() => setShowLeaveWarning(true)}
+                className="w-full py-2.5 px-3.5 bg-[#e5352f] hover:bg-[#c9241e] text-white rounded-xl font-black text-xs flex items-center gap-2.5 shadow-md active:scale-98 transition-all cursor-pointer border-b-2 border-[#8c120e]"
+              >
+                <LogOut className="w-4 h-4" />
+                <div className="flex flex-col text-left">
+                  <span>LEAVE GAME</span>
+                  <span className="text-[10px] font-normal text-white/90">
+                    Return to Main Menu
+                  </span>
+                </div>
+              </button>
+            )
           )}
 
           {/* Shop */}
@@ -151,6 +189,30 @@ export const MenuModal: React.FC<MenuModalProps> = ({
             >
               <Home className="w-4 h-4 text-[#1c6a35]" />
               <span>Main Menu</span>
+            </button>
+          )}
+
+          {/* Challenge Friends Referral Link */}
+          {onOpenChallengeFriends && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenChallengeFriends();
+              }}
+              className="w-full py-2 px-3 bg-[#eef7ee] hover:bg-[#dcf0dc] text-[#1c6a35] rounded-xl font-bold text-xs flex items-center gap-2.5 border border-[#2f9a4f]/40 active:scale-98 transition-all cursor-pointer"
+            >
+              <span className="text-base">📱</span>
+              <div className="flex flex-col text-left flex-1">
+                <span className="flex items-center justify-between">
+                  <span>Challenge Friends by SMS</span>
+                  <span className="text-[9px] bg-[#2f9a4f] text-white px-1.5 py-0.2 rounded-full font-black uppercase">
+                    +300 🪙
+                  </span>
+                </span>
+                <span className="text-[10px] text-[#2d7343] font-normal">
+                  Send invite link &amp; get bonus coins
+                </span>
+              </div>
             </button>
           )}
 

@@ -1,65 +1,14 @@
 import React, { useState } from 'react';
 import { Sparkles, Dices } from 'lucide-react';
-import { playRollDiceSound } from '../lib/audio';
+import { playRollDiceSound, playSfx } from '../lib/audio';
 import { RisingCoinBubble } from './RisingCoinBubble';
+import { ThreeDDice } from './ThreeDDice';
 
 interface DailyBonusOverlayProps {
   isOpen: boolean;
   onClaim: (coinsWon: number) => void;
   onClose: () => void;
 }
-
-// Normal pip dice face component (1 - 6)
-const PipDie: React.FC<{ value: number; color: 'red' | 'blue'; isRolling: boolean }> = ({
-  value,
-  color,
-  isRolling,
-}) => {
-  const bgClass = color === 'red'
-    ? 'bg-gradient-to-br from-[#f24741] via-[#d62822] to-[#9c1813] border-[#ff7b75]'
-    : 'bg-gradient-to-br from-[#3092ed] via-[#1a74c8] to-[#124d85] border-[#68b2f7]';
-
-  // Standard 3x3 grid positions for 1-6 pips
-  const pipPatterns: Record<number, number[]> = {
-    1: [4],
-    2: [2, 6],
-    3: [2, 4, 6],
-    4: [0, 2, 6, 8],
-    5: [0, 2, 4, 6, 8],
-    6: [0, 2, 3, 5, 6, 8],
-  };
-
-  const activePips = pipPatterns[value] || [4];
-
-  return (
-    <div
-      className={`w-24 h-24 sm:w-28 sm:h-28 rounded-2xl p-3.5 border-3 shadow-2xl flex flex-col justify-between select-none transition-transform duration-150 ${bgClass} ${
-        isRolling ? 'animate-bounce scale-105 rotate-6' : 'hover:scale-102'
-      }`}
-      style={{
-        boxShadow: color === 'red'
-          ? '0 12px 25px -4px rgba(214, 40, 34, 0.6), inset 0 2px 4px rgba(255,255,255,0.4)'
-          : '0 12px 25px -4px rgba(26, 116, 200, 0.6), inset 0 2px 4px rgba(255,255,255,0.4)',
-      }}
-    >
-      <div className="w-full h-full grid grid-cols-3 grid-rows-3 gap-1.5 items-center justify-items-center">
-        {Array.from({ length: 9 }).map((_, idx) => {
-          const isPip = activePips.includes(idx);
-          return (
-            <div
-              key={idx}
-              className={`w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full transition-opacity ${
-                isPip
-                  ? 'bg-white shadow-[inset_0_1px_2px_rgba(0,0,0,0.3),0_1px_1px_rgba(255,255,255,0.8)] opacity-100 scale-100'
-                  : 'opacity-0 scale-50'
-              }`}
-            />
-          );
-        })}
-      </div>
-    </div>
-  );
-};
 
 export const DailyBonusOverlay: React.FC<DailyBonusOverlayProps> = ({
   isOpen,
@@ -69,6 +18,7 @@ export const DailyBonusOverlay: React.FC<DailyBonusOverlayProps> = ({
   const [redDie, setRedDie] = useState<number>(3);
   const [blueDie, setBlueDie] = useState<number>(4);
   const [isRolling, setIsRolling] = useState(false);
+  const [rollId, setRollId] = useState(0);
   const [hasRolled, setHasRolled] = useState(false);
   const [showBubble, setShowBubble] = useState(false);
   const [coinsWon, setCoinsWon] = useState(0);
@@ -77,34 +27,49 @@ export const DailyBonusOverlay: React.FC<DailyBonusOverlayProps> = ({
 
   const handleRoll = () => {
     if (isRolling || hasRolled) return;
+
+    // Pick final random numbers
+    const finalRed = Math.floor(Math.random() * 6) + 1;
+    const finalBlue = Math.floor(Math.random() * 6) + 1;
+
+    setRedDie(finalRed);
+    setBlueDie(finalBlue);
     setIsRolling(true);
+    setRollId(prev => prev + 1);
+
+    // Initial toss rattle
     playRollDiceSound();
 
-    let rollCount = 0;
-    const interval = setInterval(() => {
-      setRedDie(Math.floor(Math.random() * 6) + 1);
-      setBlueDie(Math.floor(Math.random() * 6) + 1);
-      rollCount++;
+    // Table clatter sfx on bounce hits
+    const t1 = setTimeout(() => {
+      playSfx('s3');
+    }, 720);
 
-      if (rollCount >= 14) {
-        clearInterval(interval);
-        const finalRed = Math.floor(Math.random() * 6) + 1;
-        const finalBlue = Math.floor(Math.random() * 6) + 1;
-        setRedDie(finalRed);
-        setBlueDie(finalBlue);
-        setIsRolling(false);
-        setHasRolled(true);
+    const t2 = setTimeout(() => {
+      playSfx('add');
+    }, 1300);
 
-        const totalPips = finalRed + finalBlue;
-        const won = totalPips * 10;
-        setCoinsWon(won);
+    // Settle after 1.6s of dynamic 3D tumbling
+    const t3 = setTimeout(() => {
+      setIsRolling(false);
+      setHasRolled(true);
 
-        // Trigger rising coin bubble
-        setTimeout(() => {
-          setShowBubble(true);
-        }, 500);
-      }
-    }, 80);
+      const totalPips = finalRed + finalBlue;
+      const won = totalPips * 10;
+      setCoinsWon(won);
+      playSfx('fanfare');
+
+      // Trigger rising coin bubble
+      setTimeout(() => {
+        setShowBubble(true);
+      }, 550);
+    }, 1650);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
   };
 
   const handleBubbleComplete = () => {
@@ -133,38 +98,68 @@ export const DailyBonusOverlay: React.FC<DailyBonusOverlayProps> = ({
             <Sparkles className="w-6 h-6 animate-pulse text-[#e58a1f]" />
           </div>
 
-          <p className="text-sm sm:text-base font-bold text-[#6a4f35] mb-6">
+          <p className="text-sm sm:text-base font-bold text-[#6a4f35] mb-4">
             Roll the dice for your daily bonus
           </p>
 
-          {/* Dice Stage */}
-          <div className="flex items-center justify-center gap-5 sm:gap-7 mb-6 py-2">
-            <div className="flex flex-col items-center gap-1.5">
-              <PipDie value={redDie} color="red" isRolling={isRolling} />
-              <span className="text-xs font-black uppercase text-[#d62822] tracking-wider">
-                {redDie} {redDie === 1 ? 'Pip' : 'Pips'}
+          {/* Green Felt Dice Rolling Tray */}
+          <div className="w-full bg-gradient-to-b from-[#195932] to-[#0f381f] border-2 border-[#f2c14e]/60 rounded-2xl py-3 px-2 mb-5 flex items-center justify-center gap-5 sm:gap-7 shadow-[inset_0_4px_16px_rgba(0,0,0,0.6),0_6px_18px_rgba(0,0,0,0.25)] relative overflow-hidden">
+            {/* Subtle felt surface texture */}
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,rgba(255,255,255,0.08)_0%,transparent_70%)] pointer-events-none" />
+
+            {/* Red Die */}
+            <div className="flex flex-col items-center gap-1 relative z-10">
+              <ThreeDDice
+                value={redDie}
+                color="red"
+                isRolling={isRolling}
+                rollId={rollId}
+                size={82}
+              />
+              <span
+                className={`text-xs font-black uppercase tracking-wider transition-colors ${
+                  isRolling
+                    ? 'text-white/60 animate-pulse'
+                    : 'text-[#ff9692] drop-shadow-xs'
+                }`}
+              >
+                {isRolling ? 'Rolling...' : `${redDie} ${redDie === 1 ? 'Pip' : 'Pips'}`}
               </span>
             </div>
 
-            <div className="text-2xl font-black text-[#a68662]">+</div>
+            {/* Plus sign */}
+            <div className="text-2xl font-black text-[#f2c14e] drop-shadow-md z-10">+</div>
 
-            <div className="flex flex-col items-center gap-1.5">
-              <PipDie value={blueDie} color="blue" isRolling={isRolling} />
-              <span className="text-xs font-black uppercase text-[#1a74c8] tracking-wider">
-                {blueDie} {blueDie === 1 ? 'Pip' : 'Pips'}
+            {/* Blue Die */}
+            <div className="flex flex-col items-center gap-1 relative z-10">
+              <ThreeDDice
+                value={blueDie}
+                color="blue"
+                isRolling={isRolling}
+                rollId={rollId}
+                size={82}
+              />
+              <span
+                className={`text-xs font-black uppercase tracking-wider transition-colors ${
+                  isRolling
+                    ? 'text-white/60 animate-pulse'
+                    : 'text-[#8ec5fc] drop-shadow-xs'
+                }`}
+              >
+                {isRolling ? 'Rolling...' : `${blueDie} ${blueDie === 1 ? 'Pip' : 'Pips'}`}
               </span>
             </div>
           </div>
 
           {/* Rules Explanation & Payout Indicator */}
-          <div className="w-full bg-white/80 border border-[#ebdcb9] rounded-2xl p-3 mb-6 flex flex-col items-center">
+          <div className="w-full bg-white/85 border border-[#ebdcb9] rounded-2xl p-3 mb-5 flex flex-col items-center shadow-xs">
             <div className="text-xs font-bold text-[#5c442d] flex items-center gap-1.5">
               <span>Each pip rewards</span>
               <span className="font-black text-[#1c6a35] font-mono">🪙 10 Coins</span>
             </div>
             {hasRolled && (
-              <div className="mt-1 text-sm font-black text-[#1c6a35] animate-scale-in">
-                {totalPips} pips rolled = <span className="font-mono text-base">🪙 {coinsWon} Coins!</span>
+              <div className="mt-1.5 text-sm font-black text-[#1c6a35] animate-scale-in">
+                {totalPips} pips rolled = <span className="font-mono text-base text-[#155328]">🪙 {coinsWon} Coins!</span>
               </div>
             )}
           </div>
@@ -174,14 +169,15 @@ export const DailyBonusOverlay: React.FC<DailyBonusOverlayProps> = ({
             <button
               onClick={handleRoll}
               disabled={isRolling}
-              className="w-full py-4 px-6 bg-gradient-to-r from-[#2f9a4f] to-[#1c6a35] hover:from-[#37ab59] hover:to-[#227e3f] text-white font-black text-lg rounded-2xl shadow-xl border-b-4 border-[#145025] transition-all active:scale-98 flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50"
+              className="w-full py-3.5 px-6 bg-gradient-to-r from-[#2f9a4f] to-[#1c6a35] hover:from-[#37ab59] hover:to-[#227e3f] text-white font-black text-base sm:text-lg rounded-2xl shadow-xl border-b-4 border-[#145025] transition-all active:scale-98 flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50"
             >
-              <Dices className={`w-6 h-6 ${isRolling ? 'animate-spin' : ''}`} />
+              <Dices className={`w-5 h-5 sm:w-6 sm:h-6 ${isRolling ? 'animate-spin' : ''}`} />
               <span>{isRolling ? 'ROLLING...' : 'ROLL THE DICE'}</span>
             </button>
           ) : (
-            <div className="text-xs font-bold text-[#6a4f35] py-2">
-              Claiming your bonus...
+            <div className="text-xs font-bold text-[#6a4f35] py-2 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-[#e58a1f] animate-spin" />
+              <span>Claiming your bonus...</span>
             </div>
           )}
         </div>

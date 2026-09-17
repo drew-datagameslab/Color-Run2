@@ -36,15 +36,24 @@ export const ColorRunLogo: React.FC<LogoProps> = ({ className = '', size = 'md' 
   );
 };
 
-export const DGLogo: React.FC<{ className?: string; size?: 'xs' | 'sm' | 'md'; textColor?: string }> = ({
+export const DGLogo: React.FC<{
+  className?: string;
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'login';
+  imgClassName?: string;
+  textColor?: string;
+}> = ({
   className = '',
   size = 'xs',
+  imgClassName = '',
   textColor = 'text-white',
 }) => {
   const sizeStyles = {
     xs: 'w-14 sm:w-16 max-h-7',
     sm: 'w-20',
     md: 'w-28',
+    lg: 'w-32 sm:w-36',
+    // 1.75x of original xs (56px * 1.75 = 98px, 64px * 1.75 = 112px, max-h-12)
+    login: 'w-[98px] sm:w-[112px] max-h-12',
   }[size];
 
   return (
@@ -52,7 +61,7 @@ export const DGLogo: React.FC<{ className?: string; size?: 'xs' | 'sm' | 'md'; t
       <img
         src="/assets/img/dg-logo.png"
         alt="Data Games Lab"
-        className={`object-contain block ${sizeStyles} select-none filter drop-shadow-[0_1px_3px_rgba(0,0,0,0.2)]`}
+        className={`object-contain block ${sizeStyles} ${imgClassName} select-none filter drop-shadow-[0_1px_3px_rgba(0,0,0,0.2)]`}
         draggable={false}
       />
       <div className={`text-[9px] sm:text-[10px] font-extrabold tracking-wider sm:tracking-widest uppercase drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] ${textColor}`}>

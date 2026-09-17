@@ -8,7 +8,7 @@ const AD_FREE_KEY = 'cr_adfree';
 
 export const DEFAULT_AVATARS = [
   '#e5352f', '#1f7fd6', '#e58a1f', '#8e44c9',
-  '#159e8a', '#d61f7a', '#3a7d1f', '#4a5568',
+  '#159e8a', '#d61f7a', '#0d4d23', '#4a5568',
 ];
 
 export function verifyHomeGameCode(rawCode: string): boolean {
@@ -37,8 +37,18 @@ export function getInitialUser(): UserAccount {
       const parsed = JSON.parse(raw);
       // Synchronize with cr_adfree if present
       const adFreeGlobal = localStorage.getItem(AD_FREE_KEY) === '1';
+      // Migrate old bright green avatar color to high-contrast dark green
+      const avatarColor =
+        parsed.avatar?.color === '#2f9a4f' || parsed.avatar?.color === '#3a7d1f' || parsed.avatar?.color === '#27ae60'
+          ? '#0d4d23'
+          : (parsed.avatar?.color || DEFAULT_AVATARS[0]);
+
       return {
         ...parsed,
+        avatar: {
+          ...parsed.avatar,
+          color: avatarColor,
+        },
         scoreboardUnlocked: parsed.scoreboardUnlocked ?? false,
         isAdFree: parsed.isAdFree || adFreeGlobal,
         diceColors: parsed.diceColors || ['blue', 'red'],

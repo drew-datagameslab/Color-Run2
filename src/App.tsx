@@ -34,6 +34,9 @@ import { ProfileModal } from './components/ProfileModal';
 import { MenuModal } from './components/MenuModal';
 import { UserFilesModal } from './components/UserFilesModal';
 import { DailyBonusOverlay } from './components/DailyBonusOverlay';
+import { ChallengeFriendsOverlay } from './components/ChallengeFriendsOverlay';
+import { PortraitLockOverlay } from './components/PortraitLockOverlay';
+import { shouldShow24hReferralOverlay, dismiss24hReferralOverlay } from './lib/referrals';
 import { subscribeToAuth, logOut, syncUserProfileToFirestore } from './lib/firebase';
 
 export default function App() {
@@ -63,6 +66,7 @@ export default function App() {
   const [isMenuModalOpen, setIsMenuModalOpen] = useState(false);
   const [isFilesModalOpen, setIsFilesModalOpen] = useState(false);
   const [isDailyBonusOpen, setIsDailyBonusOpen] = useState(false);
+  const [isChallengeFriendsOpen, setIsChallengeFriendsOpen] = useState(false);
   const [toastNotice, setToastNotice] = useState('');
 
   const triggerToast = (msg: string) => {
@@ -81,6 +85,20 @@ export default function App() {
       }
     }
   }, [screen, user.uid]);
+
+  // Check 24-hour post-signup Referral Overlay:
+  // "After the user has signed up, after 24 hours, let's create an overlay that says:
+  // Ready to Challenge Your Friends? Send them a link to play the game with you!"
+  useEffect(() => {
+    if (screen !== 'signin' && user?.uid && !user.isGuest) {
+      if (shouldShow24hReferralOverlay(user)) {
+        const timer = setTimeout(() => {
+          setIsChallengeFriendsOpen(true);
+        }, 1200);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [screen, user]);
 
   const handleClaimDailyBonus = (wonCoins: number) => {
     markDailyBonusClaimed(user.uid);
@@ -165,10 +183,7 @@ export default function App() {
 
   const handleHeaderBack = () => {
     if (screen === 'play') {
-      if (window.confirm('Leave this game and return to the main menu?')) {
-        setScreen('mainmenu');
-        triggerToast('Returned to Main Menu');
-      }
+      setIsMenuModalOpen(true);
     } else if (screen === 'pickgame') {
       setScreen('modeselect');
     } else if (
@@ -183,10 +198,8 @@ export default function App() {
   };
 
   const handleLeaveGameFromMenu = () => {
-    if (window.confirm('Leave this game and return to the main menu?')) {
-      setScreen('mainmenu');
-      triggerToast('Returned to Main Menu');
-    }
+    setScreen('mainmenu');
+    triggerToast('Returned to Main Menu');
   };
 
   const handleUpdateShop = (updatedSettings: ShopSettings) => {
@@ -229,8 +242,8 @@ export default function App() {
       handleUpdateCoins(-settings.buyIn);
     }
 
-    if (user.isAdFree) {
-      // Direct access without ad interruption
+    if (user.isAdFree || settings.adPlayedDuringMatchmaking) {
+      // Direct access without ad interruption (or ad already played during 15s matchmaking lobby)
       setCurrentGameSettings(settings);
       setScreen('play');
     } else {
@@ -271,42 +284,46 @@ export default function App() {
   };
 
   const handlePlayAgain = () => {
-    if (currentGameSettings) {
-      handleStartGame(currentGameSettings);
-    } else {
-      setScreen('modeselect');
-    }
+    setScreen('pickgame');
   };
 
   return (
     <div
-      className={`min-h-[100dvh] text-stone-900 transition-colors duration-300 font-sans flex flex-col justify-between ${shopSettings.equippedBg}`}
+      className={`h-[100dvh] max-h-[100dvh] text-stone-900 transition-colors duration-300 font-sans flex flex-col justify-between overflow-hidden select-none ${shopSettings.equippedBg}`}
     >
-      {/* Top USER Bar anchored to the top of every page (except initial signin screen) */}
-      {screen !== 'signin' && (
-        <Header
-          user={user}
-          coins={coins}
-          currentScreen={screen}
-          onOpenMenu={() => setIsMenuModalOpen(true)}
-          onOpenProfile={() => setIsProfileModalOpen(true)}
-          onBack={screen !== 'mainmenu' ? handleHeaderBack : undefined}
-        />
-      )}
+      {/* Landscape orientation lock overlay: prompts user to rotate to portrait */}
+      <PortraitLockOverlay />
 
-      {/* Global Toast */}
-      {toastNotice && (
-        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-[#1c6a35] text-white font-bold text-xs px-4 py-2 rounded-full shadow-lg animate-fade-in pointer-events-none">
-          {toastNotice}
-        </div>
-      )}
+      {/* Centered portrait framing for all screen sizes */}
+      <div className="w-full max-w-[460px] mx-auto h-full flex flex-col justify-between relative overflow-hidden">
+        {/* Top USER Bar anchored to the top of every page (except initial signin screen) */}
+        {screen !== 'signin' && (
+          <Header
+            user={user}
+            coins={coins}
+            currentScreen={screen}
+            onOpenMenu={() => setIsMenuModalOpen(true)}
+            onOpenProfile={() => setIsProfileModalOpen(true)}
+            onBack={screen !== 'mainmenu' ? handleHeaderBack : undefined}
+          />
+        )}
 
-      {/* Screen Router */}
-      <main className="flex-1 flex flex-col justify-center">
+        {/* Global Toast */}
+        {toastNotice && (
+          <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-[#1c6a35] text-white font-bold text-xs px-4 py-2 rounded-full shadow-lg animate-fade-in pointer-events-none">
+            {toastNotice}
+          </div>
+        )}
+
+        {/* Screen Router */}
+        <main className={`flex-1 flex flex-col min-h-0 overflow-hidden ${screen === 'play' ? 'justify-between' : 'justify-center'}`}>
         {screen === 'signin' && (
           <SignInScreen
             onSignedIn={u => {
               handleSaveUser(u);
+              const storedCoins = getUserCoins(u.uid);
+              setCoins(storedCoins);
+              syncFriendsFromFirestore(u.uid).then(f => setFriends(f));
               setScreen('mainmenu');
               triggerToast(`Welcome, ${u.name}!`);
             }}
@@ -314,6 +331,7 @@ export default function App() {
               setScreen('mainmenu');
               triggerToast('Playing as Guest');
             }}
+            onToast={triggerToast}
           />
         )}
 
@@ -369,6 +387,9 @@ export default function App() {
                     },
                   ],
                 });
+              } else if (mode === 'cpu') {
+                setGameMode('cpu');
+                setScreen('pickgame');
               } else {
                 setGameMode('online');
                 setScreen('pickgame');
@@ -378,6 +399,7 @@ export default function App() {
               setSelectedChallengeFriend(friend);
               setIsChallengeFriendModalOpen(true);
             }}
+            onInviteFriends={() => setIsChallengeFriendsOpen(true)}
             onBack={() => setScreen('mainmenu')}
           />
         )}
@@ -400,6 +422,10 @@ export default function App() {
             user={user}
             onGameOver={handleGameOver}
             onOpenMenu={() => setIsStandingsOpen(true)}
+            onAwardPrize={(amount, place) => {
+              handleUpdateCoins(amount);
+              triggerToast(`🪙 Awarded ${amount} coins for finishing in ${place === 1 ? '1st' : place === 2 ? '2nd' : place === 3 ? '3rd' : `${place}th`} place!`);
+            }}
             onExitGame={() => setScreen('mainmenu')}
           />
         )}
@@ -436,10 +462,11 @@ export default function App() {
         )}
       </main>
 
-      {/* Placeholder Strip Ad at Bottom */}
-      {!user.isAdFree && (
-        <StripAd onRemoveAdsClick={() => setIsRedeemModalOpen(true)} />
-      )}
+        {/* Placeholder Strip Ad at Bottom (PlayScreen includes its own native compact banner) */}
+        {!user.isAdFree && screen !== 'play' && (
+          <StripAd onRemoveAdsClick={() => setIsRedeemModalOpen(true)} />
+        )}
+      </div>
 
       {/* 10-Second Full-Screen Interstitial Ad on entering PlayScreen */}
       {isFullScreenAdActive && (
@@ -501,6 +528,7 @@ export default function App() {
         onOpenProfile={() => setIsProfileModalOpen(true)}
         onOpenRules={() => setIsRulesOpen(true)}
         onOpenScoreboard={() => setScreen('scoreboard')}
+        onOpenChallengeFriends={() => setIsChallengeFriendsOpen(true)}
         onLogOut={handleLogOut}
         onUpdateShop={handleUpdateShop}
         onToast={triggerToast}
@@ -538,6 +566,21 @@ export default function App() {
         isOpen={isDailyBonusOpen}
         onClaim={handleClaimDailyBonus}
         onClose={() => setIsDailyBonusOpen(false)}
+      />
+
+      {/* 24-Hour Post-Signup Challenge Friends Referral Overlay */}
+      <ChallengeFriendsOverlay
+        isOpen={isChallengeFriendsOpen}
+        user={user}
+        onClose={() => {
+          dismiss24hReferralOverlay(user.uid);
+          setIsChallengeFriendsOpen(false);
+        }}
+        onToast={triggerToast}
+        onFriendAdded={async () => {
+          const updated = await syncFriendsFromFirestore(user.uid);
+          setFriends(updated);
+        }}
       />
     </div>
   );

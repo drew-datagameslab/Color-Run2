@@ -51,7 +51,7 @@ export const DieComponent: React.FC<DieProps> = ({
     <div
       onClick={onClick}
       style={{
-        animationDelay: rolling ? `${delayMs}ms` : undefined,
+        animationDelay: rolling && delayMs > 0 ? `${delayMs}ms` : undefined,
       }}
       className={`relative aspect-square rounded-[16%] cursor-pointer select-none transition-transform duration-100 
         ${rolling ? 'animate-tumble' : ''}

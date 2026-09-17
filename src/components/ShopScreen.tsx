@@ -17,6 +17,7 @@ import {
 import { DiceColor, ShopSettings, UserAccount } from '../types/game';
 import { getSoundVolume, setSoundVolume, playWinCoinsSound } from '../lib/audio';
 import { redeemShopCoupon } from '../lib/storage';
+import { redeemReferralCode } from '../lib/referrals';
 import { saveEmailSubscriber, markEmailSubscriberVerified } from '../lib/firebase';
 import { RisingCoinBubble } from './RisingCoinBubble';
 import { AdFreeCheckoutModal } from './AdFreeCheckoutModal';
@@ -256,22 +257,41 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
     }
   };
 
-  // Handle Coupon Redemption
-  const handleRedeemCoupon = () => {
+  // Handle Coupon & Referral Code Redemption
+  const handleRedeemCoupon = async () => {
     setCouponError('');
     setCouponSuccess('');
 
-    const res = redeemShopCoupon(user.uid, couponInput);
-    if (!res.success) {
-      setCouponError(res.message);
+    const cleanInput = couponInput.trim();
+    if (!cleanInput) {
+      setCouponError('Please enter a coupon code or 8-digit referral code.');
       return;
     }
 
-    // Trigger rising coin bubble
-    setBubbleCoins(res.coins);
-    setShowBubble(true);
-    setIsCouponHighlighted(false);
-    setCouponSuccess(res.message);
+    // 1. Check standard coupon codes (e.g. DGLFREE300, DGL1000FREE)
+    const res = redeemShopCoupon(user.uid, cleanInput);
+    if (res.success) {
+      setBubbleCoins(res.coins);
+      setShowBubble(true);
+      setIsCouponHighlighted(false);
+      setCouponSuccess(res.message);
+      return;
+    }
+
+    // 2. Also accept 8-digit friend referral codes!
+    try {
+      const refRes = await redeemReferralCode(cleanInput, user);
+      if (refRes.success) {
+        setBubbleCoins(refRes.coins);
+        setShowBubble(true);
+        setIsCouponHighlighted(false);
+        setCouponSuccess(refRes.message);
+        return;
+      }
+      setCouponError(refRes.message || res.message);
+    } catch {
+      setCouponError(res.message);
+    }
   };
 
   const handleBubbleComplete = () => {

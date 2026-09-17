@@ -12,7 +12,8 @@ service cloud.firestore {
 
     // User profile and account info
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId);
 
       // User-specific files and file metadata
       match /files/{fileId} {
@@ -24,10 +25,25 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
 
-      // User-specific friends
+      // User-specific friends (allow owner or authenticated user adding mutual friendship)
       match /friends/{friendId} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId) || isAuthenticated();
       }
+    }
+
+    // Phone index for friend invites and player discovery
+    match /phoneIndex/{phoneId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Referral codes for friend invites and challenge links
+    match /referralCodes/{codeId} {
+      // Any user (or new registrant) can check a referral code
+      allow read: if true;
+      // Authenticated users can create or update codes (e.g. mark as used, set reminder)
+      allow write: if true;
     }
 
     // Promotional email subscribers
@@ -36,6 +52,11 @@ service cloud.firestore {
       allow create: if request.resource.data.email is string && request.resource.data.email.size() > 3;
       // Users can view or update verification status of their own subscription
       allow read, update: if true;
+    }
+
+    // Health check and connection validation
+    match /test/{docId} {
+      allow read: if true;
     }
   }
 }

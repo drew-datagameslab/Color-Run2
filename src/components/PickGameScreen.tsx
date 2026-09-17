@@ -14,10 +14,11 @@ interface PickGameScreenProps {
   onToast: (msg: string) => void;
 }
 
-const CPU_NAMES = ['Pixel', 'Byte', 'Spark', 'Volt', 'Chip', 'Dash', 'Echo', 'Nova', 'Blaze', 'Quantum'];
-const CPU_COLORS = ['#1f7fd6', '#e58a1f', '#8e44c9', '#2f9a4f', '#d61f7a', '#00b894', '#0984e3'];
+const CPU_NAMES = ['Ava', 'Pixel', 'Chip', 'Byte', 'Vector', 'Nova', 'Key', 'Mouse'];
+const CPU_COLORS = ['#1f7fd6', '#e58a1f', '#8e44c9', '#0d4d23', '#d61f7a', '#00b894', '#0984e3', '#34495e'];
 
 export const STANDARD_PAYOUTS: Record<number, number[]> = {
+  2: [16],
   4: [20, 10],
   6: [30, 15, 5],
   8: [40, 20, 10],
@@ -27,7 +28,7 @@ export function calculatePayouts(
   playerCount: number,
   tier: 'standard' | 'double' | 'high_roller'
 ): number[] {
-  const base = STANDARD_PAYOUTS[playerCount] || [20, 10];
+  const base = STANDARD_PAYOUTS[playerCount] || [16];
   const mult = tier === 'high_roller' ? 5 : tier === 'double' ? 2 : 1;
   return base.map(p => p * mult);
 }
@@ -45,13 +46,19 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
 
   // State for the 15-second online matchmaking lobby
   const [matchmakingConfig, setMatchmakingConfig] = useState<{
-    playerCount: 4 | 6 | 8;
+    playerCount: 2 | 4 | 6 | 8;
     buyIn: number;
     tier: 'standard' | 'double' | 'high_roller';
   } | null>(null);
 
+  const roomCounts: Array<2 | 4 | 6 | 8> = mode === 'online' ? [2, 4, 6] : [4, 6, 8];
+
+  const getPlayerLabel = (count: number) => {
+    return count === 6 ? '6 Players' : `${count} Player`;
+  };
+
   const handlePick = (
-    playerCount: 4 | 6 | 8,
+    playerCount: 2 | 4 | 6 | 8,
     buyIn: number,
     tier: 'standard' | 'double' | 'high_roller'
   ) => {
@@ -129,115 +136,92 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
 
   return (
     <div className="w-full max-w-sm mx-auto flex flex-col items-center min-h-[85vh] p-3 pb-8 select-none">
-      {/* Color Run Logo */}
-      <div className="flex flex-col items-center mt-2">
-        <ColorRunLogo size="md" />
+      {/* Color Run Logo - 1.5x larger */}
+      <div className="flex flex-col items-center mt-2 mb-1">
+        <ColorRunLogo size="lg" className="h-20 max-h-20 sm:h-22 sm:max-h-22" />
 
-        {/* 6 Suit Badges: 3 Blue Spades, 3 Red Stars */}
-        <div className="flex items-center justify-center gap-1.5 mt-2 mb-2">
-          {[0, 1, 2].map(i => (
-            <div
-              key={`spade-${i}`}
-              className="w-6 h-6 rounded-md bg-[#1f7fd6] text-white flex items-center justify-center text-sm font-black shadow-xs border border-white/30"
-            >
-              ♠
-            </div>
-          ))}
-          {[0, 1, 2].map(i => (
-            <div
-              key={`star-${i}`}
-              className="w-6 h-6 rounded-md bg-[#e5352f] text-white flex items-center justify-center text-xs font-black shadow-xs border border-white/30"
-            >
-              ★
-            </div>
-          ))}
-        </div>
-
-        {/* PICK YOUR GAME in White Font */}
-        <h1 className="text-white font-black text-xl tracking-wider uppercase text-center mt-1 mb-1 drop-shadow-[0_2px_4px_rgba(0,0,0,0.7)]">
-          PICK YOUR GAME
+        {/* Top headline under logo */}
+        <h1 className="text-white font-black text-xl tracking-wider uppercase text-center mt-2 mb-1 drop-shadow-[0_2px_4px_rgba(0,0,0,0.7)]">
+          {mode === 'online'
+            ? 'Multiplayer Online Rooms'
+            : mode === 'cpu'
+            ? 'Beat our Computer Overlords'
+            : 'PICK YOUR GAME'}
         </h1>
         {mode === 'online' && (
           <p className="text-xs text-[#d9ba6d] font-bold text-center mb-3">
             15s Matchmaking Lobby · Live Online Players
           </p>
         )}
+        {mode === 'cpu' && (
+          <p className="text-xs text-[#d9ba6d] font-bold text-center mb-3">
+            Match your skills against virtual opponents
+          </p>
+        )}
       </div>
 
       {/* Cards Container */}
       <div className="w-full flex flex-col gap-3.5">
-        {/* Tier 1: STANDARD GAME- 10 Coins */}
+        {/* Tier 1: STANDARD GAME - 🪙 10 Coins Buy-In */}
         <div className="w-full bg-[#fbf7ee] rounded-2xl border-2 border-[#d9c79e] p-4 shadow-lg">
           <div className="font-black text-xs text-[#5e432d] uppercase tracking-wider mb-2.5">
-            STANDARD GAME- 10 Coins
+            STANDARD GAME - 🪙 10 Coins Buy-In
           </div>
           <div className="grid grid-cols-3 gap-2.5">
-            {([4, 6, 8] as const).map(count => (
+            {roomCounts.map(count => (
               <button
                 key={`standard-${count}`}
                 onClick={() => handlePick(count, 10, 'standard')}
-                className="p-3 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl shadow-md border-b-3 border-[#155229] active:translate-y-0.5 active:border-b-1 transition-all flex flex-col items-center justify-center cursor-pointer"
+                className="p-3 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl shadow-md border-b-3 border-[#155229] active:translate-y-0.5 active:border-b-1 transition-all flex flex-col items-center justify-center cursor-pointer min-h-[46px]"
               >
                 <span className="font-black text-xs sm:text-sm text-white tracking-tight">
-                  {count} Player
-                </span>
-                <span className="text-[11px] font-bold text-white/95 flex items-center justify-center gap-1 mt-1 font-mono">
-                  <span>🪙</span>
-                  <span>10</span>
+                  {getPlayerLabel(count)}
                 </span>
               </button>
             ))}
           </div>
         </div>
 
-        {/* Tier 2: DOUBLE ACTION - 20 Coins */}
+        {/* Tier 2: DOUBLE ACTION - 🪙 20 Coins Buy-In */}
         <div className="w-full bg-[#fbf7ee] rounded-2xl border-2 border-[#d9c79e] p-4 shadow-lg">
           <div className="font-black text-xs text-[#5e432d] uppercase tracking-wider mb-0.5">
-            DOUBLE ACTION - 20 Coins
+            DOUBLE ACTION - 🪙 20 Coins Buy-In
           </div>
           <div className="text-xs text-[#5e432d] font-semibold mb-2.5">
             Double the buy-in, double the payouts.
           </div>
           <div className="grid grid-cols-3 gap-2.5">
-            {([4, 6, 8] as const).map(count => (
+            {roomCounts.map(count => (
               <button
                 key={`double-${count}`}
                 onClick={() => handlePick(count, 20, 'double')}
-                className="p-3 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl shadow-md border-b-3 border-[#155229] active:translate-y-0.5 active:border-b-1 transition-all flex flex-col items-center justify-center cursor-pointer"
+                className="p-3 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl shadow-md border-b-3 border-[#155229] active:translate-y-0.5 active:border-b-1 transition-all flex flex-col items-center justify-center cursor-pointer min-h-[46px]"
               >
                 <span className="font-black text-xs sm:text-sm text-white tracking-tight">
-                  {count} Player
-                </span>
-                <span className="text-[11px] font-bold text-white/95 flex items-center justify-center gap-1 mt-1 font-mono">
-                  <span>🪙</span>
-                  <span>20</span>
+                  {getPlayerLabel(count)}
                 </span>
               </button>
             ))}
           </div>
         </div>
 
-        {/* Tier 3: HIGH ROLLER - 50 Coins */}
+        {/* Tier 3: HIGH ROLLER - 🪙 50 Coins Buy-In */}
         <div className="w-full bg-[#fbf7ee] rounded-2xl border-2 border-[#d9c79e] p-4 shadow-lg">
           <div className="font-black text-xs text-[#5e432d] uppercase tracking-wider mb-0.5">
-            HIGH ROLLER - 50 Coins
+            HIGH ROLLER - 🪙 50 Coins Buy-In
           </div>
           <div className="text-xs text-[#5e432d] font-semibold mb-2.5">
             5x the buy-in, 5x the payouts.
           </div>
           <div className="grid grid-cols-3 gap-2.5">
-            {([4, 6, 8] as const).map(count => (
+            {roomCounts.map(count => (
               <button
                 key={`highroller-${count}`}
                 onClick={() => handlePick(count, 50, 'high_roller')}
-                className="p-3 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl shadow-md border-b-3 border-[#155229] active:translate-y-0.5 active:border-b-1 transition-all flex flex-col items-center justify-center cursor-pointer"
+                className="p-3 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl shadow-md border-b-3 border-[#155229] active:translate-y-0.5 active:border-b-1 transition-all flex flex-col items-center justify-center cursor-pointer min-h-[46px]"
               >
                 <span className="font-black text-xs sm:text-sm text-white tracking-tight">
-                  {count} Player
-                </span>
-                <span className="text-[11px] font-bold text-white/95 flex items-center justify-center gap-1 mt-1 font-mono">
-                  <span>🪙</span>
-                  <span>50</span>
+                  {getPlayerLabel(count)}
                 </span>
               </button>
             ))}

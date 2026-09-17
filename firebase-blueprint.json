@@ -6,6 +6,7 @@
         "uid": { "type": "string" },
         "name": { "type": "string" },
         "email": { "type": "string" },
+        "phoneNumber": { "type": "string" },
         "provider": { "type": "string" },
         "isGuest": { "type": "boolean" },
         "coins": { "type": "number" },
@@ -57,6 +58,37 @@
         "status": { "type": "string" },
         "addedAt": { "type": "string" },
         "userId": { "type": "string" }
+      }
+    },
+    "ReferralCode": {
+      "collection": "referralCodes",
+      "fields": {
+        "code": { "type": "string" },
+        "inviterId": { "type": "string" },
+        "inviterName": { "type": "string" },
+        "inviterColor": { "type": "string" },
+        "inviterImage": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "preferredStore": { "type": "string" },
+        "messageText": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "used": { "type": "boolean" },
+        "usedBy": { "type": "string" },
+        "usedByName": { "type": "string" },
+        "usedAt": { "type": "string" },
+        "reminderSent": { "type": "boolean" },
+        "lastReminderAt": { "type": "string" }
+      }
+    },
+    "PhoneIndex": {
+      "collection": "phoneIndex",
+      "fields": {
+        "phoneNumber": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "color": { "type": "string" },
+        "image": { "type": "string" },
+        "updatedAt": { "type": "string" }
       }
     }
   }

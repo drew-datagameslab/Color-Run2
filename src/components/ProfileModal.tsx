@@ -16,11 +16,13 @@ import {
   Camera,
   Upload,
   Image as ImageIcon,
+  Phone,
 } from 'lucide-react';
 import { UserAccount, DiceColor, ShopSettings } from '../types/game';
 import { DEFAULT_AVATARS } from '../lib/storage';
 import { DieComponent } from './DieComponent';
 import { getSoundVolume, setSoundVolume, playSfx } from '../lib/audio';
+import { registerUserPhoneNumber } from '../lib/referrals';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -75,6 +77,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
   // User state
   const [name, setName] = useState(user.name);
+  const [phoneNumber, setPhoneNumber] = useState(user.phoneNumber || '');
   const [selectedColor, setSelectedColor] = useState(user.avatar.color);
   const [selectedImage, setSelectedImage] = useState<string | undefined>(user.avatar.image);
   const [avatarSubTab, setAvatarSubTab] = useState<'presets' | 'upload' | 'initials'>(
@@ -199,9 +202,11 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
   const handleSaveAndClose = () => {
     const trimmed = name.trim() || 'Player';
+    const cleanPhone = phoneNumber.trim();
     const updatedUser: UserAccount = {
       ...user,
       name: trimmed,
+      phoneNumber: cleanPhone || undefined,
       avatar: {
         color: selectedColor,
         name: trimmed.slice(0, 2).toUpperCase(),
@@ -209,6 +214,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       },
       diceColors: [diceColorA, diceColorB],
     };
+
+    if (cleanPhone) {
+      registerUserPhoneNumber(updatedUser, cleanPhone);
+    }
 
     onSaveUser(updatedUser);
     onUpdateShop({
@@ -766,6 +775,44 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                     <span className="truncate">UID: {user.uid}</span>
                   </div>
                 </div>
+              </div>
+
+              {/* Phone Number for Friend Challenges */}
+              <div className="bg-[#fcfaf5] border border-[#d8c89f] rounded-2xl p-3 shadow-xs flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-[#2f9a4f]/15 flex items-center justify-center text-[#1c6a35]">
+                      <Phone className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-[#2e2316]">
+                        Phone Number
+                      </h4>
+                      <p className="text-[10px] text-[#785b3f]">
+                        For Friend Challenges &amp; Direct Match
+                      </p>
+                    </div>
+                  </div>
+                  {user.phoneNumber && (
+                    <span className="text-[9px] uppercase font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      Linked
+                    </span>
+                  )}
+                </div>
+
+                <div className="relative">
+                  <Phone className="w-3.5 h-3.5 absolute left-3 top-2.5 text-[#9c8a74]" />
+                  <input
+                    type="tel"
+                    placeholder="(555) 000-0000"
+                    value={phoneNumber}
+                    onChange={e => setPhoneNumber(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-[#d8c89f] rounded-xl text-[#2e2316] font-bold placeholder-[#9c8a74] focus:outline-hidden focus:ring-2 focus:ring-[#2f9a4f]"
+                  />
+                </div>
+                <p className="text-[10px] text-[#785b3f] leading-snug">
+                  When other players challenge you using your phone number, you'll be automatically connected as friends without sending SMS texts.
+                </p>
               </div>
 
               {/* Cloud Files & Storage Section */}

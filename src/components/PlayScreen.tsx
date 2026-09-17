@@ -3,19 +3,19 @@ import { DiceColor, Die, GamePhase, GameSettings, PlayerUnit, ScoreResult, UserA
 import { scoreDice } from '../lib/scoring';
 import { decideCPUSaves } from '../lib/cpu';
 import { resolveElimination } from '../lib/elimination';
-import { playSfx } from '../lib/audio';
+import { playSfx, playWarning5sSound, stopWarningSound } from '../lib/audio';
 import { getLocalFriends, addFriend, removeFriend } from '../lib/friends';
 import { CardsStrip } from './CardsStrip';
 import { SavedBoard } from './SavedBoard';
 import { RollArea } from './RollArea';
 import { PlayerProfileModal } from './PlayerProfileModal';
-import { ArrowLeft, Menu, Sparkles } from 'lucide-react';
 
 interface PlayScreenProps {
   settings: GameSettings;
   user: UserAccount;
   onGameOver: (winner: PlayerUnit, units: PlayerUnit[]) => void;
   onOpenMenu: () => void;
+  onAwardPrize?: (amount: number, place: number) => void;
   onExitGame: () => void;
 }
 
@@ -29,6 +29,7 @@ function createInitialDice(colorA: DiceColor, colorB: DiceColor): Die[] {
       value: Math.floor(Math.random() * 6) + 1,
       zone: 'active',
       selected: false,
+      slotIndex: dice.length,
     });
   }
   // 6 of Color B
@@ -39,6 +40,7 @@ function createInitialDice(colorA: DiceColor, colorB: DiceColor): Die[] {
       value: Math.floor(Math.random() * 6) + 1,
       zone: 'active',
       selected: false,
+      slotIndex: dice.length,
     });
   }
   return dice;
@@ -63,30 +65,36 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   user,
   onGameOver,
   onOpenMenu,
+  onAwardPrize,
   onExitGame,
 }) => {
   const userDiceColors: [DiceColor, DiceColor] = user.diceColors || [settings.colorA, settings.colorB];
 
-  // Initialize players
+  // Initialize players - User is the ONLY human player (Slot 0), all other slots are CPU bots
   const [units, setUnits] = useState<PlayerUnit[]>(() => {
-    return settings.slots.map((s, idx) => ({
-      id: `u_${idx + 1}`,
-      name: s.name,
-      isCPU: s.type === 'cpu',
-      isOwner: s.name === user.name,
-      color: s.color,
-      image: s.image,
-      diceColors: s.type === 'cpu' ? ['blue', 'red'] : (s.diceColors || userDiceColors),
-      score: 0,
-      history: {},
-      active: true,
-    }));
+    return settings.slots.map((s, idx) => {
+      const isUserSlot = idx === 0;
+      return {
+        id: `u_${idx + 1}`,
+        name: s.name,
+        isCPU: !isUserSlot,
+        isOwner: isUserSlot,
+        isOnlinePlayer: false,
+        color: s.color,
+        image: s.image,
+        diceColors: isUserSlot ? (s.diceColors || userDiceColors) : ['blue', 'red'],
+        score: 0,
+        history: {},
+        active: true,
+      };
+    });
   });
 
   const [round, setRound] = useState(1);
   const [phase, setPhase] = useState<GamePhase>('regular');
   const [qIdx, setQIdx] = useState(0);
   const [rollsUsed, setRollsUsed] = useState(0);
+  const [rollSlotsCount, setRollSlotsCount] = useState(12);
   const [isRolling, setIsRolling] = useState(false);
   const [announcedChimes, setAnnouncedChimes] = useState<Record<string, number>>({});
   const [dice, setDice] = useState<Die[]>(() => {
@@ -96,9 +104,18 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   });
   const [toastMsg, setToastMsg] = useState('');
   const [elimModalMsg, setElimModalMsg] = useState<string | null>(null);
+  const [elimCountdown, setElimCountdown] = useState(5);
   const [showSixCelebration, setShowSixCelebration] = useState(false);
+  const [showInfoModal, setShowInfoModal] = useState(false);
   const [selectedPlayerForProfile, setSelectedPlayerForProfile] = useState<PlayerUnit | null>(null);
   const [friends, setFriends] = useState<Friend[]>(() => getLocalFriends(user.uid));
+
+  // Turn timer & AFK management - 20s for roll 1, 10s for roll 2 & 3
+  const [turnSecondsLeft, setTurnSecondsLeft] = useState(20);
+  const [isAfkOverlay, setIsAfkOverlay] = useState(false);
+  const [consecutiveAfkTurns, setConsecutiveAfkTurns] = useState(0);
+  const [isAutoPilotTurn, setIsAutoPilotTurn] = useState(false);
+  const prevActiveUnitIdRef = useRef<string | null>(null);
 
   const handleAddFriend = async (player: PlayerUnit) => {
     const res = await addFriend(user.uid, {
@@ -126,7 +143,12 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   // Queue of active player units
   const activeUnits = units.filter(u => u.active);
   const curUnit = activeUnits[qIdx] || activeUnits[0];
-  const isCPU = curUnit ? curUnit.isCPU : false;
+  const isHumanOwner = curUnit ? (curUnit.isOwner && !curUnit.isCPU) : false;
+  const isCPU = curUnit ? (!curUnit.isOwner || curUnit.isCPU || isAutoPilotTurn) : false;
+
+  // Timers are added to keep the games moving when additional Users are in the room.
+  // When the user is only playing against computer players (Play vs Computer rooms), no timers are needed.
+  const isTimerEnabled = settings.mode === 'online' || settings.slots.some((s, idx) => idx > 0 && s.isOnlinePlayer);
 
   // Saved dice and score calculation
   const savedDice = dice.filter(d => d.zone === 'saved');
@@ -136,7 +158,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   useEffect(() => {
     setUnits(prev =>
       prev.map(u => {
-        if (!u.isCPU) {
+        if (u.isOwner) {
           return {
             ...u,
             name: user.name,
@@ -148,19 +170,96 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         return u;
       })
     );
-    if (!curUnit?.isCPU && rollsUsed === 0 && savedDice.length === 0 && user.diceColors) {
+    if (curUnit?.isOwner && rollsUsed === 0 && savedDice.length === 0 && user.diceColors) {
       const [c1, c2] = user.diceColors;
       setDice(createInitialDice(c1, c2));
     }
   }, [user.diceColors, user.name, user.avatar]);
+
+  // Clean up any playing warning sound on unmount
+  useEffect(() => {
+    return () => {
+      stopWarningSound();
+    };
+  }, []);
+
+  // Auto-dismiss 6-of-a-kind Color Run celebration after animation plays
+  useEffect(() => {
+    if (!showSixCelebration) return;
+    const timer = setTimeout(() => {
+      setShowSixCelebration(false);
+    }, 3200);
+    return () => clearTimeout(timer);
+  }, [showSixCelebration]);
+
+  // Alert when the user's turn comes up & reset roll timer & bonus announcements
+  useEffect(() => {
+    if (!curUnit) return;
+    if (curUnit.id !== prevActiveUnitIdRef.current) {
+      prevActiveUnitIdRef.current = curUnit.id;
+      stopWarningSound();
+      setTurnSecondsLeft(20);
+      setRollSlotsCount(12);
+      setIsAutoPilotTurn(false);
+      setAnnouncedChimes({});
+      setShowSixCelebration(false);
+
+      if (curUnit.isOwner && !curUnit.isCPU) {
+        // User turn alert chime & toast alert
+        playSfx('add');
+        showToast('👉 Your Turn! Tap ROLL');
+      }
+    }
+  }, [curUnit]);
+
+  // Turn countdown timer for human user's turn (ONLY active when additional users are in the room):
+  // 20s on roll 1, 10s on rolls 2 & 3
+  useEffect(() => {
+    if (!isTimerEnabled || !isHumanOwner || isAutoPilotTurn || isRolling || elimModalMsg) {
+      stopWarningSound();
+      return;
+    }
+
+    // Play 5-second countdown warning audio when timer reaches 5 seconds
+    if (turnSecondsLeft === 5) {
+      playWarning5sSound();
+    }
+
+    if (turnSecondsLeft <= 0) {
+      stopWarningSound();
+      // User time ran out - auto-roll or score
+      const active = dice.filter(d => d.zone === 'active');
+      if (rollsUsed < 3 && (rollsUsed === 0 || active.length > 0)) {
+        doRoll();
+      } else {
+        bankTurn();
+      }
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setTurnSecondsLeft(s => s - 1);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [
+    isTimerEnabled,
+    isHumanOwner,
+    isAutoPilotTurn,
+    rollsUsed,
+    isRolling,
+    elimModalMsg,
+    turnSecondsLeft,
+    dice,
+  ]);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(''), 2500);
   };
 
-  // Sound chime detector for color bonuses
-  const checkBonusChimes = useCallback((currentDice: Die[]) => {
+  // Sound chime detector for color bonuses & 6-of-a-kind Color Run celebration
+  const checkBonusChimes = useCallback((currentDice: Die[]): boolean => {
     const saved = currentDice.filter(d => d.zone === 'saved');
     const byVC: Record<string, number> = {};
     saved.forEach(d => {
@@ -168,6 +267,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       byVC[k] = (byVC[k] || 0) + 1;
     });
 
+    let triggeredSix = false;
     const newAnnounced = { ...announcedChimes };
     for (const k in byVC) {
       const count = byVC[k];
@@ -181,14 +281,17 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         else if (tier === 6) {
           playSfx('s6');
           setShowSixCelebration(true);
+          triggeredSix = true;
         }
       }
     }
     setAnnouncedChimes(newAnnounced);
+    return triggeredSix;
   }, [announcedChimes]);
 
-  // Roll dice action
+  // Roll dice action: re-slots active dice and locks final values when animation completes
   const doRoll = () => {
+    stopWarningSound();
     if (rollsUsed >= 3 || isRolling) return;
     const active = dice.filter(d => d.zone === 'active');
     if (rollsUsed > 0 && active.length === 0) {
@@ -196,31 +299,88 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       return;
     }
 
+    const activeCount = active.length;
+    // On roll 2/3: adjust spaces. 8 remaining -> 2 rows of 4; <=6 remaining -> 1 row
+    const newSlots = rollsUsed === 0 ? 12 : activeCount;
+    setRollSlotsCount(newSlots);
+
+    // Re-index slots for active dice so they align cleanly to the adjusted layout
+    setDice(prev => {
+      let nextSlot = 0;
+      return prev.map(d => {
+        if (d.zone === 'active') {
+          return {
+            ...d,
+            slotIndex: nextSlot++,
+            selected: false,
+          };
+        }
+        return d;
+      });
+    });
+
+    // Generate final random values for this roll
+    const finalValuesMap = new Map<number, number>();
+    active.forEach(d => {
+      finalValuesMap.set(d.id, Math.floor(Math.random() * 6) + 1);
+    });
+
     setIsRolling(true);
-    setTimeout(() => {
+
+    // Rapid random shuffle during roll tumble animation
+    const shuffleTimer = setInterval(() => {
       setDice(prev =>
         prev.map(d => {
           if (d.zone === 'active') {
             return {
               ...d,
               value: Math.floor(Math.random() * 6) + 1,
+            };
+          }
+          return d;
+        })
+      );
+    }, 60);
+
+    const rollDuration = spectatorFastForward ? 100 : 380;
+
+    setTimeout(() => {
+      clearInterval(shuffleTimer);
+      // Lock dice values cleanly after the animation ends!
+      setDice(prev =>
+        prev.map(d => {
+          if (d.zone === 'active') {
+            const finalVal = finalValuesMap.get(d.id) ?? d.value;
+            return {
+              ...d,
+              value: finalVal,
               selected: false,
             };
           }
           return d;
         })
       );
-      setRollsUsed(r => r + 1);
+      setRollsUsed(r => {
+        const nextRoll = r + 1;
+        // Human player gets 10 seconds for rolls 2 & 3
+        if (isHumanOwner && !isCPU) {
+          setTurnSecondsLeft(10);
+        }
+        return nextRoll;
+      });
       setIsRolling(false);
-    }, spectatorFastForward ? 80 : 380);
+    }, rollDuration);
   };
 
-  // Tapping active die
-  // Tapping any one active die selects every other active die showing the same symbol
-  // too, so one tap gathers the whole matching group instead of tapping each die of a
-  // kind individually — autoCommit() then saves them together the moment there are 3+
+  // Tapping active die: moves matching set to saved area.
+  // Resets timer, and leaves original slot space blank in rolling area!
   const handleTapActive = (id: number) => {
-    if (isCPU || rollsUsed === 0) return;
+    if (isCPU || rollsUsed === 0 || isRolling) return;
+
+    // Reset turn timer when moving dice
+    if (isHumanOwner && !isCPU) {
+      setTurnSecondsLeft(rollsUsed === 0 ? 20 : 10);
+    }
 
     setDice(prev => {
       const targetDie = prev.find(d => d.id === id);
@@ -238,11 +398,14 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
       // Auto-commit if selected + saved of that face >= 3
       const savedCount = updated.filter(d => d.zone === 'saved' && d.value === val).length;
-      const selectedActive = updated.filter(d => d.zone === 'active' && d.selected && d.value === val);
+      const selectedActive = updated.filter(
+        d => d.zone === 'active' && d.selected && d.value === val
+      );
 
       if (savedCount + selectedActive.length >= 3) {
         const finalized = updated.map(d => {
           if (d.zone === 'active' && d.selected && d.value === val) {
+            // Keep its slotIndex so the spot remains blank in RollArea!
             return { ...d, zone: 'saved' as const, selected: false };
           }
           return d;
@@ -255,25 +418,61 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     });
   };
 
-  // Tapping saved die sends it back to active
+  // Tapping saved die sends it back to active area into a vacant slot. Resets timer!
   const handleTapSaved = (id: number) => {
-    if (isCPU) return;
+    if (isCPU || isRolling) return;
+
+    // Reset turn timer when moving dice
+    if (isHumanOwner && !isCPU) {
+      setTurnSecondsLeft(rollsUsed === 0 ? 20 : 10);
+    }
+
     setDice(prev => {
       const target = prev.find(d => d.id === id);
       if (!target) return prev;
       const v = target.value;
 
+      // Find occupied slots among active dice
+      const activeSlots = new Set(
+        prev.filter(d => d.zone === 'active').map(d => d.slotIndex)
+      );
+
+      const assignSlot = (originalSlot?: number) => {
+        if (originalSlot !== undefined && !activeSlots.has(originalSlot)) {
+          activeSlots.add(originalSlot);
+          return originalSlot;
+        }
+        for (let i = 0; i < 12; i++) {
+          if (!activeSlots.has(i)) {
+            activeSlots.add(i);
+            return i;
+          }
+        }
+        return 0;
+      };
+
       // If pulling back leaves < 3 in that set, pull all matching back
-      const remainingSaved = prev.filter(d => d.zone === 'saved' && d.value === v && d.id !== id);
+      const remainingSaved = prev.filter(
+        d => d.zone === 'saved' && d.value === v && d.id !== id
+      );
       if (remainingSaved.length < 3) {
-        return prev.map(d => (d.value === v ? { ...d, zone: 'active', selected: false } : d));
+        return prev.map(d =>
+          d.value === v
+            ? { ...d, zone: 'active' as const, selected: false, slotIndex: assignSlot(d.slotIndex) }
+            : d
+        );
       }
-      return prev.map(d => (d.id === id ? { ...d, zone: 'active', selected: false } : d));
+      return prev.map(d =>
+        d.id === id
+          ? { ...d, zone: 'active' as const, selected: false, slotIndex: assignSlot(d.slotIndex) }
+          : d
+      );
     });
   };
 
   // Next Turn or Round Resolution
   const bankTurn = useCallback(() => {
+    stopWarningSound();
     if (!curUnit) return;
 
     // Automatically commit any full sets remaining in active dice before banking
@@ -298,9 +497,12 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       }
     }
 
+    let hasSixCelebration = showSixCelebration;
     if (modified) {
       setDice(curDice);
-      checkBonusChimes(curDice);
+      if (checkBonusChimes(curDice)) {
+        hasSixCelebration = true;
+      }
     }
 
     const currentSaved = curDice.filter(d => d.zone === 'saved');
@@ -319,29 +521,34 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
     setUnits(updatedUnits);
 
-    // Reset turn state
-    setRollsUsed(0);
-    setAnnouncedChimes({});
-    setDice(createInitialDice(settings.colorA, settings.colorB));
+    const finishBank = () => {
+      // Reset turn state
+      setRollsUsed(0);
+      setAnnouncedChimes({});
+      setShowSixCelebration(false);
 
-    // Next player or end of round
-    const nextQIdx = qIdx + 1;
-    const stillActive = updatedUnits.filter(u => u.active);
-    const nextTargetUnit = nextQIdx < stillActive.length ? stillActive[nextQIdx] : stillActive[0];
-    const [nextColorA, nextColorB] = getUnitDiceColors(nextTargetUnit, userDiceColors);
+      // Next player or end of round
+      const nextQIdx = qIdx + 1;
+      const stillActive = updatedUnits.filter(u => u.active);
+      const nextTargetUnit = nextQIdx < stillActive.length ? stillActive[nextQIdx] : stillActive[0];
+      const [nextColorA, nextColorB] = getUnitDiceColors(nextTargetUnit, userDiceColors);
 
-    // Reset turn state
-    setRollsUsed(0);
-    setAnnouncedChimes({});
-    setDice(createInitialDice(nextColorA, nextColorB));
+      setDice(createInitialDice(nextColorA, nextColorB));
 
-    if (nextQIdx < stillActive.length) {
-      setQIdx(nextQIdx);
+      if (nextQIdx < stillActive.length) {
+        setQIdx(nextQIdx);
+      } else {
+        // Completed full round!
+        resolveRound(updatedUnits);
+      }
+    };
+
+    if (hasSixCelebration) {
+      setTimeout(finishBank, 3100);
     } else {
-      // Completed full round!
-      resolveRound(updatedUnits);
+      finishBank();
     }
-  }, [curUnit, dice, qIdx, round, settings.colorA, settings.colorB, units, userDiceColors, checkBonusChimes]);
+  }, [curUnit, dice, qIdx, round, settings.colorA, settings.colorB, units, userDiceColors, checkBonusChimes, showSixCelebration]);
 
   // Round resolution (checking threshold or doing elimination)
   const resolveRound = (currentUnits: PlayerUnit[]) => {
@@ -359,8 +566,14 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       // Continue next regular round
       setRound(r => r + 1);
       setQIdx(0);
+      setRollsUsed(0);
+      setRollSlotsCount(12);
       const [c1, c2] = getUnitDiceColors(liveUnits[0], userDiceColors);
       setDice(createInitialDice(c1, c2));
+      if (liveUnits[0]?.isOwner && !liveUnits[0]?.isCPU) {
+        setTurnSecondsLeft(20);
+        setIsAutoPilotTurn(false);
+      }
     } else {
       // Elimination phase: knock out lowest score!
       const countToElim = liveUnits.length > 6 ? 2 : 1;
@@ -393,14 +606,57 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
       setRound(r => r + 1);
       setQIdx(0);
+      setRollsUsed(0);
+      setRollSlotsCount(12);
       const [c1, c2] = getUnitDiceColors(survivors[0], userDiceColors);
       setDice(createInitialDice(c1, c2));
+      if (survivors[0]?.isOwner && !survivors[0]?.isCPU) {
+        setTurnSecondsLeft(20);
+        setIsAutoPilotTurn(false);
+      }
     }
   };
 
-  // CPU Automated Turn Runner
+  // Dismiss elimination announcement and prepare the round without auto-rolling
+  const handleDismissElimModal = () => {
+    setElimModalMsg(null);
+    setRound(r => r + 1);
+    setQIdx(0);
+    setRollsUsed(0);
+    setRollSlotsCount(12);
+    const liveUnits = units.filter(u => u.active);
+    const firstUnit = liveUnits[0];
+    if (firstUnit) {
+      const [c1, c2] = getUnitDiceColors(firstUnit, userDiceColors);
+      setDice(createInitialDice(c1, c2));
+    }
+    if (firstUnit?.isOwner && !firstUnit.isCPU) {
+      setTurnSecondsLeft(20);
+      setIsAutoPilotTurn(false);
+    }
+  };
+
+  // 5-second countdown timer on the elimination warning button
   useEffect(() => {
-    if (!isCPU || !curUnit || isRolling) return;
+    if (!elimModalMsg) return;
+    setElimCountdown(5);
+    const timer = setInterval(() => {
+      setElimCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          handleDismissElimModal();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [elimModalMsg]);
+
+  // CPU Automated Turn Runner (waits if elimination modal or 6-of-a-kind celebration is displayed)
+  useEffect(() => {
+    if (!isCPU || !curUnit || isRolling || elimModalMsg || showSixCelebration) return;
 
     const delay = spectatorFastForward ? 120 : 650;
 
@@ -432,167 +688,318 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     }, delay);
 
     return () => clearTimeout(timer);
-  }, [isCPU, curUnit, rollsUsed, isRolling, dice, spectatorFastForward, doRoll, bankTurn, checkBonusChimes]);
+  }, [isCPU, curUnit, rollsUsed, isRolling, dice, spectatorFastForward, elimModalMsg, showSixCelebration, doRoll, bankTurn, checkBonusChimes]);
 
   const canRoll = rollsUsed < 3 && dice.filter(d => d.zone === 'active').length > 0 && !isCPU && !isRolling;
   const canScore = (rollsUsed === 3 || dice.filter(d => d.zone === 'active').length === 0) && rollsUsed > 0 && !isCPU;
 
-  const humanPlayer = units.find(u => !u.isCPU);
+  const humanPlayer = units.find(u => u.isOwner);
   const isHumanOut = humanPlayer ? !humanPlayer.active : false;
+  const onlyComputersLeft = units.filter(u => u.active).every(u => u.isCPU);
+
+  // Target display logic: target is reached once elimination phase begins or someone hits threshold
+  const targetReached = phase === 'elimination' || units.some(u => u.score >= settings.threshold);
+
+  // 5-second warning indicator when turn time is almost up (ONLY active when timers are enabled in room)
+  const isTimeRunningOut = isTimerEnabled && isHumanOwner && !isCPU && turnSecondsLeft <= 5 && !isRolling;
+
+  const handleExitClick = () => {
+    if (!isHumanOut && humanPlayer?.active) {
+      // Route through onOpenMenu to show forfeiture warning modal
+      onOpenMenu();
+    } else {
+      // User is eliminated — they can leave early and still receive any prize they earned!
+      if (humanPlayer && humanPlayer.place && settings.payouts && settings.payouts.length > 0) {
+        const prize = settings.payouts[humanPlayer.place - 1] || 0;
+        if (prize > 0) {
+          onAwardPrize?.(prize, humanPlayer.place);
+        }
+      }
+      onExitGame();
+    }
+  };
 
   return (
-    <div className="w-full max-w-lg mx-auto flex flex-col min-h-[92vh] p-2 sm:p-3 select-none">
-      {/* Top Play Bar */}
-      <div className="flex items-center justify-between px-2 py-1 mb-2 bg-[#faf4e6]/90 border border-[#c9b877] rounded-xl shadow-xs">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              if (confirm('End this game and return to menu?')) onExitGame();
-            }}
-            className="p-1 rounded-lg hover:bg-black/10 text-[#4a3622]"
-            title="End Game"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div className="text-xs font-black text-[#1c6a35]">
-            Round <span className="font-mono text-sm">{round}</span>
+    <div className="w-full max-w-lg mx-auto flex flex-col h-full max-h-[100dvh] p-1 sm:p-2 select-none relative overflow-hidden">
+      {/* AFK Grey Overlay if user stepped away */}
+      {isAfkOverlay && (
+        <div
+          onClick={() => {
+            setIsAfkOverlay(false);
+            setConsecutiveAfkTurns(0);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/80 backdrop-blur-sm cursor-pointer select-none animate-fade-in"
+        >
+          <div className="bg-[#2d2319]/95 border-2 border-[#f2c14e] rounded-3xl p-6 max-w-xs text-center text-white shadow-2xl">
+            <div className="text-3xl mb-2">⏳</div>
+            <h3 className="text-lg font-black text-[#f2c14e] mb-1">You stepped away</h3>
+            <p className="text-xs text-stone-300 leading-relaxed mb-4">
+              Tap the screen to continue.
+            </p>
+            <div className="py-2.5 px-6 bg-[#2f9a4f] text-white text-xs font-black rounded-xl inline-block shadow-md">
+              Tap to continue
+            </div>
+            {consecutiveAfkTurns > 0 && (
+              <div className="text-[11px] font-bold text-amber-300/90 mt-3 bg-black/40 py-1 px-2 rounded-lg border border-amber-300/30">
+                Inactive turn: {consecutiveAfkTurns} of 4 before room forfeit
+              </div>
+            )}
           </div>
-          {phase === 'elimination' && (
-            <span className="text-[10px] font-extrabold uppercase tracking-wider bg-[#e5352f] text-white px-2 py-0.5 rounded-full shadow-xs">
-              Elimination
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-[#6d5138]">
-            Target: <b className="text-[#1c6a35] font-mono">{settings.threshold} pts</b>
-          </span>
-          <button
-            onClick={onOpenMenu}
-            className="p-1.5 rounded-lg bg-[#ebdcb9] hover:bg-[#ded1af] text-[#4a3622]"
-            title="Game Menu"
-          >
-            <Menu className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Players Cards Strip */}
-      <div className="mb-2">
-        <CardsStrip
-          units={units}
-          activeUnitId={curUnit?.id}
-          currentRound={round}
-          isEliminationPhase={phase === 'elimination'}
-          onSelectUnit={setSelectedPlayerForProfile}
-        />
-      </div>
-
-      {/* Toast message */}
-      {toastMsg && (
-        <div className="bg-[#1c6a35] text-white text-xs font-bold px-3 py-1.5 rounded-xl text-center mb-2 shadow-md animate-fade-in">
-          {toastMsg}
         </div>
       )}
 
-      {/* Saved Dice Board */}
-      <div className="mb-2">
-        <SavedBoard
-          savedDice={savedDice}
-          scoreResult={scoreResult}
-          onTapSavedDie={handleTapSaved}
-          isCPU={isCPU}
-        />
-      </div>
+      {/* Top Anchored Section (Logos, Round Bar, Scorecards Strip, Toast) - Fixed in place under user bar */}
+      <div className="w-full flex flex-col shrink-0">
+        {/* Logos Row - 2x larger logos, no extra back buttons, extra dice rows, or extra menu icons */}
+        <div className="flex items-center justify-between px-2 py-0.5 mb-1">
+          <img
+            src="/assets/img/cr-logo.png"
+            alt="Color Run"
+            className="h-10 sm:h-12 object-contain drop-shadow-md select-none"
+            draggable={false}
+          />
+          <img
+            src="/assets/img/dg-logo.png"
+            alt="Data Games Lab"
+            className="h-12 sm:h-14 object-contain drop-shadow-md select-none"
+            draggable={false}
+          />
+        </div>
 
-      {/* Active Roll Area */}
-      <div className="flex-1 flex flex-col justify-center mb-3">
-        <RollArea
-          dice={dice}
-          rollsUsed={rollsUsed}
-          isCPU={isCPU}
-          playerName={curUnit?.name || 'Player'}
-          isRolling={isRolling}
-          onTapActiveDie={handleTapActive}
-          onDoRoll={doRoll}
-          spectatorState={{
-            isUserOut: isHumanOut,
-            choiceMade: spectatorChoiceMade,
-            fastForwarding: spectatorFastForward,
-            onShowFinalScore: () => {
-              setSpectatorChoiceMade(true);
-              setSpectatorFastForward(true);
-            },
-            onLetPlayersFinish: () => {
-              setSpectatorChoiceMade(true);
-            },
-          }}
-        />
-      </div>
-
-      {/* Action Buttons: ROLL & SCORE IT! */}
-      <div className="flex gap-2">
-        <button
-          onClick={doRoll}
-          disabled={!canRoll}
-          className="flex-1 py-3 px-3 bg-[#2f9a4f] hover:bg-[#268a48] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-base rounded-2xl shadow-lg transition-transform active:scale-98 flex items-center justify-center gap-1.5 border-b-4 border-[#1b6b33]"
-        >
-          <span>{rollsUsed === 0 ? 'Roll' : 'Rolls'}</span>
-          {rollsUsed > 0 && (
-            <span className="text-xs font-mono font-normal opacity-90">
-              - {Math.max(0, 3 - rollsUsed)} left
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={bankTurn}
-          disabled={!canScore}
-          className="flex-1 py-3 px-3 bg-[#e58a1f] hover:bg-[#cb7512] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-base rounded-2xl shadow-lg transition-transform active:scale-98 flex items-center justify-center gap-1.5 border-b-4 border-[#a65d0a]"
-        >
-          <span>Score it!</span>
-          {rollsUsed > 0 && (
-            <span className="text-xs font-mono font-normal opacity-90">
-              - {scoreResult.total} pts
-            </span>
-          )}
-        </button>
-      </div>
-
-      {/* Hint tip text */}
-      <div className="text-center text-[11px] text-[#fcf9ea] drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] mt-2 font-medium">
-        {isCPU
-          ? `🤖 ${curUnit?.name} is thinking…`
-          : rollsUsed === 0
-            ? 'Tap ROLL to roll all 12 dice'
-            : savedDice.length === 0
-              ? 'Tap matching dice (3+ of a symbol) to save them'
-              : 'Saved dice are safe. Tap a saved die to send it back.'}
-      </div>
-
-      {/* 6-of-a-kind Color Run Video Celebration */}
-      {showSixCelebration && (
+        {/* Round Indicator Bar - Target moved here and only shown before target is reached */}
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs cursor-pointer animate-fade-in"
-          onClick={() => setShowSixCelebration(false)}
+          className={`w-full py-1 px-3 rounded-full text-center font-black text-xs sm:text-sm tracking-wider uppercase shadow-md transition-colors duration-300 mb-1 flex items-center justify-center gap-2 ${
+            phase === 'elimination'
+              ? 'bg-[#d62828] text-white'
+              : 'bg-[#28974a] text-white'
+          }`}
         >
-          <div className="relative max-w-xs w-full bg-black/80 border-2 border-[#f2c14e] rounded-3xl p-4 shadow-2xl flex flex-col items-center">
-            <video
-              src="/media/color-run.mp4"
-              autoPlay
-              playsInline
-              className="w-full rounded-2xl shadow-lg object-contain"
-              onEnded={() => setShowSixCelebration(false)}
-            />
-            <div className="mt-3 text-center">
-              <span className="text-xs font-bold text-[#f2c14e] tracking-wider uppercase">
-                🎉 Color Run Bonus! (Tap to close)
-              </span>
+          <span>
+            {!targetReached
+              ? `Round ${round} - Target ${settings.threshold} pts.`
+              : phase === 'elimination'
+              ? `Elimination Round ${round}`
+              : `Round ${round}`}
+          </span>
+          {isTimerEnabled && isHumanOwner && !isAutoPilotTurn && !isCPU && (
+            <span
+              className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                isTimeRunningOut
+                  ? 'bg-red-500 text-white border-red-600 animate-pulse'
+                  : 'bg-black/30 text-white border-white/30'
+              }`}
+            >
+              ⏱️ {turnSecondsLeft}s
+            </span>
+          )}
+        </div>
+
+        {/* If user is eliminated and only computers left, give options */}
+        {(isHumanOut || onlyComputersLeft) && (
+          <div className="flex items-center justify-between px-2.5 py-1 mb-1 bg-[#131d2e]/90 border border-white/15 rounded-xl shadow-xs">
+            <span className="text-[10px] text-white/80 font-bold">
+              {isHumanOut ? "You're out of the game" : "All opponents finished"}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => {
+                  setSpectatorChoiceMade(true);
+                  setSpectatorFastForward(true);
+                }}
+                className="text-[10px] font-black bg-[#28974a] hover:bg-[#22803e] text-white px-2 py-0.5 rounded-lg shadow-xs cursor-pointer active:scale-95"
+              >
+                ⏩ Speed to Final Score
+              </button>
+              <button
+                onClick={handleExitClick}
+                className="text-[10px] font-bold bg-[#8c745e] hover:bg-[#735d49] text-white px-2 py-0.5 rounded-lg shadow-xs cursor-pointer"
+              >
+                Leave Room
+              </button>
             </div>
           </div>
+        )}
+
+        {/* Players Scoreboards Strip */}
+        <div className="mb-1">
+          <CardsStrip
+            units={units}
+            activeUnitId={curUnit?.id}
+            currentRound={round}
+            isEliminationPhase={phase === 'elimination'}
+            isUserTurnToRoll={isHumanOwner && rollsUsed === 0 && !isAutoPilotTurn}
+            onSelectUnit={setSelectedPlayerForProfile}
+          />
+        </div>
+
+        {/* Toast message (for friend additions/actions) */}
+        {toastMsg && (
+          <div className="bg-[#1c6a35] text-white text-[11px] font-bold px-2.5 py-1 rounded-xl text-center mb-1 shadow-md animate-fade-in">
+            {toastMsg}
+          </div>
+        )}
+      </div>
+
+      {/* Middle Game Area (Saved Dice & Active Roll Area) - SavedBoard is the MAIN FLEX POINT */}
+      <div className="flex-1 flex flex-col justify-between min-h-0 py-0.5 gap-1 overflow-hidden">
+        {/* Saved Dice Board - MAIN FLEX POINT: grows and shrinks as needed */}
+        <div className="flex-1 min-h-0 flex flex-col justify-center transition-all duration-300">
+          <SavedBoard
+            savedDice={savedDice}
+            scoreResult={scoreResult}
+            onTapSavedDie={handleTapSaved}
+            isCPU={isCPU}
+            showSixCelebration={showSixCelebration}
+            onDismissSixCelebration={() => setShowSixCelebration(false)}
+          />
+        </div>
+
+        {/* Active Roll Area - Compact, fits dice compactly */}
+        <div className="shrink-0 flex flex-col justify-center">
+          <RollArea
+            dice={dice}
+            rollsUsed={rollsUsed}
+            rollSlotsCount={rollSlotsCount}
+            isCPU={isCPU}
+            playerName={curUnit?.name || 'Player'}
+            isRolling={isRolling}
+            onTapActiveDie={handleTapActive}
+            onDoRoll={doRoll}
+            spectatorState={{
+              isUserOut: isHumanOut,
+              choiceMade: spectatorChoiceMade,
+              fastForwarding: spectatorFastForward,
+              onShowFinalScore: () => {
+                setSpectatorChoiceMade(true);
+                setSpectatorFastForward(true);
+              },
+              onLetPlayersFinish: () => {
+                setSpectatorChoiceMade(true);
+              },
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Bottom Controls Area (Fixed at bottom) */}
+      <div className="shrink-0 flex flex-col gap-0.5">
+        {/* Action Buttons: ROLL, SCORE IT!, and INFO */}
+        <div className="flex gap-1.5">
+          <button
+            onClick={doRoll}
+            disabled={!canRoll}
+            className={`flex-1 py-1.5 sm:py-2 px-2 bg-[#28974a] hover:bg-[#22803e] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-1 border-b-2 border-[#185e2e] ${
+              isTimeRunningOut
+                ? 'ring-4 ring-yellow-400 ring-offset-2 ring-offset-black/50 animate-pulse bg-red-700 hover:bg-red-800'
+                : rollsUsed === 0 && isHumanOwner && !isCPU
+                ? 'ring-2 ring-yellow-300 ring-offset-1 ring-offset-black/40 animate-pulse shadow-[0_0_12px_rgba(242,193,78,0.5)]'
+                : ''
+            }`}
+          >
+            <span>{rollsUsed === 0 ? '🎲 ROLL' : 'Rolls'}</span>
+            {rollsUsed > 0 && (
+              <span className="text-[11px] font-mono font-normal opacity-90">
+                - {Math.max(0, 3 - rollsUsed)} left
+              </span>
+            )}
+            {isTimeRunningOut && (
+              <span className="ml-1 bg-yellow-400 text-black text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full animate-bounce">
+                ⚠️ {turnSecondsLeft}s!
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={bankTurn}
+            disabled={!canScore}
+            className="flex-1 py-1.5 sm:py-2 px-2 bg-[#e58a1f] hover:bg-[#cb7512] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center justify-center gap-1 border-b-2 border-[#a65d0a]"
+          >
+            <span>Score it!</span>
+            {rollsUsed > 0 && (
+              <span className="text-[11px] font-mono font-normal opacity-90">
+                - {scoreResult.total} pts
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setShowInfoModal(true)}
+            className="py-1.5 sm:py-2 px-3 bg-[#e8dec0] hover:bg-[#ded1af] text-[#3e2e1e] font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center justify-center border-b-2 border-[#c8bc9a]"
+            title="Game Rules & Scoring Info"
+          >
+            INFO
+          </button>
+        </div>
+
+        {/* Hint tip text */}
+        <div className="text-center text-[10px] sm:text-[11px] text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] mt-0.5 font-medium">
+          {isCPU
+            ? `🤖 ${curUnit?.name} is thinking…`
+            : rollsUsed === 0
+              ? <span className="text-[#f2c14e] font-bold animate-pulse">👉 Your turn! Tap ROLL to roll all 12 dice</span>
+              : savedDice.length === 0
+                ? 'Tap matching dice (3+ of a symbol) to save them'
+                : 'Saved dice are safe. Tap a saved die to send it back.'}
+        </div>
+
+        {/* Bottom Ad Banner */}
+        <div className="mt-0.5 py-0.5 px-2.5 bg-black/40 border border-white/10 rounded-xl flex items-center justify-between text-xs text-white/70">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[8px] font-black bg-white/20 text-white px-1 py-0.2 rounded">AD</span>
+            <span className="text-[10px] sm:text-[11px] font-medium truncate">Go ad-free for $2.99/mo</span>
+          </div>
+          <button
+            onClick={onOpenMenu}
+            className="text-[10px] font-bold text-[#f2c14e] hover:underline cursor-pointer ml-2 shrink-0"
+          >
+            Upgrade
+          </button>
+        </div>
+      </div>
+
+      {/* Info / Scoring Rules Modal */}
+      {showInfoModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs select-none"
+          onClick={() => setShowInfoModal(false)}
+        >
+          <div
+            className="bg-[#1c2436] border-2 border-[#f2c14e] rounded-3xl p-5 max-w-sm w-full text-white shadow-2xl relative"
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 className="text-base font-black text-[#f2c14e] mb-3 text-center uppercase tracking-wider">
+              🎲 Scoring Rules
+            </h3>
+            <div className="space-y-2 text-xs text-stone-200">
+              <div className="bg-white/5 p-2.5 rounded-xl border border-white/10">
+                <span className="font-bold text-white">3+ Matching Symbols:</span>
+                <p className="text-[11px] text-stone-300 mt-0.5">
+                  Save 3, 4, 5, or 6 of any face symbol to score points (sum of face values).
+                </p>
+              </div>
+              <div className="bg-white/5 p-2.5 rounded-xl border border-white/10">
+                <span className="font-bold text-[#54e38e]">Color Run Bonus (2x):</span>
+                <p className="text-[11px] text-stone-300 mt-0.5">
+                  If 3 or more of your saved matching dice share the same color, you earn DOUBLE points!
+                </p>
+              </div>
+              <div className="bg-white/5 p-2.5 rounded-xl border border-white/10">
+                <span className="font-bold text-[#f2c14e]">6-of-a-Kind Color Run:</span>
+                <p className="text-[11px] text-stone-300 mt-0.5">
+                  Rolling all 6 dice of the exact same color and symbol triggers the 500-point jackpot!
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowInfoModal(false)}
+              className="mt-4 w-full py-2.5 bg-[#28974a] hover:bg-[#22803e] text-white font-black text-xs rounded-xl shadow-md cursor-pointer"
+            >
+              Got it!
+            </button>
+          </div>
         </div>
       )}
+
 
       {/* Player Avatar Profile / Add Friend Modal */}
       {selectedPlayerForProfile && (
@@ -608,22 +1015,21 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         />
       )}
 
-      {/* Elimination Modal Announcement */}
+      {/* Elimination Modal Announcement with 5-second countdown on button */}
       {elimModalMsg && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs select-none animate-fade-in">
           <div className="w-full max-w-sm bg-[#faf4e6] border-2 border-[#e5352f] rounded-2xl p-5 shadow-2xl text-center">
             <div className="text-3xl mb-1">⚔️</div>
             <h3 className="text-xl font-black text-[#e5352f] mb-2">Elimination Round!</h3>
             <p className="text-xs text-[#4a3622] leading-relaxed mb-4">{elimModalMsg}</p>
             <button
-              onClick={() => {
-                setElimModalMsg(null);
-                setRound(r => r + 1);
-                setQIdx(0);
-              }}
-              className="w-full py-2.5 bg-[#2f9a4f] hover:bg-[#268a48] text-white font-bold text-sm rounded-xl shadow-md transition-transform active:scale-98"
+              onClick={handleDismissElimModal}
+              className="w-full py-3 bg-[#2f9a4f] hover:bg-[#268a48] text-white font-black text-sm rounded-xl shadow-lg transition-transform active:scale-98 flex items-center justify-center gap-2 cursor-pointer border-b-2 border-[#1c6a35]"
             >
-              Begin Elimination Round
+              <span>Begin Elimination Round</span>
+              <span className="bg-black/30 px-2 py-0.5 rounded-full text-xs font-mono font-black text-yellow-300">
+                ({elimCountdown}s)
+              </span>
             </button>
           </div>
         </div>
@@ -631,3 +1037,4 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     </div>
   );
 };
+

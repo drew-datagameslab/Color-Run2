@@ -13,10 +13,12 @@ import {
   User as FirebaseUser,
 } from 'firebase/auth';
 import {
+  initializeFirestore,
   getFirestore,
   doc,
   setDoc,
   getDoc,
+  getDocFromServer,
   updateDoc,
   collection,
   query,
@@ -42,18 +44,36 @@ const firebaseConfig = {
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
-// Initialize Firestore
+// Initialize Firestore with long polling to ensure reliable connectivity in iframe/proxy environments
 let firestoreInstance: Firestore;
 try {
-  if (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)') {
+  firestoreInstance = initializeFirestore(
+    app,
+    {
+      experimentalForceLongPolling: true,
+    },
+    firebaseConfig.firestoreDatabaseId
+  );
+} catch {
+  try {
     firestoreInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-  } else {
+  } catch {
     firestoreInstance = getFirestore(app);
   }
-} catch {
-  firestoreInstance = getFirestore(app);
 }
 export const db = firestoreInstance;
+
+// Test connection on boot to verify Firestore availability gracefully
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.warn("Firestore operating in offline mode. Local persistence active.");
+    }
+  }
+}
+testConnection();
 
 // Helper to convert Firebase Auth User to application UserAccount
 export function mapFirebaseUserToAccount(
@@ -330,6 +350,7 @@ export async function syncUserProfileToFirestore(
       adFreePlan: user.adFreePlan || null,
       adFreeBillingDate: user.adFreeBillingDate || null,
       adFreeRecurring: user.adFreeRecurring ?? null,
+      phoneNumber: user.phoneNumber || null,
       avatar: user.avatar,
       diceColors: user.diceColors || ['blue', 'red'],
       updatedAt: new Date().toISOString(),
@@ -356,6 +377,7 @@ export async function loadUserProfileFromFirestore(userId: string): Promise<User
         uid: data.uid || userId,
         name: data.name || 'Color Roller',
         email: data.email || null,
+        phoneNumber: data.phoneNumber || undefined,
         provider: data.provider || 'email',
         avatar: data.avatar || { color: '#1f7fd6', name: 'CR' },
         scoreboardUnlocked: data.scoreboardUnlocked ?? true,
