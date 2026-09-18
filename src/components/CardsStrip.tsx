@@ -71,9 +71,9 @@ export const CardsStrip: React.FC<CardsStripProps> = ({
                   : 'border border-white/20'}
                 ${isOut ? 'opacity-40 grayscale-[50%]' : ''}`}
             >
-              {/* Avatar Top Center */}
+              {/* Avatar Top Center (50% bigger) */}
               <div
-                className="w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center font-black text-[9px] sm:text-[10px] text-white shrink-0 shadow-xs mb-0.5 transition-transform hover:scale-105 border border-white/20"
+                className="w-[30px] h-[30px] sm:w-[34px] sm:h-[34px] rounded-full flex items-center justify-center font-black text-xs sm:text-sm text-white shrink-0 shadow-sm mb-0.5 transition-transform hover:scale-105 border border-white/30"
                 style={{
                   backgroundColor: unit.color,
                   backgroundImage: unit.image ? `url(${unit.image})` : undefined,
@@ -92,8 +92,8 @@ export const CardsStrip: React.FC<CardsStripProps> = ({
                 </span>
               </div>
 
-              {/* Points Total in Compact Font */}
-              <div className="text-sm sm:text-base font-black text-white text-center leading-none my-0 drop-shadow-xs">
+              {/* Points Total in Boards (30% bigger) */}
+              <div className="text-lg sm:text-xl font-black text-white text-center leading-tight my-0.5 drop-shadow-sm">
                 {unit.score}
               </div>
 
@@ -104,14 +104,14 @@ export const CardsStrip: React.FC<CardsStripProps> = ({
                 </div>
               )}
 
-              {/* Round History Rows (Last 4 Rolls) */}
-              <div className="w-full flex flex-col gap-0 mt-0.5 pt-0.5 border-t border-white/20 text-[8px] sm:text-[9px] font-mono leading-tight">
+              {/* Round History Rows (Last 4 Rolls) - Line padding increased by 6px */}
+              <div className="w-full flex flex-col gap-0.5 mt-0.5 pt-0.5 border-t border-white/20 text-[8.5px] sm:text-[9.5px] font-mono leading-tight">
                 {rows.map(r => {
                   const rScore = unit.history[r];
                   return (
                     <div
                       key={r}
-                      className={`flex justify-between items-center px-0.5 rounded ${
+                      className={`flex justify-between items-center px-1 py-[3px] rounded ${
                         r === currentRound && unit.active
                           ? 'bg-black/25 font-black text-[#f2c14e]'
                           : 'text-white/85'

@@ -160,19 +160,19 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
         )}
       </div>
 
-      {/* Cards Container */}
-      <div className="w-full flex flex-col gap-3.5">
+      {/* Cards Container with styled custom scrollbar */}
+      <div className="w-full flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1.5 flex flex-col gap-2.5 max-h-[calc(100dvh-200px)]">
         {/* Tier 1: STANDARD GAME - 🪙 10 Coins Buy-In */}
-        <div className="w-full bg-[#fbf7ee] rounded-2xl border-2 border-[#d9c79e] p-4 shadow-lg">
-          <div className="font-black text-xs text-[#5e432d] uppercase tracking-wider mb-2.5">
+        <div className="w-full bg-[#fbf7ee] rounded-2xl border-2 border-[#d9c79e] p-3 sm:p-3.5 shadow-lg">
+          <div className="font-black text-xs text-[#5e432d] uppercase tracking-wider mb-2">
             STANDARD GAME - 🪙 10 Coins Buy-In
           </div>
-          <div className="grid grid-cols-3 gap-2.5">
+          <div className="grid grid-cols-3 gap-2">
             {roomCounts.map(count => (
               <button
                 key={`standard-${count}`}
                 onClick={() => handlePick(count, 10, 'standard')}
-                className="p-3 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl shadow-md border-b-3 border-[#155229] active:translate-y-0.5 active:border-b-1 transition-all flex flex-col items-center justify-center cursor-pointer min-h-[46px]"
+                className="py-1 px-2 sm:py-1.5 sm:px-2.5 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl shadow-md border-b-2.5 border-[#155229] active:translate-y-0.5 active:border-b-1 transition-all flex flex-col items-center justify-center cursor-pointer min-h-[34px] sm:min-h-[38px]"
               >
                 <span className="font-black text-xs sm:text-sm text-white tracking-tight">
                   {getPlayerLabel(count)}
@@ -183,19 +183,19 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
         </div>
 
         {/* Tier 2: DOUBLE ACTION - 🪙 20 Coins Buy-In */}
-        <div className="w-full bg-[#fbf7ee] rounded-2xl border-2 border-[#d9c79e] p-4 shadow-lg">
+        <div className="w-full bg-[#fbf7ee] rounded-2xl border-2 border-[#d9c79e] p-3 sm:p-3.5 shadow-lg">
           <div className="font-black text-xs text-[#5e432d] uppercase tracking-wider mb-0.5">
             DOUBLE ACTION - 🪙 20 Coins Buy-In
           </div>
-          <div className="text-xs text-[#5e432d] font-semibold mb-2.5">
+          <div className="text-[11px] sm:text-xs text-[#5e432d] font-semibold mb-2">
             Double the buy-in, double the payouts.
           </div>
-          <div className="grid grid-cols-3 gap-2.5">
+          <div className="grid grid-cols-3 gap-2">
             {roomCounts.map(count => (
               <button
                 key={`double-${count}`}
                 onClick={() => handlePick(count, 20, 'double')}
-                className="p-3 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl shadow-md border-b-3 border-[#155229] active:translate-y-0.5 active:border-b-1 transition-all flex flex-col items-center justify-center cursor-pointer min-h-[46px]"
+                className="py-1 px-2 sm:py-1.5 sm:px-2.5 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl shadow-md border-b-2.5 border-[#155229] active:translate-y-0.5 active:border-b-1 transition-all flex flex-col items-center justify-center cursor-pointer min-h-[34px] sm:min-h-[38px]"
               >
                 <span className="font-black text-xs sm:text-sm text-white tracking-tight">
                   {getPlayerLabel(count)}
@@ -206,19 +206,19 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
         </div>
 
         {/* Tier 3: HIGH ROLLER - 🪙 50 Coins Buy-In */}
-        <div className="w-full bg-[#fbf7ee] rounded-2xl border-2 border-[#d9c79e] p-4 shadow-lg">
+        <div className="w-full bg-[#fbf7ee] rounded-2xl border-2 border-[#d9c79e] p-3 sm:p-3.5 shadow-lg">
           <div className="font-black text-xs text-[#5e432d] uppercase tracking-wider mb-0.5">
             HIGH ROLLER - 🪙 50 Coins Buy-In
           </div>
-          <div className="text-xs text-[#5e432d] font-semibold mb-2.5">
+          <div className="text-[11px] sm:text-xs text-[#5e432d] font-semibold mb-2">
             5x the buy-in, 5x the payouts.
           </div>
-          <div className="grid grid-cols-3 gap-2.5">
+          <div className="grid grid-cols-3 gap-2">
             {roomCounts.map(count => (
               <button
                 key={`highroller-${count}`}
                 onClick={() => handlePick(count, 50, 'high_roller')}
-                className="p-3 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl shadow-md border-b-3 border-[#155229] active:translate-y-0.5 active:border-b-1 transition-all flex flex-col items-center justify-center cursor-pointer min-h-[46px]"
+                className="py-1 px-2 sm:py-1.5 sm:px-2.5 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl shadow-md border-b-2.5 border-[#155229] active:translate-y-0.5 active:border-b-1 transition-all flex flex-col items-center justify-center cursor-pointer min-h-[34px] sm:min-h-[38px]"
               >
                 <span className="font-black text-xs sm:text-sm text-white tracking-tight">
                   {getPlayerLabel(count)}
@@ -231,7 +231,7 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
         {/* Back Button to Mode Select */}
         <button
           onClick={onBack}
-          className="mt-3 mx-auto flex items-center justify-center gap-1 text-xs font-bold text-white/90 hover:text-white bg-black/35 hover:bg-black/55 px-4 py-2 rounded-xl transition-colors cursor-pointer"
+          className="mt-2 mb-2 mx-auto flex items-center justify-center gap-1 text-xs font-bold text-white/90 hover:text-white bg-black/35 hover:bg-black/55 px-4 py-1.5 rounded-xl transition-colors cursor-pointer shrink-0"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Back to Mode Select</span>

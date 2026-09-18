@@ -373,11 +373,12 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   };
 
   // Tapping active die: moves matching set to saved area.
-  // Resets timer, and leaves original slot space blank in rolling area!
+  // Stops warning sound immediately, resets timer, and leaves original slot space blank in rolling area!
   const handleTapActive = (id: number) => {
     if (isCPU || rollsUsed === 0 || isRolling) return;
 
-    // Reset turn timer when moving dice
+    // Stop warning sound immediately and reset turn timer when user moves dice!
+    stopWarningSound();
     if (isHumanOwner && !isCPU) {
       setTurnSecondsLeft(rollsUsed === 0 ? 20 : 10);
     }
@@ -418,11 +419,12 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     });
   };
 
-  // Tapping saved die sends it back to active area into a vacant slot. Resets timer!
+  // Tapping saved die sends it back to active area into a vacant slot. Resets timer & stops warning sound!
   const handleTapSaved = (id: number) => {
     if (isCPU || isRolling) return;
 
-    // Reset turn timer when moving dice
+    // Stop warning sound immediately and reset turn timer when user moves dice!
+    stopWarningSound();
     if (isHumanOwner && !isCPU) {
       setTurnSecondsLeft(rollsUsed === 0 ? 20 : 10);
     }
@@ -750,25 +752,25 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
       {/* Top Anchored Section (Logos, Round Bar, Scorecards Strip, Toast) - Fixed in place under user bar */}
       <div className="w-full flex flex-col shrink-0">
-        {/* Logos Row */}
+        {/* Logos Row (75% larger) */}
         <div className="flex items-center justify-between px-2 py-0 mb-0.5">
           <img
             src="/assets/img/cr-logo.png"
             alt="Color Run"
-            className="h-8 sm:h-9 object-contain drop-shadow-md select-none"
+            className="h-[78px] sm:h-[88px] object-contain drop-shadow-md select-none"
             draggable={false}
           />
           <img
             src="/assets/img/dg-logo.png"
             alt="Data Games Lab"
-            className="h-9 sm:h-10 object-contain drop-shadow-md select-none"
+            className="h-[88px] sm:h-[98px] object-contain drop-shadow-md select-none"
             draggable={false}
           />
         </div>
 
-        {/* Round Indicator Bar - Target moved here and only shown before target is reached */}
+        {/* Round Indicator Bar - Text 10% smaller */}
         <div
-          className={`w-full py-0.5 px-2.5 rounded-full text-center font-black text-xs tracking-wider uppercase shadow-sm transition-colors duration-300 mb-0.5 flex items-center justify-center gap-2 ${
+          className={`w-full py-0.5 px-2.5 rounded-full text-center font-black text-[10.5px] sm:text-[11px] tracking-wider uppercase shadow-sm transition-colors duration-300 mb-0.5 flex items-center justify-center gap-2 ${
             phase === 'elimination'
               ? 'bg-[#d62828] text-white'
               : 'bg-[#28974a] text-white'
@@ -783,7 +785,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           </span>
           {isTimerEnabled && isHumanOwner && !isAutoPilotTurn && !isCPU && (
             <span
-              className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+              className={`text-[9.5px] sm:text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
                 isTimeRunningOut
                   ? 'bg-red-500 text-white border-red-600 animate-pulse'
                   : 'bg-black/30 text-white border-white/30'
@@ -841,7 +843,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       </div>
 
       {/* Middle Game Area (Saved Dice & Active Roll Area) - SavedBoard is the MAIN FLEX POINT */}
-      <div className="flex-1 flex flex-col justify-between min-h-0 py-0.5 gap-1 overflow-hidden">
+      <div
+        onTouchStart={() => stopWarningSound()}
+        onMouseDown={() => stopWarningSound()}
+        className="flex-1 flex flex-col justify-between min-h-0 py-0.5 gap-1 overflow-hidden"
+      >
         {/* Saved Dice Board - MAIN FLEX POINT: grows and shrinks as needed */}
         <div className="flex-1 min-h-0 flex flex-col justify-center transition-all duration-300">
           <SavedBoard

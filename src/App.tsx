@@ -294,8 +294,13 @@ export default function App() {
       {/* Landscape orientation lock overlay: prompts user to rotate to portrait */}
       <PortraitLockOverlay />
 
-      {/* Centered portrait framing for all screen sizes */}
-      <div className="w-full max-w-[460px] mx-auto h-full flex flex-col justify-between relative overflow-hidden">
+      {/* Centered portrait framing with maximum screen width constrained by portrait screen ratio (9:16 = 0.5625) */}
+      <div
+        className="w-full mx-auto h-full flex flex-col justify-between relative overflow-hidden"
+        style={{
+          maxWidth: 'min(100vw, calc(100dvh * 0.5625), 480px)',
+        }}
+      >
         {/* Top USER Bar anchored to the top of every page (except initial signin screen) */}
         {screen !== 'signin' && (
           <Header

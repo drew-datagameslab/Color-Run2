@@ -146,3 +146,25 @@
   animation: diceShadow 1.6s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
 }
 
+/* ----------------------------------------------------
+   CUSTOM SCROLLBAR
+   ---------------------------------------------------- */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #c9b877 rgba(0, 0, 0, 0.2);
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 9999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #c9b877;
+  border-radius: 9999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #f2c14e;
+}
+

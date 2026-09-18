@@ -96,6 +96,7 @@ export function playWinCoinsSound(): void {
 }
 
 let activeWarningAudio: HTMLAudioElement | null = null;
+let activeWarningCtx: AudioContext | null = null;
 
 export function stopWarningSound(): void {
   if (activeWarningAudio) {
@@ -106,6 +107,14 @@ export function stopWarningSound(): void {
       // Ignore
     }
     activeWarningAudio = null;
+  }
+  if (activeWarningCtx) {
+    try {
+      activeWarningCtx.close();
+    } catch {
+      // Ignore
+    }
+    activeWarningCtx = null;
   }
 }
 
@@ -141,6 +150,7 @@ function playSynthesizedWarningTone(): void {
     const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtx) return;
     const ctx = new AudioCtx();
+    activeWarningCtx = ctx;
     const now = ctx.currentTime;
 
     const beepFrequencies = [880, 880, 987.77, 1046.5, 1318.5];

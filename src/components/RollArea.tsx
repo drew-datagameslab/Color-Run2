@@ -46,25 +46,25 @@ export const RollArea: React.FC<RollAreaProps> = ({
   return (
     <div
       className={`relative w-full rounded-2xl bg-[#144b26] border border-[#2f9a4f]/70 p-1 sm:p-1.5 shadow-xl flex flex-col justify-center transition-all duration-200 ${
-        isSingleRow ? 'min-h-[48px] sm:min-h-[54px] py-1' : 'min-h-[86px] sm:min-h-[96px] py-1'
+        isSingleRow ? 'min-h-[64px] sm:min-h-[72px] py-1' : 'min-h-[124px] sm:min-h-[138px] py-1.5'
       }`}
     >
-      {/* Dice Grid/Row - Default dice size reduced by 20% with responsive shrink */}
+      {/* Dice Grid/Row - Maximized to fit 6 in a row */}
       <div
         className={
           isSingleRow
-            ? 'flex justify-center items-center gap-1 sm:gap-1.5 max-w-[320px] sm:max-w-[360px] mx-auto w-full px-1'
+            ? 'flex justify-center items-center gap-1.5 sm:gap-2 max-w-full mx-auto w-full px-1'
             : isFourCols
-            ? 'grid grid-cols-4 gap-1 sm:gap-1.5 max-w-[220px] sm:max-w-[250px] mx-auto w-full px-1 justify-items-center'
-            : 'grid grid-cols-6 gap-1 sm:gap-1.5 max-w-[320px] sm:max-w-[360px] mx-auto w-full px-1 justify-items-center'
+            ? 'grid grid-cols-4 gap-1.5 sm:gap-2 max-w-[290px] sm:max-w-[340px] mx-auto w-full px-1 justify-items-center'
+            : 'grid grid-cols-6 gap-1 sm:gap-1.5 max-w-full mx-auto w-full px-1 justify-items-center'
         }
       >
         {isSingleRow ? (
-          // In single row mode: display the remaining 1-6 dice directly centered in one row
+          // In single row mode: display remaining active dice centered with maximized size
           activeDice.map(die => (
             <div
               key={die.id}
-              className="w-8 h-8 sm:w-9 sm:h-9 max-w-[38px] max-h-[38px] flex-shrink-0 aspect-square"
+              className="w-[50px] h-[50px] sm:w-[56px] sm:h-[56px] max-w-[62px] max-h-[62px] flex-shrink-0 aspect-square"
             >
               <DieComponent
                 color={die.color}
@@ -90,7 +90,7 @@ export const RollArea: React.FC<RollAreaProps> = ({
               return (
                 <div
                   key={die.id}
-                  className="w-full max-w-[38px] sm:max-w-[42px] max-h-[38px] sm:max-h-[42px] min-w-0 aspect-square"
+                  className="w-full max-w-[56px] sm:max-w-[62px] aspect-square min-w-0 flex items-center justify-center"
                 >
                   <DieComponent
                     color={die.color}
@@ -110,7 +110,7 @@ export const RollArea: React.FC<RollAreaProps> = ({
             return (
               <div
                 key={`slot-empty-${slotIdx}`}
-                className="aspect-square rounded-[16%] border border-dashed border-[#2f9a4f]/30 bg-black/15 pointer-events-none transition-all w-full max-w-[38px] sm:max-w-[42px] max-h-[38px] sm:max-h-[42px] min-w-0"
+                className="aspect-square rounded-[16%] border border-dashed border-[#2f9a4f]/35 bg-black/15 pointer-events-none transition-all w-full max-w-[56px] sm:max-w-[62px] min-w-0"
               />
             );
           })

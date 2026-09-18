@@ -18,10 +18,11 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
   onOpenTournament,
 }) => {
   return (
-    <div className="w-full max-w-xs sm:max-w-sm mx-auto flex flex-col items-center justify-center p-2.5 sm:p-4 my-auto select-none">
-      <div className="w-full bg-[#faf4e6]/95 border-2 border-[#c9b877] rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 shadow-2xl flex flex-col items-center">
-        <ColorRunLogo size="md" className="mb-1.5" />
-        <div className="text-[10px] sm:text-xs font-black tracking-widest text-[#6d5138] uppercase mb-3 sm:mb-4 text-center">
+    <div className="w-full max-w-xs sm:max-w-sm mx-auto flex flex-col items-center justify-center p-2 sm:p-3 my-auto select-none">
+      <div className="w-full bg-[#faf4e6]/95 border-2 border-[#c9b877] rounded-2xl sm:rounded-3xl p-3 sm:p-4 shadow-2xl flex flex-col items-center">
+        {/* Color Run Logo increased by 75% */}
+        <ColorRunLogo size="xl" className="mb-2" />
+        <div className="text-[10px] sm:text-xs font-black tracking-widest text-[#6d5138] uppercase mb-2.5 sm:mb-3 text-center">
           ROLL - MATCH - SURVIVE.
         </div>
 
@@ -77,7 +78,8 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
         </div>
       </div>
 
-      <DGLogo className="mt-2" size="xs" textColor="text-white" />
+      {/* Data Games Lab Logo increased by 100% (double size) */}
+      <DGLogo className="mt-3" size="menu" textColor="text-white" />
     </div>
   );
 };

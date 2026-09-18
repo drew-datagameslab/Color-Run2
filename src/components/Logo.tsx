@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 interface LogoProps {
   className?: string;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
 export const ColorRunLogo: React.FC<LogoProps> = ({ className = '', size = 'md' }) => {
@@ -12,6 +12,8 @@ export const ColorRunLogo: React.FC<LogoProps> = ({ className = '', size = 'md' 
     sm: 'h-9 max-h-9',
     md: 'h-13 max-h-13',
     lg: 'h-20 max-h-20',
+    // 75% increase over md (52px * 1.75 = 91px)
+    xl: 'h-[91px] max-h-[91px] sm:h-[98px] sm:max-h-[98px]',
   }[size];
 
   if (imgError) {
@@ -38,7 +40,7 @@ export const ColorRunLogo: React.FC<LogoProps> = ({ className = '', size = 'md' 
 
 export const DGLogo: React.FC<{
   className?: string;
-  size?: 'xs' | 'sm' | 'md' | 'lg' | 'login';
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'login' | 'menu';
   imgClassName?: string;
   textColor?: string;
 }> = ({
@@ -54,6 +56,8 @@ export const DGLogo: React.FC<{
     lg: 'w-32 sm:w-36',
     // 1.75x of original xs (56px * 1.75 = 98px, 64px * 1.75 = 112px, max-h-12)
     login: 'w-[98px] sm:w-[112px] max-h-12',
+    // 100% increase (double xs: 112px / 128px, max-h-14)
+    menu: 'w-28 sm:w-32 max-h-14',
   }[size];
 
   return (
