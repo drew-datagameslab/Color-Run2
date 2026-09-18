@@ -74,3 +74,41 @@ export const DGLogo: React.FC<{
     </div>
   );
 };
+
+export const ColorRunShopLogo: React.FC<{
+  className?: string;
+  size?: 'sm' | 'md' | 'lg';
+}> = ({ className = '', size = 'md' }) => {
+  const [imgError, setImgError] = useState(false);
+
+  const sizeStyles = {
+    sm: 'h-11 max-h-11',
+    md: 'h-14 max-h-14 sm:h-16 sm:max-h-16',
+    lg: 'h-20 max-h-20 sm:h-24 sm:max-h-24',
+  }[size];
+
+  if (imgError) {
+    return (
+      <div className={`flex flex-col items-center justify-center font-black tracking-tight select-none ${className}`}>
+        <div className="flex items-center gap-1 text-2xl sm:text-3xl font-black drop-shadow-md italic">
+          <span className="text-[#e5352f]">Color</span>
+          <span className="text-[#1f7fd6]">Run</span>
+          <span className="text-[#e5352f] ml-1">Shop</span>
+        </div>
+        <span className="text-[9px] uppercase tracking-widest text-[#42311f] font-bold">
+          ★ CUSTOMIZE YOUR GAME EXPERIENCE ★
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src="/assets/img/shop-logo.png"
+      alt="Color Run Shop"
+      onError={() => setImgError(true)}
+      className={`object-contain block mx-auto select-none filter drop-shadow-[0_2px_4px_rgba(0,0,0,0.25)] ${sizeStyles} ${className}`}
+      draggable={false}
+    />
+  );
+};
