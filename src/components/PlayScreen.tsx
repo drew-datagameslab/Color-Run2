@@ -750,25 +750,25 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
       {/* Top Anchored Section (Logos, Round Bar, Scorecards Strip, Toast) - Fixed in place under user bar */}
       <div className="w-full flex flex-col shrink-0">
-        {/* Logos Row - 2x larger logos, no extra back buttons, extra dice rows, or extra menu icons */}
-        <div className="flex items-center justify-between px-2 py-0.5 mb-1">
+        {/* Logos Row */}
+        <div className="flex items-center justify-between px-2 py-0 mb-0.5">
           <img
             src="/assets/img/cr-logo.png"
             alt="Color Run"
-            className="h-10 sm:h-12 object-contain drop-shadow-md select-none"
+            className="h-8 sm:h-9 object-contain drop-shadow-md select-none"
             draggable={false}
           />
           <img
             src="/assets/img/dg-logo.png"
             alt="Data Games Lab"
-            className="h-12 sm:h-14 object-contain drop-shadow-md select-none"
+            className="h-9 sm:h-10 object-contain drop-shadow-md select-none"
             draggable={false}
           />
         </div>
 
         {/* Round Indicator Bar - Target moved here and only shown before target is reached */}
         <div
-          className={`w-full py-1 px-3 rounded-full text-center font-black text-xs sm:text-sm tracking-wider uppercase shadow-md transition-colors duration-300 mb-1 flex items-center justify-center gap-2 ${
+          className={`w-full py-0.5 px-2.5 rounded-full text-center font-black text-xs tracking-wider uppercase shadow-sm transition-colors duration-300 mb-0.5 flex items-center justify-center gap-2 ${
             phase === 'elimination'
               ? 'bg-[#d62828] text-white'
               : 'bg-[#28974a] text-white'

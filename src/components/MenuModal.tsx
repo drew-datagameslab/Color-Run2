@@ -12,6 +12,8 @@ import {
   ShieldCheck,
   Trophy,
   AlertTriangle,
+  Maximize,
+  Minimize,
 } from 'lucide-react';
 import { UserAccount, ShopSettings } from '../types/game';
 import { getSoundVolume, setSoundVolume } from '../lib/audio';
@@ -54,6 +56,48 @@ export const MenuModal: React.FC<MenuModalProps> = ({
   onToast,
 }) => {
   const [showLeaveWarning, setShowLeaveWarning] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(() => {
+    return typeof document !== 'undefined' && Boolean(document.fullscreenElement);
+  });
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    document.addEventListener('webkitfullscreenchange', handleFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFsChange);
+      document.removeEventListener('webkitfullscreenchange', handleFsChange);
+    };
+  }, []);
+
+  const handleToggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        const docEl = document.documentElement as any;
+        if (docEl.requestFullscreen) {
+          await docEl.requestFullscreen();
+        } else if (docEl.webkitRequestFullscreen) {
+          await docEl.webkitRequestFullscreen();
+        } else if (docEl.msRequestFullscreen) {
+          await docEl.msRequestFullscreen();
+        }
+      } else {
+        const doc = document as any;
+        if (doc.exitFullscreen) {
+          await doc.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          await doc.webkitExitFullscreen();
+        } else if (doc.msExitFullscreen) {
+          await doc.msExitFullscreen();
+        }
+      }
+    } catch (err) {
+      console.warn('Fullscreen request failed:', err);
+      onToast('Fullscreen mode not permitted in this browser preview.');
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -255,6 +299,34 @@ export const MenuModal: React.FC<MenuModalProps> = ({
           >
             <ClipboardList className="w-4 h-4 text-[#1f7fd6]" />
             <span>Companion Scoreboard</span>
+          </button>
+
+          {/* Full Screen Toggle */}
+          <button
+            onClick={handleToggleFullscreen}
+            className="w-full py-2 px-3 bg-white hover:bg-[#f5ebd2] text-[#4a3622] rounded-xl font-bold text-xs flex items-center gap-2.5 border border-[#d8c89f] active:scale-98 transition-all cursor-pointer"
+          >
+            {isFullscreen ? (
+              <>
+                <Minimize className="w-4 h-4 text-[#1f7fd6]" />
+                <div className="flex flex-col text-left">
+                  <span>Exit Full Screen</span>
+                  <span className="text-[10px] text-[#785b3f] font-normal">
+                    Return to standard display
+                  </span>
+                </div>
+              </>
+            ) : (
+              <>
+                <Maximize className="w-4 h-4 text-[#1f7fd6]" />
+                <div className="flex flex-col text-left">
+                  <span>Go Full Screen</span>
+                  <span className="text-[10px] text-[#785b3f] font-normal">
+                    Maximize game across display
+                  </span>
+                </div>
+              </>
+            )}
           </button>
 
           {/* Audio Quick Bar */}

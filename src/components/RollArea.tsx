@@ -36,73 +36,85 @@ export const RollArea: React.FC<RollAreaProps> = ({
 
   // Layout sizing:
   // - Roll 1: 12 dice (2 rows of 6)
-  // - Roll 2/3 with 4 saved (8 remaining): 2 rows of 4
-  // - Roll 2/3 with 6 or less remaining: 1 row of dice, container shrinks in height
-  const isSingleRow = rollsUsed > 0 && slotsCount <= 6;
-  const isFourCols = !isSingleRow && slotsCount <= 8;
-  const totalSlots = isSingleRow ? Math.max(slotsCount, 1) : isFourCols ? 8 : 12;
+  // - If 6 dice or less are left in the rolling area, shift to one row of dice to allow more room for saved dice
+  const isSingleRow = rollsUsed > 0 && activeDice.length <= 6;
+  const isFourCols = !isSingleRow && (slotsCount <= 8 || activeDice.length <= 8);
+  const totalSlots = isSingleRow ? Math.max(activeDice.length, 1) : isFourCols ? 8 : 12;
 
   const slots = Array.from({ length: totalSlots }, (_, i) => i);
 
   return (
     <div
       className={`relative w-full rounded-2xl bg-[#144b26] border border-[#2f9a4f]/70 p-1 sm:p-1.5 shadow-xl flex flex-col justify-center transition-all duration-200 ${
-        isSingleRow ? 'min-h-[58px] sm:min-h-[66px] py-1.5' : 'min-h-[106px] sm:min-h-[118px] py-1.5'
+        isSingleRow ? 'min-h-[48px] sm:min-h-[54px] py-1' : 'min-h-[86px] sm:min-h-[96px] py-1'
       }`}
     >
-      {/* Dice Grid/Row - 1.25x larger default dice with responsive width shrinking */}
+      {/* Dice Grid/Row - Default dice size reduced by 20% with responsive shrink */}
       <div
         className={
           isSingleRow
-            ? 'flex justify-center items-center gap-1.5 sm:gap-2 max-w-[350px] sm:max-w-[390px] mx-auto w-full px-1.5'
+            ? 'flex justify-center items-center gap-1 sm:gap-1.5 max-w-[320px] sm:max-w-[360px] mx-auto w-full px-1'
             : isFourCols
-            ? 'grid grid-cols-4 gap-1.5 sm:gap-2 max-w-[250px] sm:max-w-[280px] mx-auto w-full px-1.5 justify-items-center'
-            : 'grid grid-cols-6 gap-1.5 sm:gap-2 max-w-[350px] sm:max-w-[390px] mx-auto w-full px-1.5 justify-items-center'
+            ? 'grid grid-cols-4 gap-1 sm:gap-1.5 max-w-[220px] sm:max-w-[250px] mx-auto w-full px-1 justify-items-center'
+            : 'grid grid-cols-6 gap-1 sm:gap-1.5 max-w-[320px] sm:max-w-[360px] mx-auto w-full px-1 justify-items-center'
         }
       >
-        {slots.map(slotIdx => {
-          const die =
-            activeDice.find(d => d.slotIndex === slotIdx) ||
-            (activeDice[slotIdx] && activeDice[slotIdx].slotIndex === undefined
-              ? activeDice[slotIdx]
-              : undefined);
+        {isSingleRow ? (
+          // In single row mode: display the remaining 1-6 dice directly centered in one row
+          activeDice.map(die => (
+            <div
+              key={die.id}
+              className="w-8 h-8 sm:w-9 sm:h-9 max-w-[38px] max-h-[38px] flex-shrink-0 aspect-square"
+            >
+              <DieComponent
+                color={die.color}
+                value={die.value}
+                rolling={isRolling}
+                selected={die.selected}
+                delayMs={0}
+                onClick={
+                  isCPU || rollsUsed === 0 ? undefined : () => onTapActiveDie(die.id)
+                }
+              />
+            </div>
+          ))
+        ) : (
+          slots.map(slotIdx => {
+            const die =
+              activeDice.find(d => d.slotIndex === slotIdx) ||
+              (activeDice[slotIdx] && activeDice[slotIdx].slotIndex === undefined
+                ? activeDice[slotIdx]
+                : undefined);
 
-          if (die) {
+            if (die) {
+              return (
+                <div
+                  key={die.id}
+                  className="w-full max-w-[38px] sm:max-w-[42px] max-h-[38px] sm:max-h-[42px] min-w-0 aspect-square"
+                >
+                  <DieComponent
+                    color={die.color}
+                    value={die.value}
+                    rolling={isRolling}
+                    selected={die.selected}
+                    delayMs={0}
+                    onClick={
+                      isCPU || rollsUsed === 0 ? undefined : () => onTapActiveDie(die.id)
+                    }
+                  />
+                </div>
+              );
+            }
+
+            // Blank space where die was moved to Saved Area
             return (
               <div
-                key={die.id}
-                className={
-                  isSingleRow
-                    ? 'w-9 h-9 sm:w-10 sm:h-10 max-w-[50px] max-h-[50px] flex-shrink-1 min-w-0'
-                    : 'w-full max-w-[50px] sm:max-w-[55px] min-w-0 aspect-square'
-                }
-              >
-                <DieComponent
-                  color={die.color}
-                  value={die.value}
-                  rolling={isRolling}
-                  selected={die.selected}
-                  delayMs={0}
-                  onClick={
-                    isCPU || rollsUsed === 0 ? undefined : () => onTapActiveDie(die.id)
-                  }
-                />
-              </div>
+                key={`slot-empty-${slotIdx}`}
+                className="aspect-square rounded-[16%] border border-dashed border-[#2f9a4f]/30 bg-black/15 pointer-events-none transition-all w-full max-w-[38px] sm:max-w-[42px] max-h-[38px] sm:max-h-[42px] min-w-0"
+              />
             );
-          }
-
-          // Blank space where die was moved to Saved Area
-          return (
-            <div
-              key={`slot-empty-${slotIdx}`}
-              className={`aspect-square rounded-[16%] border border-dashed border-[#2f9a4f]/30 bg-black/15 pointer-events-none transition-all ${
-                isSingleRow
-                  ? 'w-9 h-9 sm:w-10 sm:h-10 max-w-[50px] max-h-[50px] flex-shrink-1 min-w-0'
-                  : 'w-full max-w-[50px] sm:max-w-[55px] min-w-0'
-              }`}
-            />
-          );
-        })}
+          })
+        )}
       </div>
 
       {/* Start Turn Overlay Hint - High-visibility alert that the user needs to roll */}
