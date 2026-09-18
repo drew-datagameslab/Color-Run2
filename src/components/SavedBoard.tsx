@@ -60,6 +60,53 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
       ? 'gap-1'
       : 'gap-1 sm:gap-1.5';
 
+  // Helper to partition dice across 2 rows keeping same-colored dice on the same line
+  const splitDiceByColor = (diceList: Die[]): [Die[], Die[]] => {
+    const colorMap = new Map<string, Die[]>();
+    for (const d of diceList) {
+      const list = colorMap.get(d.color) || [];
+      list.push(d);
+      colorMap.set(d.color, list);
+    }
+
+    // Sort color groups descending by count so the larger color group appears on row 1
+    const groups = Array.from(colorMap.values()).sort((a, b) => b.length - a.length);
+
+    // Single color scenario
+    if (groups.length === 1) {
+      const single = groups[0];
+      return [single.slice(0, 6), single.slice(6)];
+    }
+
+    // Standard two-color scenario (e.g. Blue & Red in Color Run)
+    if (groups.length === 2) {
+      const [g1, g2] = groups;
+      if (g1.length <= 6 && g2.length <= 6) {
+        return [g1, g2];
+      }
+      if (g1.length > 6) {
+        return [g1.slice(0, 6), [...g1.slice(6), ...g2]];
+      }
+      return [[...g1, ...g2.slice(6)], g2.slice(0, 6)];
+    }
+
+    // 3+ colors: keep each color group whole within row 1 (max 6) or row 2 (max 6)
+    let row1: Die[] = [];
+    let row2: Die[] = [];
+    for (const g of groups) {
+      if (row1.length + g.length <= 6) {
+        row1 = [...row1, ...g];
+      } else if (row2.length + g.length <= 6) {
+        row2 = [...row2, ...g];
+      } else {
+        const space1 = Math.max(0, 6 - row1.length);
+        row1 = [...row1, ...g.slice(0, space1)];
+        row2 = [...row2, ...g.slice(space1)];
+      }
+    }
+    return [row1, row2];
+  };
+
   // Helper to render a row of dice with bonus groups (gold frame for 3+ consecutive same color)
   const renderDiceRow = (
     diceList: Die[],
@@ -189,15 +236,21 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
           </div>
         ) : (
           sets.map(set => {
-            const matchingDice = savedDice.filter(d => d.value === set.value);
+            const matchingDice = savedDice
+              .filter(d => d.value === set.value)
+              .sort((a, b) => {
+                if (a.color !== b.color) {
+                  return a.color.localeCompare(b.color);
+                }
+                return a.id - b.id;
+              });
             const pts = set.base + set.cb;
             const count = matchingDice.length;
 
             if (count >= 8) {
-              // 8 or more dice of same symbol: broken into 2 rows.
+              // 8 or more dice of same symbol: broken into 2 rows, keeping same-colored dice on the same line.
               // Points box is the height of the two rows with points total centered!
-              const row1Dice = matchingDice.slice(0, 6);
-              const row2Dice = matchingDice.slice(6);
+              const [row1Dice, row2Dice] = splitDiceByColor(matchingDice);
 
               return (
                 <div
