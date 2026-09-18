@@ -35,11 +35,10 @@ export const RollArea: React.FC<RollAreaProps> = ({
   const slotsCount = rollSlotsCount ?? (rollsUsed === 0 ? 12 : activeDice.length);
 
   // Layout sizing:
-  // - Roll 1: 12 dice (2 rows of 6)
-  // - If 6 dice or less are left in the rolling area, shift to one row of dice to allow more room for saved dice
+  // - Roll 1 or when more than 6 dice remain: 2 rows of 6 dice (12 slots in grid-cols-6)
+  // - When 6 dice or fewer remain after a roll: 1 row of dice
   const isSingleRow = rollsUsed > 0 && activeDice.length <= 6;
-  const isFourCols = !isSingleRow && (slotsCount <= 8 || activeDice.length <= 8);
-  const totalSlots = isSingleRow ? Math.max(activeDice.length, 1) : isFourCols ? 8 : 12;
+  const totalSlots = isSingleRow ? Math.max(activeDice.length, 1) : 12;
 
   const slots = Array.from({ length: totalSlots }, (_, i) => i);
 
@@ -49,13 +48,11 @@ export const RollArea: React.FC<RollAreaProps> = ({
         isSingleRow ? 'min-h-[64px] sm:min-h-[72px] py-1' : 'min-h-[124px] sm:min-h-[138px] py-1.5'
       }`}
     >
-      {/* Dice Grid/Row - Maximized to fit 6 in a row */}
+      {/* Dice Grid/Row - strictly 1 row of up to 6 dice or 2 rows of 6 dice */}
       <div
         className={
           isSingleRow
             ? 'flex justify-center items-center gap-1.5 sm:gap-2 max-w-full mx-auto w-full px-1'
-            : isFourCols
-            ? 'grid grid-cols-4 gap-1.5 sm:gap-2 max-w-[290px] sm:max-w-[340px] mx-auto w-full px-1 justify-items-center'
             : 'grid grid-cols-6 gap-1 sm:gap-1.5 max-w-full mx-auto w-full px-1 justify-items-center'
         }
       >

@@ -104,21 +104,21 @@ export const CardsStrip: React.FC<CardsStripProps> = ({
                 </div>
               )}
 
-              {/* Round History Rows (Last 4 Rolls) - Line padding increased by 6px */}
-              <div className="w-full flex flex-col gap-0.5 mt-0.5 pt-0.5 border-t border-white/20 text-[8.5px] sm:text-[9.5px] font-mono leading-tight">
+              {/* Round History Rows (Last 4 Rolls) - Spacing reduced to 1.25 */}
+              <div className="w-full flex flex-col gap-0 mt-0.5 pt-0.5 border-t border-white/20 text-[8.5px] sm:text-[9.5px] font-mono leading-[1.25]">
                 {rows.map(r => {
                   const rScore = unit.history[r];
                   return (
                     <div
                       key={r}
-                      className={`flex justify-between items-center px-1 py-[3px] rounded ${
+                      className={`flex justify-between items-center px-1 py-[1px] rounded leading-[1.25] ${
                         r === currentRound && unit.active
                           ? 'bg-black/25 font-black text-[#f2c14e]'
                           : 'text-white/85'
                       }`}
                     >
-                      <span className="opacity-80">{r}</span>
-                      <span className="font-bold">
+                      <span className="opacity-80 leading-[1.25]">{r}</span>
+                      <span className="font-bold leading-[1.25]">
                         {rScore !== undefined ? rScore : '—'}
                       </span>
                     </div>

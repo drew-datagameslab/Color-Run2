@@ -752,18 +752,18 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
       {/* Top Anchored Section (Logos, Round Bar, Scorecards Strip, Toast) - Fixed in place under user bar */}
       <div className="w-full flex flex-col shrink-0">
-        {/* Logos Row (75% larger) */}
+        {/* Logos Row (reduced by 15%) */}
         <div className="flex items-center justify-between px-2 py-0 mb-0.5">
           <img
             src="/assets/img/cr-logo.png"
             alt="Color Run"
-            className="h-[78px] sm:h-[88px] object-contain drop-shadow-md select-none"
+            className="h-[66px] sm:h-[75px] object-contain drop-shadow-md select-none"
             draggable={false}
           />
           <img
             src="/assets/img/dg-logo.png"
             alt="Data Games Lab"
-            className="h-[88px] sm:h-[98px] object-contain drop-shadow-md select-none"
+            className="h-[75px] sm:h-[83px] object-contain drop-shadow-md select-none"
             draggable={false}
           />
         </div>
