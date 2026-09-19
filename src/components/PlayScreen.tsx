@@ -169,7 +169,8 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const isCPU = curUnit ? (curUnit.isCPU || isAutoPilotTurn) : false;
 
   const humanUnits = units.filter(u => !u.isCPU && (u.isOwner || u.isOnlinePlayer));
-  const turnAuthorityUid = humanUnits.length > 0 ? (humanUnits[0].uid || user.uid) : user.uid;
+  const sortedHumanUids = humanUnits.map(u => u.uid).filter(Boolean).sort() as string[];
+  const turnAuthorityUid = sortedHumanUids.length > 0 ? sortedHumanUids[0] : (humanUnits[0]?.uid || user.uid);
   const isTurnAuthority = settings.mode !== 'online' || user.uid === turnAuthorityUid;
 
   // Timers are added to keep the games moving when additional Users are in the room.
@@ -346,40 +347,41 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       playWarning5sSound();
     }
 
-    if (turnSecondsLeft <= 0) {
+    if (isHumanOwner && turnSecondsLeft <= 0) {
       stopWarningSound();
-      if (isHumanOwner) {
-        // Local human user ran out of time - mark as stepped away / autopilot
-        setConsecutiveAfkTurns(prev => {
-          const next = prev + 1;
-          if (next >= 1) {
-            setIsAfkOverlay(true);
-            setIsAutoPilotTurn(true);
-          }
-          return next;
-        });
-        // User time ran out - auto-roll or score
-        const active = dice.filter(d => d.zone === 'active');
-        if (rollsUsed < 3 && (rollsUsed === 0 || active.length > 0)) {
-          doRollRef.current();
-        } else {
-          bankTurnRef.current();
+      setConsecutiveAfkTurns(prev => {
+        const next = prev + 1;
+        if (next >= 1) {
+          setIsAfkOverlay(true);
+          setIsAutoPilotTurn(true);
         }
-      } else if (isRemoteHuman && isTurnAuthority) {
-        // Remote human ran out of time! Turn authority marks them stepped away and executes turn
-        showToast(`${curUnit?.name} ran out of time. Computer has taken over.`);
-        if (settings.roomId && curUnit?.uid) {
-          markPlayerLeft(settings.roomId, curUnit.uid);
-        }
-        setUnits(prev =>
-          prev.map(u => (u.id === curUnit?.id ? { ...u, isCPU: true, isOnlinePlayer: false } : u))
-        );
-        const active = dice.filter(d => d.zone === 'active');
-        if (rollsUsed < 3 && (rollsUsed === 0 || active.length > 0)) {
-          doRollRef.current();
-        } else {
-          bankTurnRef.current();
-        }
+        return next;
+      });
+      // User time ran out - auto-roll or score
+      const active = dice.filter(d => d.zone === 'active');
+      if (rollsUsed < 3 && (rollsUsed === 0 || active.length > 0)) {
+        doRollRef.current();
+      } else {
+        bankTurnRef.current();
+      }
+      return;
+    }
+
+    if (isRemoteHuman && isTurnAuthority && turnSecondsLeft <= -4) {
+      stopWarningSound();
+      // Remote human ran out of time after 4s grace window! Turn authority marks them stepped away and executes turn
+      showToast(`${curUnit?.name} ran out of time. Computer has taken over.`);
+      if (settings.roomId && curUnit?.uid) {
+        markPlayerLeft(settings.roomId, curUnit.uid);
+      }
+      setUnits(prev =>
+        prev.map(u => (u.id === curUnit?.id ? { ...u, isCPU: true, isOnlinePlayer: false } : u))
+      );
+      const active = dice.filter(d => d.zone === 'active');
+      if (rollsUsed < 3 && (rollsUsed === 0 || active.length > 0)) {
+        doRollRef.current();
+      } else {
+        bankTurnRef.current();
       }
       return;
     }
@@ -445,6 +447,8 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const doRoll = () => {
     stopWarningSound();
     if (rollsUsed >= 3 || isRolling) return;
+    if (!isHumanOwner && !(isCPU && isTurnAuthority)) return;
+    if (joiningCountdown !== null && joiningCountdown > 0) return;
     const active = dice.filter(d => d.zone === 'active');
     if (rollsUsed > 0 && active.length === 0) {
       showToast('All dice saved — Score it!');
@@ -541,7 +545,8 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   // Tapping active die: moves matching set to saved area.
   // Stops warning sound immediately, resets timer, and leaves original slot space blank in rolling area!
   const handleTapActive = (id: number) => {
-    if (isCPU || rollsUsed === 0 || isRolling) return;
+    if (!isHumanOwner || isCPU || rollsUsed === 0 || isRolling) return;
+    if (joiningCountdown !== null && joiningCountdown > 0) return;
 
     // Stop warning sound immediately and reset turn timer when user moves dice!
     stopWarningSound();
@@ -595,7 +600,8 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
   // Tapping saved die sends it back to active area into a vacant slot. Resets timer & stops warning sound!
   const handleTapSaved = (id: number) => {
-    if (isCPU || isRolling) return;
+    if (!isHumanOwner || isCPU || isRolling) return;
+    if (joiningCountdown !== null && joiningCountdown > 0) return;
 
     // Stop warning sound immediately and reset turn timer when user moves dice!
     stopWarningSound();
@@ -660,6 +666,8 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const bankTurn = useCallback(() => {
     stopWarningSound();
     if (!curUnit) return;
+    if (!isHumanOwner && !(isCPU && isTurnAuthority)) return;
+    if (joiningCountdown !== null && joiningCountdown > 0) return;
 
     // Automatically commit any full sets remaining in active dice before banking
     let curDice = [...dice];
@@ -1171,6 +1179,9 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             rollsUsed={rollsUsed}
             rollSlotsCount={rollSlotsCount}
             isCPU={isCPU}
+            isHumanOwner={isHumanOwner}
+            isRemoteHuman={isRemoteHuman}
+            joiningCountdown={joiningCountdown}
             playerName={curUnit?.name || 'Player'}
             isRolling={isRolling}
             onTapActiveDie={handleTapActive}

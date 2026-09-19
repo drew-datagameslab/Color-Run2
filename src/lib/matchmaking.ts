@@ -5,6 +5,7 @@ import {
   getDoc,
   setDoc,
   updateDoc,
+  runTransaction,
   query,
   where,
   onSnapshot,
@@ -123,13 +124,30 @@ export async function findOrCreateRoom(
     );
 
     const snapshot = await getDocs(q);
-    const candidateRooms: GameRoom[] = [];
 
+    // 1a. If user is ALREADY waiting in an active room for this gameKey (< 15s elapsed), reuse it!
+    for (const docSnap of snapshot.docs) {
+      const data = docSnap.data() as GameRoom;
+      const elapsed = now - data.createdAt;
+      if (elapsed >= 0 && elapsed < 15000 && data.status === 'waiting') {
+        if (data.players && data.players.some(p => p.uid === user.uid)) {
+          return { room: { ...data, id: docSnap.id }, isNew: false };
+        }
+      }
+    }
+
+    // 1b. Look for open candidate rooms created within the 14s entry window with space available
+    const candidateRooms: Array<GameRoom & { id: string }> = [];
     snapshot.forEach(docSnap => {
       const data = docSnap.data() as GameRoom;
-      // Must be within 12 seconds of creation and have spots available
       const elapsed = now - data.createdAt;
-      if (elapsed >= 0 && elapsed < 12000 && data.players.length < playerCount) {
+      if (
+        elapsed >= 0 &&
+        elapsed < 14000 &&
+        data.status === 'waiting' &&
+        data.players &&
+        data.players.length < playerCount
+      ) {
         candidateRooms.push({ ...data, id: docSnap.id });
       }
     });
@@ -137,40 +155,43 @@ export async function findOrCreateRoom(
     // Sort by earliest created first (FIFO room filling)
     candidateRooms.sort((a, b) => a.createdAt - b.createdAt);
 
-    if (candidateRooms.length > 0) {
-      const targetRoom = candidateRooms[0];
+    // Try joining candidate rooms atomically via transaction
+    for (const targetRoom of candidateRooms) {
       const roomRef = doc(db, 'rooms', targetRoom.id);
-
-      // Check if user already in room
-      const alreadyJoined = targetRoom.players.some(p => p.uid === user.uid);
-      if (alreadyJoined) {
-        return { room: targetRoom, isNew: false };
-      }
-
-      // Add user to the existing room
-      const updatedPlayers = [...targetRoom.players, currentPlayer];
-      const updatedRoom: GameRoom = {
-        ...targetRoom,
-        players: updatedPlayers,
-        updatedAt: now,
-      };
-
       try {
-        await updateDoc(roomRef, {
-          players: updatedPlayers,
-          updatedAt: now,
-        });
-      } catch {
-        await setDoc(roomRef, updatedRoom, { merge: true });
-      }
+        const joinedRoom = await runTransaction(db, async transaction => {
+          const roomDoc = await transaction.get(roomRef);
+          if (!roomDoc.exists()) throw new Error('Room does not exist');
+          const roomData = roomDoc.data() as GameRoom;
+          if (roomData.status !== 'waiting') throw new Error('Room is no longer waiting');
+          const elapsed = Date.now() - roomData.createdAt;
+          if (elapsed >= 15000) throw new Error('Room entry window expired');
+          if (roomData.players && roomData.players.length >= playerCount) {
+            throw new Error('Room is full');
+          }
 
-      return { room: updatedRoom, isNew: false };
+          const currentPlayers = roomData.players || [];
+          const alreadyIn = currentPlayers.some(p => p.uid === user.uid);
+          const updatedPlayers = alreadyIn ? currentPlayers : [...currentPlayers, currentPlayer];
+
+          transaction.update(roomRef, {
+            players: updatedPlayers,
+            updatedAt: Date.now(),
+          });
+
+          return { ...roomData, id: targetRoom.id, players: updatedPlayers };
+        });
+
+        return { room: joinedRoom, isNew: false };
+      } catch (err) {
+        console.warn('Could not join candidate room via transaction, trying next:', err);
+      }
     }
   } catch (err) {
     console.warn('Matchmaking lookup warning (falling back to new room):', err);
   }
 
-  // 2. No open room with time and space available — create a new room!
+  // 2. No open room with time and space available — create a brand-new room!
   const newRoomId = `room_${now}_${Math.random().toString(36).substring(2, 7)}`;
   const newRoom: GameRoom = {
     id: newRoomId,

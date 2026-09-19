@@ -7,6 +7,9 @@ interface RollAreaProps {
   rollsUsed: number;
   rollSlotsCount?: number;
   isCPU: boolean;
+  isHumanOwner?: boolean;
+  isRemoteHuman?: boolean;
+  joiningCountdown?: number | null;
   playerName: string;
   isRolling: boolean;
   onTapActiveDie: (id: number) => void;
@@ -25,6 +28,9 @@ export const RollArea: React.FC<RollAreaProps> = ({
   rollsUsed,
   rollSlotsCount,
   isCPU,
+  isHumanOwner = false,
+  isRemoteHuman = false,
+  joiningCountdown = null,
   playerName,
   isRolling,
   onTapActiveDie,
@@ -70,7 +76,7 @@ export const RollArea: React.FC<RollAreaProps> = ({
                 selected={die.selected}
                 delayMs={0}
                 onClick={
-                  isCPU || rollsUsed === 0 ? undefined : () => onTapActiveDie(die.id)
+                  isHumanOwner && rollsUsed > 0 && !isRolling ? () => onTapActiveDie(die.id) : undefined
                 }
               />
             </div>
@@ -96,7 +102,7 @@ export const RollArea: React.FC<RollAreaProps> = ({
                     selected={die.selected}
                     delayMs={0}
                     onClick={
-                      isCPU || rollsUsed === 0 ? undefined : () => onTapActiveDie(die.id)
+                      isHumanOwner && rollsUsed > 0 && !isRolling ? () => onTapActiveDie(die.id) : undefined
                     }
                   />
                 </div>
@@ -117,15 +123,27 @@ export const RollArea: React.FC<RollAreaProps> = ({
       {/* Start Turn Overlay Hint - High-visibility alert that the user needs to roll */}
       {rollsUsed === 0 && (
         <div
-          onClick={isCPU ? undefined : onDoRoll}
-          className={`absolute inset-0 rounded-2xl bg-[#144628]/90 flex flex-col items-center justify-center p-3 text-center cursor-pointer transition-all z-10 
-            ${!isCPU ? 'hover:bg-[#144628]/80 ring-2 ring-[#f2c14e] ring-inset animate-pulse' : ''}`}
+          onClick={isHumanOwner && (joiningCountdown === null || joiningCountdown <= 0) ? onDoRoll : undefined}
+          className={`absolute inset-0 rounded-2xl bg-[#144628]/90 flex flex-col items-center justify-center p-3 text-center transition-all z-10 
+            ${isHumanOwner && (joiningCountdown === null || joiningCountdown <= 0) ? 'cursor-pointer hover:bg-[#144628]/80 ring-2 ring-[#f2c14e] ring-inset animate-pulse' : 'pointer-events-none select-none'}`}
         >
           <div className="text-lg sm:text-xl font-black text-[#f2c14e] drop-shadow-md">
-            {isCPU ? `🤖 ${playerName} is ready` : '👉 Your Turn! Tap ROLL'}
+            {joiningCountdown !== null && joiningCountdown > 0
+              ? `⏳ Waiting for all players… (${joiningCountdown}s)`
+              : isHumanOwner
+              ? '👉 Your Turn! Tap ROLL'
+              : isRemoteHuman
+              ? `⏳ ${playerName}'s Turn`
+              : `🤖 ${playerName} is ready`}
           </div>
           <div className="text-xs text-white/95 mt-0.5 font-bold">
-            {isCPU ? 'Computer will roll…' : `${playerName} · Tap to roll all 12 dice`}
+            {joiningCountdown !== null && joiningCountdown > 0
+              ? 'Round 1 begins when countdown completes'
+              : isHumanOwner
+              ? `${playerName} · Tap to roll all 12 dice`
+              : isRemoteHuman
+              ? `Waiting for ${playerName} to roll…`
+              : 'Computer will roll…'}
           </div>
         </div>
       )}

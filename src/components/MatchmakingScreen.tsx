@@ -44,6 +44,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   roomRef.current = room;
 
   const matchLaunchedRef = useRef(false);
+  const initRanRef = useRef(false);
 
   const launchMatchWithSlots = (slots: GameSettings['slots'], roomId: string) => {
     if (matchLaunchedRef.current) return;
@@ -80,6 +81,9 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
 
   // 1. Enter or create the multiplayer room for this game version
   useEffect(() => {
+    if (initRanRef.current) return;
+    initRanRef.current = true;
+
     let unsubscribe: (() => void) | undefined;
     let isCancelled = false;
 
@@ -198,13 +202,10 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
       const bots = generateBots(neededBots, humanPlayers.length);
       const combined = [...humanPlayers, ...bots];
 
-      const finalSlots: GameSettings['slots'] = combined.slice(0, playerCount).map(p => {
-        const isCurrentLocalUser = p.uid === user.uid;
+      const canonicalSlots: GameSettings['slots'] = combined.slice(0, playerCount).map(p => {
         return {
           name: p.name,
           type: p.type,
-          isOnlinePlayer: p.type === 'human' && !isCurrentLocalUser,
-          isOwner: isCurrentLocalUser,
           color: p.color,
           image: p.image,
           diceColors: p.diceColors || ['blue', 'red'],
@@ -212,11 +213,11 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
         };
       });
 
-      if (isAuthority && curRoom.id) {
-        finalizeAndStartRoom(curRoom.id, finalSlots);
+      if (curRoom.id) {
+        finalizeAndStartRoom(curRoom.id, canonicalSlots);
       }
 
-      launchMatchWithSlots(finalSlots, curRoom.id);
+      launchMatchWithSlots(canonicalSlots, curRoom.id);
       return;
     }
 
