@@ -722,7 +722,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   };
 
   return (
-    <div className="w-full max-w-lg mx-auto flex flex-col h-full max-h-[100dvh] p-1 sm:p-2 select-none relative overflow-hidden">
+    <div className="w-full max-w-lg md:max-w-2xl mx-auto flex flex-col h-full max-h-[100dvh] p-1 sm:p-2 md:p-3 select-none relative overflow-hidden">
       {/* AFK Grey Overlay if user stepped away */}
       {isAfkOverlay && (
         <div
@@ -846,7 +846,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       <div
         onTouchStart={() => stopWarningSound()}
         onMouseDown={() => stopWarningSound()}
-        className="flex-1 flex flex-col justify-between min-h-0 py-0.5 gap-1 overflow-hidden"
+        className="flex-1 flex flex-col justify-between min-h-0 py-0.5 md:py-2 gap-1 md:gap-3 overflow-hidden"
       >
         {/* Saved Dice Board - MAIN FLEX POINT: grows and shrinks as needed */}
         <div className="flex-1 min-h-0 flex flex-col justify-center transition-all duration-300">
@@ -887,14 +887,14 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         </div>
       </div>
 
-      {/* Bottom Controls Area (Fixed at bottom) */}
-      <div className="shrink-0 flex flex-col gap-0.5">
+      {/* Bottom Controls Area (Fixed at bottom - with extra padding on tablet to reveal more background) */}
+      <div className="shrink-0 flex flex-col gap-0.5 md:gap-2 md:pt-4 md:pb-2">
         {/* Action Buttons: ROLL, SCORE IT!, and INFO */}
-        <div className="flex gap-1.5">
+        <div className="flex gap-1.5 md:gap-3 md:py-1">
           <button
             onClick={doRoll}
             disabled={!canRoll}
-            className={`flex-1 py-1.5 sm:py-2 px-2 bg-[#28974a] hover:bg-[#22803e] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-1 border-b-2 border-[#185e2e] ${
+            className={`flex-1 py-1.5 sm:py-2 md:py-3.5 px-2 md:px-4 bg-[#28974a] hover:bg-[#22803e] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm md:text-base rounded-xl md:rounded-2xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-1 md:gap-2 border-b-2 md:border-b-3 border-[#185e2e] ${
               isTimeRunningOut
                 ? 'ring-4 ring-yellow-400 ring-offset-2 ring-offset-black/50 animate-pulse bg-red-700 hover:bg-red-800'
                 : rollsUsed === 0 && isHumanOwner && !isCPU
@@ -904,12 +904,12 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           >
             <span>{rollsUsed === 0 ? '🎲 ROLL' : 'Rolls'}</span>
             {rollsUsed > 0 && (
-              <span className="text-[11px] font-mono font-normal opacity-90">
+              <span className="text-[11px] md:text-xs font-mono font-normal opacity-90">
                 - {Math.max(0, 3 - rollsUsed)} left
               </span>
             )}
             {isTimeRunningOut && (
-              <span className="ml-1 bg-yellow-400 text-black text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full animate-bounce">
+              <span className="ml-1 bg-yellow-400 text-black text-[10px] md:text-xs font-mono font-black px-1.5 py-0.2 rounded-full animate-bounce">
                 ⚠️ {turnSecondsLeft}s!
               </span>
             )}
@@ -918,11 +918,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           <button
             onClick={bankTurn}
             disabled={!canScore}
-            className="flex-1 py-1.5 sm:py-2 px-2 bg-[#e58a1f] hover:bg-[#cb7512] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center justify-center gap-1 border-b-2 border-[#a65d0a]"
+            className="flex-1 py-1.5 sm:py-2 md:py-3.5 px-2 md:px-4 bg-[#e58a1f] hover:bg-[#cb7512] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm md:text-base rounded-xl md:rounded-2xl shadow-md transition-transform active:scale-98 flex items-center justify-center gap-1 md:gap-2 border-b-2 md:border-b-3 border-[#a65d0a]"
           >
             <span>Score it!</span>
             {rollsUsed > 0 && (
-              <span className="text-[11px] font-mono font-normal opacity-90">
+              <span className="text-[11px] md:text-xs font-mono font-normal opacity-90">
                 - {scoreResult.total} pts
               </span>
             )}
@@ -930,7 +930,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
           <button
             onClick={() => setShowInfoModal(true)}
-            className="py-1.5 sm:py-2 px-3 bg-[#e8dec0] hover:bg-[#ded1af] text-[#3e2e1e] font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center justify-center border-b-2 border-[#c8bc9a]"
+            className="py-1.5 sm:py-2 md:py-3.5 px-3 md:px-5 bg-[#e8dec0] hover:bg-[#ded1af] text-[#3e2e1e] font-black text-xs sm:text-sm md:text-base rounded-xl md:rounded-2xl shadow-md transition-transform active:scale-98 flex items-center justify-center border-b-2 md:border-b-3 border-[#c8bc9a]"
             title="Game Rules & Scoring Info"
           >
             INFO

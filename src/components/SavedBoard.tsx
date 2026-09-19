@@ -34,31 +34,32 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
 
   // Default dice size: slightly smaller than rolling area to account for points total boxes
   // Scales down progressively as more rows are added so dice never overlap
+  // On tablets (md:), dice are significantly larger to eliminate wasted space while keeping room for 4 rows
   const defaultDieSizeClass =
     visualRowCount >= 4
-      ? 'max-w-[25px] max-h-[25px] sm:max-w-[28px] sm:max-h-[28px]'
+      ? 'max-w-[25px] max-h-[25px] sm:max-w-[28px] sm:max-h-[28px] md:max-w-[48px] md:max-h-[48px]'
       : visualRowCount === 3
-      ? 'max-w-[31px] max-h-[31px] sm:max-w-[35px] sm:max-h-[35px]'
+      ? 'max-w-[31px] max-h-[31px] sm:max-w-[35px] sm:max-h-[35px] md:max-w-[54px] md:max-h-[54px]'
       : visualRowCount === 2
-      ? 'max-w-[38px] max-h-[38px] sm:max-w-[42px] sm:max-h-[42px]'
-      : 'max-w-[45px] max-h-[45px] sm:max-w-[49px] sm:max-h-[49px]';
+      ? 'max-w-[38px] max-h-[38px] sm:max-w-[42px] sm:max-h-[42px] md:max-w-[60px] md:max-h-[60px]'
+      : 'max-w-[45px] max-h-[45px] sm:max-w-[49px] sm:max-h-[49px] md:max-w-[64px] md:max-h-[64px]';
 
   // If 7 dice of the same shape are collected, shrink as needed to fit the 7 dice and points total
   const shrunkSevenDieSizeClass =
     visualRowCount >= 4
-      ? 'max-w-[21px] max-h-[21px] sm:max-w-[24px] sm:max-h-[24px]'
+      ? 'max-w-[21px] max-h-[21px] sm:max-w-[24px] sm:max-h-[24px] md:max-w-[42px] md:max-h-[42px]'
       : visualRowCount === 3
-      ? 'max-w-[26px] max-h-[26px] sm:max-w-[30px] sm:max-h-[30px]'
+      ? 'max-w-[26px] max-h-[26px] sm:max-w-[30px] sm:max-h-[30px] md:max-w-[46px] md:max-h-[46px]'
       : visualRowCount === 2
-      ? 'max-w-[32px] max-h-[32px] sm:max-w-[36px] sm:max-h-[36px]'
-      : 'max-w-[38px] max-h-[38px] sm:max-w-[42px] sm:max-h-[42px]';
+      ? 'max-w-[32px] max-h-[32px] sm:max-w-[36px] sm:max-h-[36px] md:max-w-[52px] md:max-h-[52px]'
+      : 'max-w-[38px] max-h-[38px] sm:max-w-[42px] sm:max-h-[42px] md:max-w-[56px] md:max-h-[56px]';
 
   const rowGapClass =
     visualRowCount >= 4
-      ? 'gap-0.5'
+      ? 'gap-0.5 md:gap-1.5'
       : visualRowCount === 3
-      ? 'gap-1'
-      : 'gap-1 sm:gap-1.5';
+      ? 'gap-1 md:gap-2'
+      : 'gap-1 sm:gap-1.5 md:gap-2.5';
 
   // Helper to partition dice across 2 rows keeping same-colored dice on the same line
   const splitDiceByColor = (diceList: Die[]): [Die[], Die[]] => {
@@ -130,7 +131,7 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
 
     return (
       <div
-        className="grid gap-0.5 sm:gap-1 items-center justify-items-center w-full"
+        className="grid gap-0.5 sm:gap-1 md:gap-1.5 items-center justify-items-center w-full"
         style={{
           gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
         }}
@@ -178,7 +179,7 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
         {Array.from({ length: emptySlots }).map((_, sIdx) => (
           <div
             key={`${keyPrefix}-empty-${sIdx}`}
-            className={`aspect-square ${dieClass} w-full rounded-lg border border-dashed border-white/15 bg-white/5`}
+            className={`aspect-square ${dieClass} w-full rounded-lg md:rounded-xl border border-dashed border-white/15 bg-white/5`}
           />
         ))}
       </div>
@@ -186,7 +187,7 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full bg-[#131d2e]/85 border border-white/15 rounded-2xl p-1 sm:p-1.5 shadow-lg backdrop-blur-xs select-none flex flex-col justify-between transition-all duration-300 min-h-[72px] overflow-hidden">
+    <div className="relative w-full h-full bg-[#131d2e]/85 border border-white/15 rounded-2xl md:rounded-3xl p-1 sm:p-1.5 md:p-3 shadow-lg backdrop-blur-xs select-none flex flex-col justify-between transition-all duration-300 min-h-[72px] md:min-h-[250px] overflow-hidden">
       {/* 6-of-a-kind Color Run Animation playing directly over the dice in the saved dice area with black background removed */}
       {showSixCelebration && (
         <div
@@ -197,16 +198,16 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
         </div>
       )}
 
-      {/* Header bar: SAVED DICE & POINTS (30% larger) */}
-      <div className="flex items-center justify-between px-1.5 pb-0.5 mb-0.5 border-b border-white/10 shrink-0">
-        <span className="text-[13px] sm:text-[15px] font-black uppercase tracking-wider text-[#f2c14e] drop-shadow-xs">
+      {/* Header bar: SAVED DICE & POINTS */}
+      <div className="flex items-center justify-between px-1.5 md:px-2.5 pb-0.5 md:pb-1.5 mb-0.5 md:mb-1.5 border-b border-white/10 shrink-0">
+        <span className="text-[13px] sm:text-[15px] md:text-[16px] font-black uppercase tracking-wider text-[#f2c14e] drop-shadow-xs">
           SAVED DICE
         </span>
-        <div className="flex items-center gap-2">
-          <span className="text-[10.5px] sm:text-[12px] font-extrabold uppercase tracking-wider text-white/80">
+        <div className="flex items-center gap-2 md:gap-3">
+          <span className="text-[10.5px] sm:text-[12px] md:text-[13px] font-extrabold uppercase tracking-wider text-white/80">
             POINTS
           </span>
-          <span className="font-mono font-black text-base sm:text-lg bg-black/60 text-[#54e38e] px-2 py-0.5 rounded-md border border-[#54e38e]/50 shadow-xs">
+          <span className="font-mono font-black text-base sm:text-lg md:text-xl bg-black/60 text-[#54e38e] px-2 md:px-3 py-0.5 md:py-1 rounded-md md:rounded-lg border border-[#54e38e]/50 shadow-xs">
             {scoreResult.total}
           </span>
         </div>
@@ -216,20 +217,20 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
       <div className={`flex-1 flex flex-col justify-center ${rowGapClass} min-h-0 w-full px-0.5`}>
         {sets.length === 0 ? (
           // Empty placeholder row when no dice are saved yet
-          <div className="flex items-stretch justify-between gap-1 sm:gap-1.5 w-full max-w-[360px] sm:max-w-[420px] mx-auto min-h-0">
+          <div className="flex items-stretch justify-between gap-1 sm:gap-1.5 md:gap-2.5 w-full max-w-[360px] sm:max-w-[420px] md:max-w-[520px] mx-auto min-h-0">
             <div className="flex-1 min-w-0 flex items-center justify-center">
-              <div className="grid grid-cols-6 gap-1 sm:gap-1.5 items-center justify-items-center w-full">
+              <div className="grid grid-cols-6 gap-1 sm:gap-1.5 md:gap-2 items-center justify-items-center w-full">
                 {Array.from({ length: 6 }).map((_, sIdx) => (
                   <div
                     key={`empty-init-${sIdx}`}
-                    className={`aspect-square ${defaultDieSizeClass} w-full rounded-lg border border-dashed border-white/15 bg-white/5 flex items-center justify-center`}
+                    className={`aspect-square ${defaultDieSizeClass} w-full rounded-lg md:rounded-xl border border-dashed border-white/15 bg-white/5 flex items-center justify-center`}
                   />
                 ))}
               </div>
             </div>
             {/* Points box matches dice row height, centered */}
-            <div className="w-8 sm:w-9 shrink-0 self-stretch flex items-center justify-center pl-1">
-              <div className="w-full h-full min-h-[32px] flex items-center justify-center font-mono font-black text-xs sm:text-sm text-white/30 border border-white/10 rounded-lg text-center">
+            <div className="w-8 sm:w-9 md:w-12 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
+              <div className="w-full h-full min-h-[32px] md:min-h-[44px] flex items-center justify-center font-mono font-black text-xs sm:text-sm md:text-base text-white/30 border border-white/10 rounded-lg md:rounded-xl text-center">
                 0
               </div>
             </div>
@@ -255,17 +256,17 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
               return (
                 <div
                   key={`set-${set.value}`}
-                  className="flex items-stretch justify-between gap-1 sm:gap-1.5 w-full max-w-[360px] sm:max-w-[420px] mx-auto min-h-0"
+                  className="flex items-stretch justify-between gap-1 sm:gap-1.5 md:gap-2.5 w-full max-w-[360px] sm:max-w-[420px] md:max-w-[520px] mx-auto min-h-0"
                 >
                   {/* Two rows of dice */}
-                  <div className="flex-1 min-w-0 flex flex-col gap-1 justify-center">
+                  <div className="flex-1 min-w-0 flex flex-col gap-1 md:gap-1.5 justify-center">
                     {renderDiceRow(row1Dice, 6, defaultDieSizeClass, `set-${set.value}-r1`)}
                     {renderDiceRow(row2Dice, 6, defaultDieSizeClass, `set-${set.value}-r2`)}
                   </div>
 
                   {/* Points box spanning the height of the two rows with points total centered */}
-                  <div className="w-8 sm:w-9 shrink-0 self-stretch flex items-center justify-center pl-1">
-                    <div className="w-full h-full min-h-[64px] flex items-center justify-center font-mono font-black text-xs sm:text-sm rounded-xl bg-[#28974a] text-white border-2 border-[#34c759] shadow-md text-center">
+                  <div className="w-8 sm:w-9 md:w-12 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
+                    <div className="w-full h-full min-h-[64px] md:min-h-[92px] flex items-center justify-center font-mono font-black text-xs sm:text-sm md:text-base rounded-xl md:rounded-2xl bg-[#28974a] text-white border-2 border-[#34c759] shadow-md text-center">
                       {pts}
                     </div>
                   </div>
@@ -282,7 +283,7 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
             return (
               <div
                 key={`set-${set.value}`}
-                className="flex items-stretch justify-between gap-1 sm:gap-1.5 w-full max-w-[360px] sm:max-w-[420px] mx-auto min-h-0"
+                className="flex items-stretch justify-between gap-1 sm:gap-1.5 md:gap-2.5 w-full max-w-[360px] sm:max-w-[420px] md:max-w-[520px] mx-auto min-h-0"
               >
                 {/* Dice container for 1 row */}
                 <div className="flex-1 min-w-0 flex items-center justify-center">
@@ -290,8 +291,8 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
                 </div>
 
                 {/* Points box matching the height of the single dice row with points total centered */}
-                <div className="w-8 sm:w-9 shrink-0 self-stretch flex items-center justify-center pl-1">
-                  <div className="w-full h-full min-h-[32px] flex items-center justify-center font-mono font-black text-xs sm:text-sm rounded-lg bg-[#28974a] text-white border border-[#34c759] shadow-xs text-center">
+                <div className="w-8 sm:w-9 md:w-12 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
+                  <div className="w-full h-full min-h-[32px] md:min-h-[44px] flex items-center justify-center font-mono font-black text-xs sm:text-sm md:text-base rounded-lg md:rounded-xl bg-[#28974a] text-white border border-[#34c759] shadow-xs text-center">
                     {pts}
                   </div>
                 </div>
