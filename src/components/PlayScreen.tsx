@@ -246,6 +246,9 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
   const lastActionTimestampRef = useRef(0);
   const lastActionIdRef = useRef<string>('');
+  const lastActionRef = useRef<string>('');
+  const qIdxRef = useRef<number>(-1);
+  const rollsUsedRef = useRef<number>(-1);
 
   // Listen for room updates & players who stepped away / disconnected
   useEffect(() => {
@@ -271,12 +274,19 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       if (!gs) return;
 
       const isNewAction =
+        !lastActionIdRef.current ||
         (gs.lastActionId && gs.lastActionId !== lastActionIdRef.current) ||
-        (gs.actionTimestamp && gs.actionTimestamp > lastActionTimestampRef.current);
+        (gs.actionTimestamp && gs.actionTimestamp > lastActionTimestampRef.current) ||
+        (gs.lastAction && gs.lastAction !== lastActionRef.current) ||
+        (typeof gs.activeUnitIndex === 'number' && gs.activeUnitIndex !== qIdxRef.current) ||
+        (typeof gs.rollsUsed === 'number' && gs.rollsUsed !== rollsUsedRef.current);
 
       if (isNewAction) {
         if (gs.lastActionId) lastActionIdRef.current = gs.lastActionId;
-        if (gs.actionTimestamp) lastActionTimestampRef.current = gs.actionTimestamp;
+        if (gs.actionTimestamp) lastActionTimestampRef.current = Math.max(lastActionTimestampRef.current, gs.actionTimestamp);
+        if (gs.lastAction) lastActionRef.current = gs.lastAction;
+        if (typeof gs.activeUnitIndex === 'number') qIdxRef.current = gs.activeUnitIndex;
+        if (typeof gs.rollsUsed === 'number') rollsUsedRef.current = gs.rollsUsed;
 
         // Action was performed by another peer
         if (gs.lastActionBy !== user.uid) {
@@ -293,6 +303,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             checkBonusChimes(gs.dice);
           } else if (gs.lastAction === 'bank' || gs.lastAction === 'elimination' || gs.lastAction === 'phase_change') {
             playSfx('add');
+            setIsRolling(false);
             if (gs.unitStatus) {
               setUnits(prev =>
                 prev.map(u => {
@@ -313,10 +324,10 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
               setUnits(prev =>
                 prev.map(u => {
                   const isActive = gs.activeUnitIds ? gs.activeUnitIds.includes(u.id) : u.active;
-                  if (gs.scores[u.id] !== undefined) {
+                  if (gs.scores![u.id] !== undefined) {
                     return {
                       ...u,
-                      score: gs.scores[u.id],
+                      score: gs.scores![u.id],
                       history: gs.unitHistory?.[u.id] || u.history,
                       active: isActive,
                     };
@@ -712,7 +723,8 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const bankTurn = useCallback(() => {
     stopWarningSound();
     if (!curUnit) return;
-    if (!isHumanOwner && !(isCPU && isTurnAuthority)) return;
+    const canAct = (curUnit.isOwner ?? false) || (curUnit.uid === user.uid) || (curUnit.isCPU && isTurnAuthority) || (isRemoteHuman && isTurnAuthority && turnSecondsLeft <= -15);
+    if (!canAct) return;
     if (joiningCountdown !== null && joiningCountdown > 0) return;
 
     // Automatically commit any full sets remaining in active dice before banking
@@ -781,7 +793,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       if (nextQIdx < stillActive.length) {
         setQIdx(nextQIdx);
 
-        if (settings.roomId && (isHumanOwner || (isCPU && isTurnAuthority))) {
+        if (settings.roomId) {
           const scoresRecord: Record<string, number> = {};
           const histRecord: Record<string, Record<number, number>> = {};
           updatedUnits.forEach(u => {
@@ -833,7 +845,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         const msg = `Someone reached ${settings.threshold} points! From here, every player plays a full round, then the lowest total is knocked out. Last one standing wins!`;
         setElimModalMsg(msg);
 
-        if (settings.roomId && isTurnAuthority) {
+        if (settings.roomId) {
           const scoresRecord: Record<string, number> = {};
           const histRecord: Record<string, Record<number, number>> = {};
           currentUnits.forEach(u => {
@@ -876,7 +888,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         setIsAutoPilotTurn(false);
       }
 
-      if (settings.roomId && isTurnAuthority) {
+      if (settings.roomId) {
         const scoresRecord: Record<string, number> = {};
         const histRecord: Record<string, Record<number, number>> = {};
         currentUnits.forEach(u => {
@@ -924,7 +936,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         const winner = survivors[0] || currentUnits[0];
         winner.place = 1;
 
-        if (settings.roomId && isTurnAuthority) {
+        if (settings.roomId) {
           const scoresRecord: Record<string, number> = {};
           const histRecord: Record<string, Record<number, number>> = {};
           finalizedUnits.forEach(u => {
@@ -972,7 +984,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         setIsAutoPilotTurn(false);
       }
 
-      if (settings.roomId && isTurnAuthority) {
+      if (settings.roomId) {
         const scoresRecord: Record<string, number> = {};
         const histRecord: Record<string, Record<number, number>> = {};
         finalizedUnits.forEach(u => {

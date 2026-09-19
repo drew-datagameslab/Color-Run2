@@ -117,41 +117,41 @@ export async function findOrCreateRoom(
     joinedAt: now,
   };
 
+  const lobbyRef = doc(db, 'lobbies', gameKey);
+
+  // 1. Atomic transaction on the lobby & room so devices joining simultaneously (e.g. iPad, Android, phone) converge into the same room
   try {
-    const lobbyRef = doc(db, 'lobbies', gameKey);
+    const result = await runTransaction(db, async transaction => {
+      const lobbySnap = await transaction.get(lobbyRef);
+      const currentTime = Date.now();
 
-    // 1. Check canonical active lobby pointer for this gameKey
-    try {
-      const lobbySnap = await getDoc(lobbyRef);
       if (lobbySnap.exists()) {
-        const lobbyData = lobbySnap.data() as { roomId: string; createdAt: number; playerCount: number };
-        const elapsed = now - (lobbyData.createdAt || 0);
+        const lobbyData = lobbySnap.data() as { roomId: string; createdAt: number; playerCount: number; maxPlayers?: number };
+        const elapsed = currentTime - (lobbyData.createdAt || 0);
 
-        // Active lobby within the 22-second window (with generous clock skew tolerance)
         if (elapsed > -30000 && elapsed < 22000 && lobbyData.roomId) {
-          const roomRef = doc(db, 'rooms', lobbyData.roomId);
-          const roomSnap = await getDoc(roomRef);
+          const targetRoomRef = doc(db, 'rooms', lobbyData.roomId);
+          const roomSnap = await transaction.get(targetRoomRef);
+
           if (roomSnap.exists()) {
             const roomData = roomSnap.data() as GameRoom;
-            if (
-              (roomData.status === 'waiting' || roomData.status === 'starting') &&
-              roomData.players &&
-              roomData.players.length < playerCount
-            ) {
-              const currentPlayers = roomData.players;
+            const currentPlayers = roomData.players || [];
+            const isFull = currentPlayers.length >= playerCount;
+            const isOpen = roomData.status === 'waiting' || roomData.status === 'starting';
+
+            if (isOpen && !isFull) {
               const alreadyIn = currentPlayers.some(p => p.uid === user.uid);
               const updatedPlayers = alreadyIn ? currentPlayers : [...currentPlayers, currentPlayer];
 
-              await updateDoc(roomRef, {
+              transaction.update(targetRoomRef, {
                 players: updatedPlayers,
-                updatedAt: Date.now(),
+                updatedAt: currentTime,
               });
 
-              // Update lobby player count
-              await updateDoc(lobbyRef, {
+              transaction.update(lobbyRef, {
                 playerCount: updatedPlayers.length,
-                updatedAt: Date.now(),
-              }).catch(() => {});
+                updatedAt: currentTime,
+              });
 
               return {
                 room: { ...roomData, id: lobbyData.roomId, players: updatedPlayers },
@@ -161,11 +161,43 @@ export async function findOrCreateRoom(
           }
         }
       }
-    } catch (lobbyErr) {
-      console.warn('Lobby pointer lookup error, falling back to rooms scan:', lobbyErr);
-    }
 
-    // 2. Search for waiting rooms with the same game version from the rooms collection
+      // No suitable existing room found in transaction - create one atomically!
+      const newRoomId = `room_${currentTime}_${Math.random().toString(36).substring(2, 7)}`;
+      const newRoom: GameRoom = {
+        id: newRoomId,
+        gameKey,
+        tier,
+        playerCount,
+        buyIn,
+        createdAt: currentTime,
+        expiresAt: currentTime + 20000,
+        status: 'waiting',
+        players: [currentPlayer],
+        filledBots: [],
+        updatedAt: currentTime,
+      };
+
+      const newRoomRef = doc(db, 'rooms', newRoomId);
+      transaction.set(newRoomRef, newRoom);
+      transaction.set(lobbyRef, {
+        roomId: newRoomId,
+        createdAt: currentTime,
+        playerCount: 1,
+        maxPlayers: playerCount,
+        updatedAt: currentTime,
+      });
+
+      return { room: newRoom, isNew: true };
+    });
+
+    return result;
+  } catch (txErr) {
+    console.warn('Matchmaking transaction error, falling back to query scan:', txErr);
+  }
+
+  // 2. Search for waiting rooms with the same game version from the rooms collection
+  try {
     const roomsCol = collection(db, 'rooms');
     const q = query(
       roomsCol,
@@ -352,26 +384,32 @@ export async function updateRoomGameState(
     const sanitized: Partial<RoomGameState> = JSON.parse(JSON.stringify(stateUpdate));
 
     if (!sanitized.lastActionId) {
-      sanitized.lastActionId = `${sanitized.lastActionBy || 'p'}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      sanitized.lastActionId = `${sanitized.lastAction || 'act'}_${sanitized.lastActionBy || 'p'}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    }
+    if (!sanitized.actionTimestamp) {
+      sanitized.actionTimestamp = Date.now();
     }
 
-    const updatePayload: Record<string, any> = {
-      updatedAt: Date.now(),
-    };
-    Object.entries(sanitized).forEach(([key, val]) => {
-      updatePayload[`gameState.${key}`] = val;
-    });
-
-    await updateDoc(roomRef, updatePayload);
+    // Use setDoc with merge: true to cleanly merge gameState map and update timestamp
+    await setDoc(roomRef, { gameState: sanitized, updatedAt: Date.now() }, { merge: true });
   } catch (err) {
-    console.error('updateDoc failed on room game state, trying setDoc merge fallback:', err);
+    console.error('setDoc merge failed on room game state, trying updateDoc fallback:', err);
     try {
       const roomRef = doc(db, 'rooms', roomId);
-      const sanitized = JSON.parse(JSON.stringify(stateUpdate));
+      const sanitized: Partial<RoomGameState> = JSON.parse(JSON.stringify(stateUpdate));
       if (!sanitized.lastActionId) {
-        sanitized.lastActionId = `${sanitized.lastActionBy || 'p'}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        sanitized.lastActionId = `${sanitized.lastAction || 'act'}_${sanitized.lastActionBy || 'p'}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
       }
-      await setDoc(roomRef, { gameState: sanitized, updatedAt: Date.now() }, { merge: true });
+      if (!sanitized.actionTimestamp) {
+        sanitized.actionTimestamp = Date.now();
+      }
+      const updatePayload: Record<string, any> = {
+        updatedAt: Date.now(),
+      };
+      Object.entries(sanitized).forEach(([key, val]) => {
+        updatePayload[`gameState.${key}`] = val;
+      });
+      await updateDoc(roomRef, updatePayload);
     } catch (fallbackErr) {
       console.error('All Firestore update attempts failed for game state:', fallbackErr);
     }
