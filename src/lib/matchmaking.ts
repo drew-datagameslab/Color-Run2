@@ -34,10 +34,11 @@ export interface RoomGameState {
   scores: Record<string, number>;
   unitHistory: Record<string, Record<number, number>>;
   activeUnitIds: string[];
-  lastAction: 'roll' | 'save_dice' | 'bank' | 'sync' | 'step_away';
+  unitStatus?: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }>;
+  lastAction: 'roll' | 'save_dice' | 'bank' | 'sync' | 'step_away' | 'elimination' | 'phase_change';
   lastActionBy: string; // unitId or uid
   actionTimestamp: number;
-  turnAuthorityUid: string;
+  turnAuthorityUid?: string;
   elimModalMsg?: string | null;
 }
 
@@ -155,36 +156,30 @@ export async function findOrCreateRoom(
     // Sort by earliest created first (FIFO room filling)
     candidateRooms.sort((a, b) => a.createdAt - b.createdAt);
 
-    // Try joining candidate rooms atomically via transaction
+    // Try joining candidate rooms reliably via getDoc & updateDoc
     for (const targetRoom of candidateRooms) {
       const roomRef = doc(db, 'rooms', targetRoom.id);
       try {
-        const joinedRoom = await runTransaction(db, async transaction => {
-          const roomDoc = await transaction.get(roomRef);
-          if (!roomDoc.exists()) throw new Error('Room does not exist');
-          const roomData = roomDoc.data() as GameRoom;
-          if (roomData.status !== 'waiting') throw new Error('Room is no longer waiting');
-          const elapsed = Date.now() - roomData.createdAt;
-          if (elapsed >= 15000) throw new Error('Room entry window expired');
-          if (roomData.players && roomData.players.length >= playerCount) {
-            throw new Error('Room is full');
-          }
+        const freshSnap = await getDoc(roomRef);
+        if (!freshSnap.exists()) continue;
+        const freshData = freshSnap.data() as GameRoom;
+        if (freshData.status !== 'waiting') continue;
+        const elapsed = Date.now() - freshData.createdAt;
+        if (elapsed >= 15000) continue;
+        if (freshData.players && freshData.players.length >= playerCount) continue;
 
-          const currentPlayers = roomData.players || [];
-          const alreadyIn = currentPlayers.some(p => p.uid === user.uid);
-          const updatedPlayers = alreadyIn ? currentPlayers : [...currentPlayers, currentPlayer];
+        const currentPlayers = freshData.players || [];
+        const alreadyIn = currentPlayers.some(p => p.uid === user.uid);
+        const updatedPlayers = alreadyIn ? currentPlayers : [...currentPlayers, currentPlayer];
 
-          transaction.update(roomRef, {
-            players: updatedPlayers,
-            updatedAt: Date.now(),
-          });
-
-          return { ...roomData, id: targetRoom.id, players: updatedPlayers };
+        await updateDoc(roomRef, {
+          players: updatedPlayers,
+          updatedAt: Date.now(),
         });
 
-        return { room: joinedRoom, isNew: false };
+        return { room: { ...freshData, id: targetRoom.id, players: updatedPlayers }, isNew: false };
       } catch (err) {
-        console.warn('Could not join candidate room via transaction, trying next:', err);
+        console.warn('Could not join candidate room, trying next:', err);
       }
     }
   } catch (err) {

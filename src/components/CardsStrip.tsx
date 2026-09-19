@@ -70,11 +70,14 @@ export const CardsStrip: React.FC<CardsStripProps> = ({
               onClick={() => onSelectUnit?.(unit)}
               className={`flex-shrink-0 rounded-xl md:rounded-2xl py-1 px-1 sm:py-1.5 sm:px-1.5 md:py-2 md:px-2 flex flex-col items-center transition-all duration-200 select-none cursor-pointer relative shadow-md
                 ${displayUnits.length > 4 ? 'w-[calc((100%-20px)/4)] min-w-[70px] sm:min-w-[78px] md:min-w-[95px] max-w-[98px] md:max-w-[130px]' : 'flex-1 min-w-[66px] md:min-w-[85px] max-w-[108px] md:max-w-[140px]'}
-                ${isEliminationPhase ? 'bg-[#d62828]' : 'bg-[#28974a]'}
+                ${isOut
+                  ? 'bg-[#37383c] border-white/10 opacity-50 grayscale'
+                  : isEliminationPhase
+                  ? 'bg-[#d62828]'
+                  : 'bg-[#28974a]'}
                 ${isActive
                   ? 'border-2 border-[#f2c14e] ring-2 ring-[#f2c14e]/50 shadow-[0_0_10px_rgba(242,193,78,0.5)] scale-[1.02]'
-                  : 'border border-white/20'}
-                ${isOut ? 'opacity-40 grayscale-[50%]' : ''}`}
+                  : 'border border-white/20'}`}
             >
               {/* Avatar Top Center (50% bigger) */}
               <div
@@ -102,9 +105,9 @@ export const CardsStrip: React.FC<CardsStripProps> = ({
                 {unit.score}
               </div>
 
-              {/* Elimination status badge if out */}
+              {/* Elimination status badge if out (e.g. 4th, 3rd, 2nd) */}
               {isOut && (
-                <div className="text-[7px] md:text-[8px] font-black text-white bg-black/60 rounded px-1 py-0 uppercase text-center mb-0.5 border border-white/20 leading-tight">
+                <div className="text-[8px] sm:text-[9px] md:text-[10px] font-black text-[#f2c14e] bg-black/85 rounded px-1.5 py-0.5 uppercase text-center my-0.5 border border-[#f2c14e]/40 shadow-sm leading-tight">
                   {unit.place ? `${unit.place}${unit.place === 1 ? 'st' : unit.place === 2 ? 'nd' : unit.place === 3 ? 'rd' : 'th'}` : 'Out'}
                 </div>
               )}

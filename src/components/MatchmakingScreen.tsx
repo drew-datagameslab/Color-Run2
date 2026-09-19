@@ -138,16 +138,15 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
     };
   }, [tier, playerCount, buyIn, user, equippedColors]);
 
-  // 2. Countdown timer based on room creation timestamp (15-second total entry window)
+  // 2. Countdown timer: starts immediately on mount and guarantees match progression
   useEffect(() => {
-    if (!room) return;
+    const mountTime = Date.now();
 
     const interval = setInterval(() => {
       const curRoom = roomRef.current;
-      if (!curRoom) return;
-
       const now = Date.now();
-      const elapsed = now - curRoom.createdAt;
+      const baseTime = curRoom ? curRoom.createdAt : mountTime;
+      const elapsed = now - baseTime;
       const remainingMs = Math.max(0, 15000 - elapsed);
       const remainingSec = Math.ceil(remainingMs / 1000);
 
@@ -167,26 +166,23 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
     }, 250);
 
     return () => clearInterval(interval);
-  }, [room?.createdAt, room?.id]);
+  }, []);
 
   // 3. Launch the game when countdown finishes
   useEffect(() => {
     if (startCountdown === null) return;
 
     if (startCountdown <= 0) {
+      if (matchLaunchedRef.current) return;
       const curRoom = roomRef.current;
-      if (!curRoom || matchLaunchedRef.current) return;
 
       // If room already has finalSlots, launch using them
-      if (curRoom.finalSlots && curRoom.finalSlots.length > 0) {
+      if (curRoom?.finalSlots && curRoom.finalSlots.length > 0) {
         launchMatchWithSlots(curRoom.finalSlots, curRoom.id);
         return;
       }
 
-      // Otherwise, the first joined human player finalizes slots and persists to Firestore
-      const isAuthority = curRoom.players.length > 0 && curRoom.players[0].uid === user.uid;
-
-      const humanPlayers: RoomPlayer[] = curRoom.players || [
+      const humanPlayers: RoomPlayer[] = (curRoom?.players && curRoom.players.length > 0) ? curRoom.players : [
         {
           uid: user.uid,
           name: user.name,
@@ -213,11 +209,12 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
         };
       });
 
-      if (curRoom.id) {
+      const targetRoomId = curRoom?.id || `room_${Date.now()}_local`;
+      if (curRoom?.id) {
         finalizeAndStartRoom(curRoom.id, canonicalSlots);
       }
 
-      launchMatchWithSlots(canonicalSlots, curRoom.id);
+      launchMatchWithSlots(canonicalSlots, targetRoomId);
       return;
     }
 

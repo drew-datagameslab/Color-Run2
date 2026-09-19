@@ -275,22 +275,51 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           } else if (gs.lastAction === 'save_dice') {
             setDice(gs.dice);
             checkBonusChimes(gs.dice);
-          } else if (gs.lastAction === 'bank') {
+          } else if (gs.lastAction === 'bank' || gs.lastAction === 'elimination' || gs.lastAction === 'phase_change') {
             playSfx('add');
-            if (gs.scores) {
+            if (gs.unitStatus) {
               setUnits(prev =>
                 prev.map(u => {
+                  const st = gs.unitStatus![u.id];
+                  if (st) {
+                    return {
+                      ...u,
+                      score: st.score ?? u.score,
+                      history: st.history ?? u.history,
+                      active: st.active !== undefined ? st.active : u.active,
+                      place: st.place !== undefined ? st.place : u.place,
+                    };
+                  }
+                  return u;
+                })
+              );
+            } else if (gs.scores) {
+              setUnits(prev =>
+                prev.map(u => {
+                  const isActive = gs.activeUnitIds ? gs.activeUnitIds.includes(u.id) : u.active;
                   if (gs.scores[u.id] !== undefined) {
                     return {
                       ...u,
                       score: gs.scores[u.id],
                       history: gs.unitHistory?.[u.id] || u.history,
+                      active: isActive,
                     };
                   }
                   return u;
                 })
               );
             }
+
+            if (gs.phase === 'over') {
+              setUnits(prev => {
+                const winner = prev.find(u => u.active) || prev[0];
+                if (winner) winner.place = 1;
+                onGameOver(winner, prev);
+                return prev;
+              });
+              return;
+            }
+
             setRollsUsed(0);
             setAnnouncedChimes({});
             setShowSixCelebration(false);
@@ -730,32 +759,35 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
       setDice(nextDiceForTurn);
 
-      if (settings.roomId && (isHumanOwner || (isCPU && isTurnAuthority))) {
-        const scoresRecord: Record<string, number> = {};
-        const histRecord: Record<string, Record<number, number>> = {};
-        updatedUnits.forEach(u => {
-          scoresRecord[u.id] = u.score;
-          histRecord[u.id] = u.history;
-        });
-
-        updateRoomGameState(settings.roomId, {
-          round: nextQIdx < stillActive.length ? round : round + 1,
-          phase,
-          activeUnitIndex: nextQIdx < stillActive.length ? nextQIdx : 0,
-          activeUnitId: nextTargetUnit.id,
-          scores: scoresRecord,
-          unitHistory: histRecord,
-          activeUnitIds: stillActive.map(u => u.id),
-          rollsUsed: 0,
-          dice: nextDiceForTurn,
-          lastAction: 'bank',
-          lastActionBy: user.uid,
-          actionTimestamp: Date.now(),
-        });
-      }
-
       if (nextQIdx < stillActive.length) {
         setQIdx(nextQIdx);
+
+        if (settings.roomId && (isHumanOwner || (isCPU && isTurnAuthority))) {
+          const scoresRecord: Record<string, number> = {};
+          const histRecord: Record<string, Record<number, number>> = {};
+          const unitStatus: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }> = {};
+          updatedUnits.forEach(u => {
+            scoresRecord[u.id] = u.score;
+            histRecord[u.id] = u.history;
+            unitStatus[u.id] = { active: u.active, place: u.place, score: u.score, history: u.history };
+          });
+
+          updateRoomGameState(settings.roomId, {
+            round,
+            phase,
+            activeUnitIndex: nextQIdx,
+            activeUnitId: nextTargetUnit.id,
+            scores: scoresRecord,
+            unitHistory: histRecord,
+            activeUnitIds: stillActive.map(u => u.id),
+            unitStatus,
+            rollsUsed: 0,
+            dice: nextDiceForTurn,
+            lastAction: 'bank',
+            lastActionBy: user.uid,
+            actionTimestamp: Date.now(),
+          });
+        }
       } else {
         // Completed full round!
         resolveRound(updatedUnits);
@@ -767,7 +799,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     } else {
       finishBank();
     }
-  }, [curUnit, dice, qIdx, round, settings.colorA, settings.colorB, units, userDiceColors, checkBonusChimes, showSixCelebration]);
+  }, [curUnit, dice, qIdx, round, settings.colorA, settings.colorB, units, userDiceColors, checkBonusChimes, showSixCelebration, isTurnAuthority]);
 
   doRollRef.current = doRoll;
   bankTurnRef.current = bankTurn;
@@ -780,21 +812,78 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       const thresholdReached = liveUnits.some(u => u.score >= settings.threshold);
       if (thresholdReached) {
         setPhase('elimination');
-        setElimModalMsg(
-          `Someone reached ${settings.threshold} points! From here, every player plays a full round, then the lowest total is knocked out. Last one standing wins!`
-        );
+        const msg = `Someone reached ${settings.threshold} points! From here, every player plays a full round, then the lowest total is knocked out. Last one standing wins!`;
+        setElimModalMsg(msg);
+
+        if (settings.roomId && isTurnAuthority) {
+          const scoresRecord: Record<string, number> = {};
+          const histRecord: Record<string, Record<number, number>> = {};
+          const unitStatus: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }> = {};
+          currentUnits.forEach(u => {
+            scoresRecord[u.id] = u.score;
+            histRecord[u.id] = u.history;
+            unitStatus[u.id] = { active: u.active, place: u.place, score: u.score, history: u.history };
+          });
+
+          updateRoomGameState(settings.roomId, {
+            round,
+            phase: 'elimination',
+            activeUnitIndex: qIdx,
+            activeUnitId: curUnit?.id || currentUnits[0].id,
+            scores: scoresRecord,
+            unitHistory: histRecord,
+            activeUnitIds: liveUnits.map(u => u.id),
+            unitStatus,
+            rollsUsed: 0,
+            dice,
+            elimModalMsg: msg,
+            lastAction: 'phase_change',
+            lastActionBy: user.uid,
+            actionTimestamp: Date.now(),
+          });
+        }
         return;
       }
+
       // Continue next regular round
-      setRound(r => r + 1);
+      const nextRound = round + 1;
+      setRound(nextRound);
       setQIdx(0);
       setRollsUsed(0);
       setRollSlotsCount(12);
       const [c1, c2] = getUnitDiceColors(liveUnits[0], userDiceColors);
-      setDice(createInitialDice(c1, c2));
+      const nextDice = createInitialDice(c1, c2);
+      setDice(nextDice);
       if (liveUnits[0]?.isOwner && !liveUnits[0]?.isCPU) {
         setTurnSecondsLeft(ROLL_1_TIME);
         setIsAutoPilotTurn(false);
+      }
+
+      if (settings.roomId && isTurnAuthority) {
+        const scoresRecord: Record<string, number> = {};
+        const histRecord: Record<string, Record<number, number>> = {};
+        const unitStatus: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }> = {};
+        currentUnits.forEach(u => {
+          scoresRecord[u.id] = u.score;
+          histRecord[u.id] = u.history;
+          unitStatus[u.id] = { active: u.active, place: u.place, score: u.score, history: u.history };
+        });
+
+        updateRoomGameState(settings.roomId, {
+          round: nextRound,
+          phase: 'regular',
+          activeUnitIndex: 0,
+          activeUnitId: liveUnits[0].id,
+          scores: scoresRecord,
+          unitHistory: histRecord,
+          activeUnitIds: liveUnits.map(u => u.id),
+          unitStatus,
+          rollsUsed: 0,
+          dice: nextDice,
+          lastAction: 'bank',
+          lastActionBy: user.uid,
+          actionTimestamp: Date.now(),
+        });
       }
     } else {
       // Elimination phase: knock out lowest score!
@@ -818,6 +907,34 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         // We have a winner!
         const winner = survivors[0] || currentUnits[0];
         winner.place = 1;
+
+        if (settings.roomId && isTurnAuthority) {
+          const scoresRecord: Record<string, number> = {};
+          const histRecord: Record<string, Record<number, number>> = {};
+          const unitStatus: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }> = {};
+          finalizedUnits.forEach(u => {
+            scoresRecord[u.id] = u.score;
+            histRecord[u.id] = u.history;
+            unitStatus[u.id] = { active: u.id === winner.id, place: u.id === winner.id ? 1 : u.place, score: u.score, history: u.history };
+          });
+
+          updateRoomGameState(settings.roomId, {
+            round: round + 1,
+            phase: 'over',
+            activeUnitIndex: 0,
+            activeUnitId: winner.id,
+            scores: scoresRecord,
+            unitHistory: histRecord,
+            activeUnitIds: [winner.id],
+            unitStatus,
+            rollsUsed: 0,
+            dice,
+            lastAction: 'elimination',
+            lastActionBy: user.uid,
+            actionTimestamp: Date.now(),
+          });
+        }
+
         onGameOver(winner, finalizedUnits);
         return;
       }
@@ -826,15 +943,44 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       const elimNames = toElim.map(e => e.name).join(', ');
       showToast(`⚔️ Round complete: ${elimNames} knocked out!`);
 
-      setRound(r => r + 1);
+      const nextRound = round + 1;
+      setRound(nextRound);
       setQIdx(0);
       setRollsUsed(0);
       setRollSlotsCount(12);
       const [c1, c2] = getUnitDiceColors(survivors[0], userDiceColors);
-      setDice(createInitialDice(c1, c2));
+      const nextDice = createInitialDice(c1, c2);
+      setDice(nextDice);
       if (survivors[0]?.isOwner && !survivors[0]?.isCPU) {
         setTurnSecondsLeft(ROLL_1_TIME);
         setIsAutoPilotTurn(false);
+      }
+
+      if (settings.roomId && isTurnAuthority) {
+        const scoresRecord: Record<string, number> = {};
+        const histRecord: Record<string, Record<number, number>> = {};
+        const unitStatus: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }> = {};
+        finalizedUnits.forEach(u => {
+          scoresRecord[u.id] = u.score;
+          histRecord[u.id] = u.history;
+          unitStatus[u.id] = { active: u.active, place: u.place, score: u.score, history: u.history };
+        });
+
+        updateRoomGameState(settings.roomId, {
+          round: nextRound,
+          phase: 'elimination',
+          activeUnitIndex: 0,
+          activeUnitId: survivors[0].id,
+          scores: scoresRecord,
+          unitHistory: histRecord,
+          activeUnitIds: survivors.map(u => u.id),
+          unitStatus,
+          rollsUsed: 0,
+          dice: nextDice,
+          lastAction: 'elimination',
+          lastActionBy: user.uid,
+          actionTimestamp: Date.now(),
+        });
       }
     }
   };
