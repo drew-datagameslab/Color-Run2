@@ -91,8 +91,9 @@ export function generateBots(countNeeded: number, existingCount: number = 0): Ro
 }
 
 /**
- * Finds an open room within the 15-second entry window with available spots,
- * or creates a brand-new game room.
+ * Finds an open room within the 15-20 second entry window with available spots,
+ * or creates a brand-new game room. Uses an active lobby pointer so that all
+ * devices selecting the same option join the exact same room.
  */
 export async function findOrCreateRoom(
   tier: 'standard' | 'double' | 'high_roller',
@@ -116,7 +117,50 @@ export async function findOrCreateRoom(
   };
 
   try {
-    // 1. Search for waiting rooms with the same game version
+    const lobbyRef = doc(db, 'lobbies', gameKey);
+
+    // 1. Check canonical active lobby pointer for this gameKey
+    try {
+      const lobbySnap = await getDoc(lobbyRef);
+      if (lobbySnap.exists()) {
+        const lobbyData = lobbySnap.data() as { roomId: string; createdAt: number; playerCount: number };
+        const elapsed = now - (lobbyData.createdAt || 0);
+
+        // Active lobby within the 22-second window (with generous clock skew tolerance)
+        if (elapsed > -30000 && elapsed < 22000 && lobbyData.roomId) {
+          const roomRef = doc(db, 'rooms', lobbyData.roomId);
+          const roomSnap = await getDoc(roomRef);
+          if (roomSnap.exists()) {
+            const roomData = roomSnap.data() as GameRoom;
+            if (roomData.status === 'waiting' && roomData.players && roomData.players.length < playerCount) {
+              const currentPlayers = roomData.players;
+              const alreadyIn = currentPlayers.some(p => p.uid === user.uid);
+              const updatedPlayers = alreadyIn ? currentPlayers : [...currentPlayers, currentPlayer];
+
+              await updateDoc(roomRef, {
+                players: updatedPlayers,
+                updatedAt: Date.now(),
+              });
+
+              // Update lobby player count
+              await updateDoc(lobbyRef, {
+                playerCount: updatedPlayers.length,
+                updatedAt: Date.now(),
+              }).catch(() => {});
+
+              return {
+                room: { ...roomData, id: lobbyData.roomId, players: updatedPlayers },
+                isNew: false,
+              };
+            }
+          }
+        }
+      }
+    } catch (lobbyErr) {
+      console.warn('Lobby pointer lookup error, falling back to rooms scan:', lobbyErr);
+    }
+
+    // 2. Search for waiting rooms with the same game version from the rooms collection
     const roomsCol = collection(db, 'rooms');
     const q = query(
       roomsCol,
@@ -126,25 +170,25 @@ export async function findOrCreateRoom(
 
     const snapshot = await getDocs(q);
 
-    // 1a. If user is ALREADY waiting in an active room for this gameKey (< 15s elapsed), reuse it!
+    // 2a. If user is ALREADY waiting in an active room for this gameKey, reuse it!
     for (const docSnap of snapshot.docs) {
       const data = docSnap.data() as GameRoom;
       const elapsed = now - data.createdAt;
-      if (elapsed >= 0 && elapsed < 15000 && data.status === 'waiting') {
+      if (elapsed > -30000 && elapsed < 22000 && data.status === 'waiting') {
         if (data.players && data.players.some(p => p.uid === user.uid)) {
           return { room: { ...data, id: docSnap.id }, isNew: false };
         }
       }
     }
 
-    // 1b. Look for open candidate rooms created within the 14s entry window with space available
+    // 2b. Look for open candidate rooms created within 22s window with space available
     const candidateRooms: Array<GameRoom & { id: string }> = [];
     snapshot.forEach(docSnap => {
       const data = docSnap.data() as GameRoom;
       const elapsed = now - data.createdAt;
       if (
-        elapsed >= 0 &&
-        elapsed < 14000 &&
+        elapsed > -30000 &&
+        elapsed < 22000 &&
         data.status === 'waiting' &&
         data.players &&
         data.players.length < playerCount
@@ -165,7 +209,7 @@ export async function findOrCreateRoom(
         const freshData = freshSnap.data() as GameRoom;
         if (freshData.status !== 'waiting') continue;
         const elapsed = Date.now() - freshData.createdAt;
-        if (elapsed >= 15000) continue;
+        if (elapsed > 25000) continue;
         if (freshData.players && freshData.players.length >= playerCount) continue;
 
         const currentPlayers = freshData.players || [];
@@ -177,6 +221,15 @@ export async function findOrCreateRoom(
           updatedAt: Date.now(),
         });
 
+        // Set or refresh lobby pointer to this room
+        await setDoc(lobbyRef, {
+          roomId: targetRoom.id,
+          createdAt: targetRoom.createdAt,
+          playerCount: updatedPlayers.length,
+          maxPlayers: playerCount,
+          updatedAt: Date.now(),
+        }).catch(() => {});
+
         return { room: { ...freshData, id: targetRoom.id, players: updatedPlayers }, isNew: false };
       } catch (err) {
         console.warn('Could not join candidate room, trying next:', err);
@@ -186,7 +239,7 @@ export async function findOrCreateRoom(
     console.warn('Matchmaking lookup warning (falling back to new room):', err);
   }
 
-  // 2. No open room with time and space available — create a brand-new room!
+  // 3. No open room with time and space available — create a brand-new room!
   const newRoomId = `room_${now}_${Math.random().toString(36).substring(2, 7)}`;
   const newRoom: GameRoom = {
     id: newRoomId,
@@ -195,7 +248,7 @@ export async function findOrCreateRoom(
     playerCount,
     buyIn,
     createdAt: now,
-    expiresAt: now + 15000,
+    expiresAt: now + 20000,
     status: 'waiting',
     players: [currentPlayer],
     filledBots: [],
@@ -205,6 +258,16 @@ export async function findOrCreateRoom(
   try {
     const roomRef = doc(db, 'rooms', newRoomId);
     await setDoc(roomRef, newRoom);
+
+    // Point active lobby to this brand-new room so phones, tablets, iPads all converge
+    const lobbyRef = doc(db, 'lobbies', gameKey);
+    await setDoc(lobbyRef, {
+      roomId: newRoomId,
+      createdAt: now,
+      playerCount: 1,
+      maxPlayers: playerCount,
+      updatedAt: now,
+    }).catch(() => {});
   } catch (err) {
     console.warn('Could not persist new room to Firestore (local fallback):', err);
   }

@@ -82,22 +82,21 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const ROLL_1_TIME = isMultiplayer ? 30 : 20;
   const ROLL_2_3_TIME = isMultiplayer ? 20 : 10;
 
-  // 15 seconds on the gameplay screen to allow all players to join the room
-  const [joiningCountdown, setJoiningCountdown] = useState<number | null>(() =>
-    isMultiplayer ? 15 : null
-  );
+  // Immediate start since matchmaking screen already handled the 15-second lobby sync
+  const [joiningCountdown, setJoiningCountdown] = useState<number | null>(null);
 
   // Initialize players from settings slots
   const [units, setUnits] = useState<PlayerUnit[]>(() => {
     return settings.slots.map((s, idx) => {
       const isLocalUser = s.isOwner ?? (s.uid ? s.uid === user.uid : idx === 0);
-      const isCPU = s.type === 'cpu' || (!isLocalUser && !s.isOnlinePlayer && settings.mode !== 'online');
+      const isHuman = s.type === 'human' || (!!s.uid && s.type !== 'cpu');
+      const isCPU = s.type === 'cpu' || (!isLocalUser && !isHuman);
       return {
         id: `u_${idx + 1}`,
         name: s.name,
         isCPU: isCPU,
         isOwner: isLocalUser,
-        isOnlinePlayer: !isLocalUser && s.type === 'human',
+        isOnlinePlayer: !isLocalUser && isHuman,
         color: s.color,
         image: s.image,
         diceColors: s.diceColors || (isLocalUser ? userDiceColors : ['blue', 'red']),
@@ -378,15 +377,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
     if (isHumanOwner && turnSecondsLeft <= 0) {
       stopWarningSound();
-      setConsecutiveAfkTurns(prev => {
-        const next = prev + 1;
-        if (next >= 1) {
-          setIsAfkOverlay(true);
-          setIsAutoPilotTurn(true);
-        }
-        return next;
-      });
-      // User time ran out - auto-roll or score
+      // User turn time ran out - auto-roll or score for this roll to keep match moving
       const active = dice.filter(d => d.zone === 'active');
       if (rollsUsed < 3 && (rollsUsed === 0 || active.length > 0)) {
         doRollRef.current();
@@ -396,16 +387,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       return;
     }
 
-    if (isRemoteHuman && isTurnAuthority && turnSecondsLeft <= -4) {
+    if (isRemoteHuman && isTurnAuthority && turnSecondsLeft <= -15) {
       stopWarningSound();
-      // Remote human ran out of time after 4s grace window! Turn authority marks them stepped away and executes turn
-      showToast(`${curUnit?.name} ran out of time. Computer has taken over.`);
-      if (settings.roomId && curUnit?.uid) {
-        markPlayerLeft(settings.roomId, curUnit.uid);
-      }
-      setUnits(prev =>
-        prev.map(u => (u.id === curUnit?.id ? { ...u, isCPU: true, isOnlinePlayer: false } : u))
-      );
+      // Remote human had 15 seconds of network grace beyond their full turn time with no response!
+      // Turn authority executes a single roll/bank to keep the room progressing,
+      // but DOES NOT mark them as left or convert them to a bot!
       const active = dice.filter(d => d.zone === 'active');
       if (rollsUsed < 3 && (rollsUsed === 0 || active.length > 0)) {
         doRollRef.current();
@@ -758,6 +744,8 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       const nextDiceForTurn = createInitialDice(nextColorA, nextColorB);
 
       setDice(nextDiceForTurn);
+      setTurnSecondsLeft(ROLL_1_TIME);
+      setIsAutoPilotTurn(false);
 
       if (nextQIdx < stillActive.length) {
         setQIdx(nextQIdx);
