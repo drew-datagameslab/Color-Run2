@@ -62,6 +62,14 @@ service cloud.firestore {
       }
     }
 
+    // Multiplayer active lobby pointers
+    match /lobbies/{lobbyId} {
+      allow read, write: if true;
+      match /{allPaths=**} {
+        allow read, write: if true;
+      }
+    }
+
     // Health check and connection validation
     match /test/{docId} {
       allow read: if true;

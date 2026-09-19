@@ -37,6 +37,7 @@ export interface RoomGameState {
   unitStatus?: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }>;
   lastAction: 'roll' | 'save_dice' | 'bank' | 'sync' | 'step_away' | 'elimination' | 'phase_change';
   lastActionBy: string; // unitId or uid
+  lastActionId?: string;
   actionTimestamp: number;
   turnAuthorityUid?: string;
   elimModalMsg?: string | null;
@@ -132,7 +133,11 @@ export async function findOrCreateRoom(
           const roomSnap = await getDoc(roomRef);
           if (roomSnap.exists()) {
             const roomData = roomSnap.data() as GameRoom;
-            if (roomData.status === 'waiting' && roomData.players && roomData.players.length < playerCount) {
+            if (
+              (roomData.status === 'waiting' || roomData.status === 'starting') &&
+              roomData.players &&
+              roomData.players.length < playerCount
+            ) {
               const currentPlayers = roomData.players;
               const alreadyIn = currentPlayers.some(p => p.uid === user.uid);
               const updatedPlayers = alreadyIn ? currentPlayers : [...currentPlayers, currentPlayer];
@@ -189,7 +194,7 @@ export async function findOrCreateRoom(
       if (
         elapsed > -30000 &&
         elapsed < 22000 &&
-        data.status === 'waiting' &&
+        (data.status === 'waiting' || data.status === 'starting') &&
         data.players &&
         data.players.length < playerCount
       ) {
@@ -207,7 +212,7 @@ export async function findOrCreateRoom(
         const freshSnap = await getDoc(roomRef);
         if (!freshSnap.exists()) continue;
         const freshData = freshSnap.data() as GameRoom;
-        if (freshData.status !== 'waiting') continue;
+        if (freshData.status !== 'waiting' && freshData.status !== 'starting') continue;
         const elapsed = Date.now() - freshData.createdAt;
         if (elapsed > 25000) continue;
         if (freshData.players && freshData.players.length >= playerCount) continue;
@@ -343,15 +348,33 @@ export async function updateRoomGameState(
 ): Promise<void> {
   try {
     const roomRef = doc(db, 'rooms', roomId);
+    // Deep-strip any undefined fields to prevent Firestore serialization errors
+    const sanitized: Partial<RoomGameState> = JSON.parse(JSON.stringify(stateUpdate));
+
+    if (!sanitized.lastActionId) {
+      sanitized.lastActionId = `${sanitized.lastActionBy || 'p'}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    }
+
     const updatePayload: Record<string, any> = {
       updatedAt: Date.now(),
     };
-    Object.entries(stateUpdate).forEach(([key, val]) => {
+    Object.entries(sanitized).forEach(([key, val]) => {
       updatePayload[`gameState.${key}`] = val;
     });
+
     await updateDoc(roomRef, updatePayload);
   } catch (err) {
-    console.warn('Could not update room game state:', err);
+    console.error('updateDoc failed on room game state, trying setDoc merge fallback:', err);
+    try {
+      const roomRef = doc(db, 'rooms', roomId);
+      const sanitized = JSON.parse(JSON.stringify(stateUpdate));
+      if (!sanitized.lastActionId) {
+        sanitized.lastActionId = `${sanitized.lastActionBy || 'p'}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      }
+      await setDoc(roomRef, { gameState: sanitized, updatedAt: Date.now() }, { merge: true });
+    } catch (fallbackErr) {
+      console.error('All Firestore update attempts failed for game state:', fallbackErr);
+    }
   }
 }
 

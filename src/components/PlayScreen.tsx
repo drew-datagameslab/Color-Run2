@@ -170,7 +170,16 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const humanUnits = units.filter(u => !u.isCPU && (u.isOwner || u.isOnlinePlayer));
   const sortedHumanUids = humanUnits.map(u => u.uid).filter(Boolean).sort() as string[];
   const turnAuthorityUid = sortedHumanUids.length > 0 ? sortedHumanUids[0] : (humanUnits[0]?.uid || user.uid);
-  const isTurnAuthority = settings.mode !== 'online' || user.uid === turnAuthorityUid;
+  const otherHumanUids = humanUnits
+    .filter(u => u.uid !== curUnit?.uid)
+    .map(u => u.uid)
+    .filter(Boolean)
+    .sort() as string[];
+  const fallbackAuthorityUid = otherHumanUids.length > 0 ? otherHumanUids[0] : turnAuthorityUid;
+  const isTurnAuthority =
+    settings.mode !== 'online' ||
+    user.uid === turnAuthorityUid ||
+    (isRemoteHuman && user.uid === fallbackAuthorityUid);
 
   // Timers are added to keep the games moving when additional Users are in the room.
   // When the user is only playing against computer players (Play vs Computer rooms), no timers are needed.
@@ -236,6 +245,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   }, [joiningCountdown]);
 
   const lastActionTimestampRef = useRef(0);
+  const lastActionIdRef = useRef<string>('');
 
   // Listen for room updates & players who stepped away / disconnected
   useEffect(() => {
@@ -258,8 +268,15 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
       // 2. Sync shared real-time gameState across players
       const gs = updatedRoom.gameState;
-      if (gs && gs.actionTimestamp > lastActionTimestampRef.current) {
-        lastActionTimestampRef.current = gs.actionTimestamp;
+      if (!gs) return;
+
+      const isNewAction =
+        (gs.lastActionId && gs.lastActionId !== lastActionIdRef.current) ||
+        (gs.actionTimestamp && gs.actionTimestamp > lastActionTimestampRef.current);
+
+      if (isNewAction) {
+        if (gs.lastActionId) lastActionIdRef.current = gs.lastActionId;
+        if (gs.actionTimestamp) lastActionTimestampRef.current = gs.actionTimestamp;
 
         // Action was performed by another peer
         if (gs.lastActionBy !== user.uid) {
@@ -677,6 +694,20 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     });
   };
 
+  // Helper to build unit status record with no undefined fields for Firestore serialization
+  const buildUnitStatusRecord = (playerList: PlayerUnit[]) => {
+    const status: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }> = {};
+    playerList.forEach(u => {
+      status[u.id] = {
+        active: u.active,
+        score: u.score,
+        history: u.history,
+        ...(u.place !== undefined ? { place: u.place } : {}),
+      };
+    });
+    return status;
+  };
+
   // Next Turn or Round Resolution
   const bankTurn = useCallback(() => {
     stopWarningSound();
@@ -753,12 +784,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         if (settings.roomId && (isHumanOwner || (isCPU && isTurnAuthority))) {
           const scoresRecord: Record<string, number> = {};
           const histRecord: Record<string, Record<number, number>> = {};
-          const unitStatus: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }> = {};
           updatedUnits.forEach(u => {
             scoresRecord[u.id] = u.score;
             histRecord[u.id] = u.history;
-            unitStatus[u.id] = { active: u.active, place: u.place, score: u.score, history: u.history };
           });
+          const unitStatus = buildUnitStatusRecord(updatedUnits);
 
           updateRoomGameState(settings.roomId, {
             round,
@@ -806,12 +836,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         if (settings.roomId && isTurnAuthority) {
           const scoresRecord: Record<string, number> = {};
           const histRecord: Record<string, Record<number, number>> = {};
-          const unitStatus: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }> = {};
           currentUnits.forEach(u => {
             scoresRecord[u.id] = u.score;
             histRecord[u.id] = u.history;
-            unitStatus[u.id] = { active: u.active, place: u.place, score: u.score, history: u.history };
           });
+          const unitStatus = buildUnitStatusRecord(currentUnits);
 
           updateRoomGameState(settings.roomId, {
             round,
@@ -850,12 +879,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       if (settings.roomId && isTurnAuthority) {
         const scoresRecord: Record<string, number> = {};
         const histRecord: Record<string, Record<number, number>> = {};
-        const unitStatus: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }> = {};
         currentUnits.forEach(u => {
           scoresRecord[u.id] = u.score;
           histRecord[u.id] = u.history;
-          unitStatus[u.id] = { active: u.active, place: u.place, score: u.score, history: u.history };
         });
+        const unitStatus = buildUnitStatusRecord(currentUnits);
 
         updateRoomGameState(settings.roomId, {
           round: nextRound,
@@ -899,12 +927,12 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         if (settings.roomId && isTurnAuthority) {
           const scoresRecord: Record<string, number> = {};
           const histRecord: Record<string, Record<number, number>> = {};
-          const unitStatus: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }> = {};
           finalizedUnits.forEach(u => {
             scoresRecord[u.id] = u.score;
             histRecord[u.id] = u.history;
-            unitStatus[u.id] = { active: u.id === winner.id, place: u.id === winner.id ? 1 : u.place, score: u.score, history: u.history };
           });
+          const unitStatus = buildUnitStatusRecord(finalizedUnits);
+          unitStatus[winner.id] = { ...unitStatus[winner.id], place: 1, active: true };
 
           updateRoomGameState(settings.roomId, {
             round: round + 1,
@@ -947,12 +975,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       if (settings.roomId && isTurnAuthority) {
         const scoresRecord: Record<string, number> = {};
         const histRecord: Record<string, Record<number, number>> = {};
-        const unitStatus: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }> = {};
         finalizedUnits.forEach(u => {
           scoresRecord[u.id] = u.score;
           histRecord[u.id] = u.history;
-          unitStatus[u.id] = { active: u.active, place: u.place, score: u.score, history: u.history };
         });
+        const unitStatus = buildUnitStatusRecord(finalizedUnits);
 
         updateRoomGameState(settings.roomId, {
           round: nextRound,
@@ -1357,7 +1384,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
               <span className="flex items-center gap-1.5">
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-white/80" />
                 <span>Waiting for {curUnit.name}…</span>
-                {turnSecondsLeft <= 5 && (
+                {turnSecondsLeft <= 5 && turnSecondsLeft > 0 && (
                   <span className="ml-1 bg-yellow-400 text-black text-[10px] md:text-xs font-mono font-black px-1.5 py-0.2 rounded-full">
                     ⚠️ {turnSecondsLeft}s
                   </span>
