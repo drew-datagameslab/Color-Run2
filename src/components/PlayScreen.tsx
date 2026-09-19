@@ -142,6 +142,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const [consecutiveAfkTurns, setConsecutiveAfkTurns] = useState(0);
   const [isAutoPilotTurn, setIsAutoPilotTurn] = useState(false);
   const prevActiveUnitIdRef = useRef<string | null>(null);
+  const prevRoundRef = useRef<number>(1);
   const doRollRef = useRef<() => void>(() => {});
   const bankTurnRef = useRef<() => void>(() => {});
 
@@ -307,8 +308,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
               setIsRolling(false);
             }, 350);
           } else if (gs.lastAction === 'save_dice') {
-            setDice(gs.dice);
-            checkBonusChimes(gs.dice);
+            // Only accept save_dice if the turn is in progress (not before roll 1 has happened)
+            if (rollsUsedRef.current > 0 || (typeof gs.rollsUsed === 'number' && gs.rollsUsed > 0)) {
+              setDice(gs.dice);
+              checkBonusChimes(gs.dice);
+            }
           } else if (gs.lastAction === 'bank' || gs.lastAction === 'elimination' || gs.lastAction === 'phase_change') {
             playSfx('add');
             setIsRolling(false);
@@ -358,7 +362,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             setRollsUsed(0);
             setAnnouncedChimes({});
             setShowSixCelebration(false);
-            if (gs.dice) setDice(gs.dice);
+            if (gs.dice) {
+              // Ensure that on a banked turn transitioning to roll 0, all dice are in the active zone
+              const freshActiveDice = gs.dice.map(d => ({ ...d, zone: 'active' as const, selected: false }));
+              setDice(freshActiveDice);
+            }
             if (typeof gs.activeUnitIndex === 'number') setQIdx(gs.activeUnitIndex);
             if (typeof gs.round === 'number') setRound(gs.round);
             if (gs.phase) {
@@ -378,8 +386,9 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   // Alert when the user's turn comes up & reset roll timer & bonus announcements
   useEffect(() => {
     if (!curUnit) return;
-    if (curUnit.id !== prevActiveUnitIdRef.current) {
+    if (curUnit.id !== prevActiveUnitIdRef.current || round !== prevRoundRef.current) {
       prevActiveUnitIdRef.current = curUnit.id;
+      prevRoundRef.current = round;
       stopWarningSound();
       setTurnSecondsLeft(ROLL_1_TIME);
       setRollSlotsCount(12);
@@ -387,13 +396,22 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       setAnnouncedChimes({});
       setShowSixCelebration(false);
 
+      // On new turn or new round, guarantee all 12 dice are fresh in the active zone
+      setDice(prev => {
+        if (prev.some(d => d.zone === 'saved') || prev.length < 12) {
+          const [c1, c2] = getUnitDiceColors(curUnit, userDiceColors);
+          return createInitialDice(c1, c2);
+        }
+        return prev;
+      });
+
       if (curUnit.isOwner && !curUnit.isCPU) {
         // User turn alert chime & toast alert
         playSfx('add');
         showToast('👉 Your Turn! Tap ROLL');
       }
     }
-  }, [curUnit, ROLL_1_TIME]);
+  }, [curUnit, round, ROLL_1_TIME, userDiceColors]);
 
   // Turn countdown timer (active when additional users are in the room):
   // 30s on roll 1, 20s on rolls 2 & 3 in multiplayer
@@ -504,7 +522,18 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     if (rollsUsed >= 3 || isRolling) return;
     if (!isHumanOwner && !(isCPU && isTurnAuthority)) return;
     if (joiningCountdown !== null && joiningCountdown > 0) return;
-    const active = dice.filter(d => d.zone === 'active');
+
+    // Guarantee that on roll 1 (rollsUsed === 0), all 12 dice are in the active rolling zone
+    let workingDice = dice;
+    if (rollsUsed === 0) {
+      if (workingDice.length < 12 || workingDice.some(d => d.zone === 'saved')) {
+        const [c1, c2] = getUnitDiceColors(curUnit, userDiceColors);
+        workingDice = createInitialDice(c1, c2);
+        setDice(workingDice);
+      }
+    }
+
+    const active = workingDice.filter(d => d.zone === 'active');
     if (rollsUsed > 0 && active.length === 0) {
       showToast('All dice saved — Score it!');
       return;
@@ -558,7 +587,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     setTimeout(() => {
       clearInterval(shuffleTimer);
       // Lock dice values cleanly after the animation ends!
-      const finalDice = dice.map(d => {
+      const finalDice = workingDice.map(d => {
         if (d.zone === 'active') {
           const finalVal = finalValuesMap.get(d.id) ?? d.value;
           return {
@@ -1085,30 +1114,28 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       } else {
         // CPU decision on saving sets
         const toSaveIds = decideCPUSaves(dice);
-
-        if (toSaveIds.length > 0) {
-          setDice(prev => {
-            const next = prev.map(d => (toSaveIds.includes(d.id) ? { ...d, zone: 'saved' as const, selected: false } : d));
-            checkBonusChimes(next);
-            if (settings.roomId && isTurnAuthority) {
-              updateRoomGameState(settings.roomId, {
-                dice: next,
-                lastAction: 'save_dice',
-                lastActionBy: user.uid,
-                actionTimestamp: Date.now(),
-              });
-            }
-            return next;
-          });
-        }
-
         const remainingActive = dice.filter(d => d.zone === 'active' && !toSaveIds.includes(d.id));
 
         if (rollsUsed < 3 && remainingActive.length > 0) {
-          // Roll again
+          // Rolling again: save the dice first and notify room peers
+          if (toSaveIds.length > 0) {
+            setDice(prev => {
+              const next = prev.map(d => (toSaveIds.includes(d.id) ? { ...d, zone: 'saved' as const, selected: false } : d));
+              checkBonusChimes(next);
+              if (settings.roomId && isTurnAuthority) {
+                updateRoomGameState(settings.roomId, {
+                  dice: next,
+                  lastAction: 'save_dice',
+                  lastActionBy: user.uid,
+                  actionTimestamp: Date.now(),
+                });
+              }
+              return next;
+            });
+          }
           doRoll();
         } else {
-          // Bank turn
+          // Done rolling: bank turn directly! bankTurn will automatically commit all scoring sets and reset dice cleanly for the next player without racing save_dice
           bankTurn();
         }
       }
