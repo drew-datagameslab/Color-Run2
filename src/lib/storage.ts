@@ -422,8 +422,8 @@ export function redeemShopCoupon(
 export const DEFAULT_SHOP: ShopSettings = {
   equippedColors: ['blue', 'red'],
   unlockedColors: ['blue', 'red'],
-  equippedBg: 'bg-wood',
-  unlockedBgs: ['bg-wood'],
+  equippedBg: 'wood',
+  unlockedBgs: ['wood', 'bg-wood'],
   volume: 70,
 };
 

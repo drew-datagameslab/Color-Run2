@@ -287,9 +287,13 @@ export default function App() {
     setScreen('pickgame');
   };
 
+  const bgClass = shopSettings.equippedBg.startsWith('bg-')
+    ? `${shopSettings.equippedBg} ${shopSettings.equippedBg.slice(3)}`
+    : `bg-${shopSettings.equippedBg} ${shopSettings.equippedBg}`;
+
   return (
     <div
-      className={`h-[100dvh] max-h-[100dvh] text-stone-900 transition-colors duration-300 font-sans flex flex-col justify-between overflow-hidden select-none ${shopSettings.equippedBg}`}
+      className={`h-[100dvh] max-h-[100dvh] text-stone-900 transition-colors duration-300 font-sans flex flex-col justify-between overflow-hidden select-none ${bgClass}`}
     >
       {/* Landscape orientation lock overlay: prompts user to rotate to portrait */}
       <PortraitLockOverlay />

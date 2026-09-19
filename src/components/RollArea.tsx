@@ -44,8 +44,8 @@ export const RollArea: React.FC<RollAreaProps> = ({
 
   return (
     <div
-      className={`relative w-full rounded-2xl bg-[#144b26] border border-[#2f9a4f]/70 p-1 sm:p-1.5 shadow-xl flex flex-col justify-center transition-all duration-200 ${
-        isSingleRow ? 'min-h-[64px] sm:min-h-[72px] py-1' : 'min-h-[124px] sm:min-h-[138px] py-1.5'
+      className={`relative w-full rounded-2xl bg-[#144b26] border border-[#2f9a4f]/70 p-1.5 sm:p-2 shadow-xl flex flex-col justify-center transition-all duration-200 overflow-visible ${
+        isSingleRow ? 'min-h-[70px] sm:min-h-[78px] py-2' : 'min-h-[122px] sm:min-h-[134px] py-2 sm:py-2.5'
       }`}
     >
       {/* Dice Grid/Row - strictly 1 row of up to 6 dice or 2 rows of 6 dice */}
@@ -57,11 +57,11 @@ export const RollArea: React.FC<RollAreaProps> = ({
         }
       >
         {isSingleRow ? (
-          // In single row mode: display remaining active dice centered with maximized size
+          // In single row mode: display remaining active dice centered at the same proportional size
           activeDice.map(die => (
             <div
               key={die.id}
-              className="w-[50px] h-[50px] sm:w-[56px] sm:h-[56px] max-w-[62px] max-h-[62px] flex-shrink-0 aspect-square"
+              className="w-[42px] h-[42px] sm:w-[48px] sm:h-[48px] flex-shrink-0 aspect-square flex items-center justify-center"
             >
               <DieComponent
                 color={die.color}
@@ -87,7 +87,7 @@ export const RollArea: React.FC<RollAreaProps> = ({
               return (
                 <div
                   key={die.id}
-                  className="w-full max-w-[56px] sm:max-w-[62px] aspect-square min-w-0 flex items-center justify-center"
+                  className="w-full max-w-[44px] sm:max-w-[48px] aspect-square min-w-0 flex items-center justify-center"
                 >
                   <DieComponent
                     color={die.color}
@@ -107,7 +107,7 @@ export const RollArea: React.FC<RollAreaProps> = ({
             return (
               <div
                 key={`slot-empty-${slotIdx}`}
-                className="aspect-square rounded-[16%] border border-dashed border-[#2f9a4f]/35 bg-black/15 pointer-events-none transition-all w-full max-w-[56px] sm:max-w-[62px] min-w-0"
+                className="aspect-square rounded-[16%] border border-dashed border-[#2f9a4f]/35 bg-black/15 pointer-events-none transition-all w-full max-w-[44px] sm:max-w-[48px] min-w-0"
               />
             );
           })

@@ -4,12 +4,35 @@
    COLOR RUN ARCADE THEMES & BACKGROUNDS
    ---------------------------------------------------- */
 .bg-wood, .wood {
-  background-color: #bd9059;
-  background-image:
-    repeating-linear-gradient(0deg, rgba(255,255,255,.045) 0 2px, transparent 2px 6px),
-    repeating-linear-gradient(0deg, rgba(96,54,26,.07) 0 1px, transparent 1px 5px),
-    repeating-linear-gradient(90deg, rgba(96,54,26,.05) 0 1px, transparent 1px 26px),
-    linear-gradient(180deg, #9a6530, #7d4f20 28%, #633b14 55%, #b5834b 100%);
+  background-color: #7d4f20;
+  background-image: url('/media/backgrounds/wood.jpg');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+.bg-blue-abstract, .blue-abstract {
+  background-color: #0b1a30;
+  background-image: url('/media/backgrounds/blue-abstract.jpg');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+.bg-purple-abstract, .purple-abstract {
+  background-color: #1e0b30;
+  background-image: url('/media/backgrounds/purple-abstract.jpg');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+.bg-purple-dots, .purple-dots {
+  background-color: #2b0c3d;
+  background-image: url('/media/backgrounds/purple-dots.jpg');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
 }
 
 .bg-galaxy, .galaxy {

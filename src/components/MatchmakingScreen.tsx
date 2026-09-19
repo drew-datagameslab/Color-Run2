@@ -216,93 +216,76 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   const progressPercent = Math.max(0, (secondsLeft / 15) * 100);
 
   return (
-    <div className="w-full max-w-sm mx-auto flex flex-col items-center justify-between min-h-[85vh] p-3 pb-8 select-none animate-fade-in">
+    <div className="w-full max-w-sm mx-auto flex flex-col items-center justify-between min-h-0 py-2 sm:py-3 px-3 select-none animate-fade-in">
       {/* Top Header */}
-      <div className="flex flex-col items-center w-full mt-2">
-        <ColorRunLogo size="md" />
+      <div className="flex flex-col items-center w-full mt-1">
+        <ColorRunLogo size="sm" />
 
-        <div className="mt-2 text-center">
-          <div className="text-[11px] font-black uppercase tracking-widest text-[#d9ba6d]">
+        <div className="mt-1 text-center">
+          <div className="text-[10px] font-black uppercase tracking-widest text-[#d9ba6d]">
             ONLINE MATCHMAKING
           </div>
-          <h2 className="text-xl font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
+          <h2 className="text-base sm:text-lg font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
             {playerCount} Players · 🪙 {buyIn} Buy-In
           </h2>
         </div>
       </div>
 
-      {/* Center Radar / Timer Widget */}
-      <div className="w-full bg-[#faf4e6]/95 border-2 border-[#c9b877] rounded-3xl p-5 shadow-2xl flex flex-col items-center my-3">
-        {/* Countdown Ring / Ready Banner */}
-        <div className="relative mb-3 flex items-center justify-center">
-          <div className="w-20 h-20 rounded-full border-4 border-[#ebdcb9] flex items-center justify-center relative shadow-inner">
-            <svg className="absolute inset-0 w-full h-full -rotate-90">
-              <circle
-                cx="36"
-                cy="36"
-                r="32"
-                className="text-[#2f9a4f] stroke-current"
-                strokeWidth="4"
-                fill="transparent"
-                strokeDasharray="201"
-                strokeDashoffset={201 - (201 * (15 - secondsLeft)) / 15}
-                style={{ transition: 'stroke-dashoffset 1s linear' }}
-              />
-            </svg>
-
-            <div className="flex flex-col items-center justify-center">
-              {isStarting ? (
-                <span className="text-2xl font-black text-[#e58a1f] animate-ping">
-                  {startCountdown}
-                </span>
-              ) : (
-                <>
-                  <span className="text-xl font-mono font-black text-[#1c6a35]">
-                    {secondsLeft}s
-                  </span>
-                  <span className="text-[9px] font-bold text-[#8c745e] uppercase">Timer</span>
-                </>
-              )}
-            </div>
+      {/* Center Radar / Timer Widget with Loading Bar */}
+      <div className="w-full bg-[#faf4e6]/95 border-2 border-[#c9b877] rounded-2xl sm:rounded-3xl p-3 sm:p-4 shadow-2xl flex flex-col items-center my-2">
+        {/* Loading Bar Timer - Compact & clear */}
+        <div className="w-full mb-2 bg-white/80 p-2.5 rounded-xl border border-[#ebdcb9]">
+          <div className="flex items-center justify-between text-xs font-bold text-[#4a3622] mb-1.5">
+            <span className="flex items-center gap-1.5">
+              {!isStarting && <Loader2 className="w-3.5 h-3.5 animate-spin text-[#2f9a4f]" />}
+              <span>{isStarting ? `Starting game in ${startCountdown}s…` : statusText}</span>
+            </span>
+            <span className="font-mono text-xs font-black px-2 py-0.5 rounded-md bg-[#2f9a4f]/15 text-[#1c6a35]">
+              {isStarting ? `${startCountdown}s` : `${secondsLeft}s`}
+            </span>
+          </div>
+          {/* Visual Loading Bar */}
+          <div className="w-full h-2.5 bg-[#ebdcb9] rounded-full overflow-hidden shadow-inner border border-[#c9b877]/60">
+            <div
+              className="h-full bg-gradient-to-r from-[#2f9a4f] via-[#3ebd63] to-[#2f9a4f] rounded-full transition-all duration-1000 ease-linear shadow-xs"
+              style={{
+                width: isStarting ? '100%' : `${Math.min(100, Math.max(0, ((15 - secondsLeft) / 15) * 100))}%`,
+              }}
+            />
+          </div>
+          <div className="flex justify-between items-center mt-1 text-[10px] text-[#735c46]">
+            <span>15-second matchmaking</span>
+            <span className="font-bold">Slots: {filledCount}/{playerCount} filled</span>
           </div>
         </div>
 
-        {/* Status Text */}
-        <p className="text-xs font-black text-[#4a3622] text-center mb-1 flex items-center justify-center gap-1.5">
-          {!isStarting && <Loader2 className="w-3.5 h-3.5 animate-spin text-[#2f9a4f]" />}
-          <span>{isStarting ? `Room Full! Starting in ${startCountdown}s…` : statusText}</span>
-        </p>
-        <p className="text-[11px] text-[#735c46] text-center mb-4">
-          Filled: {filledCount} of {playerCount} slots
-        </p>
-
         {/* 10-second Ad Banner during the 15s Matchmaking Lobby for non-ad-free players */}
         {!user.isAdFree && (
-          <div className="w-full mb-3 bg-gradient-to-r from-[#2b170a] to-[#452712] border-2 border-[#f2c14e]/70 rounded-2xl p-2.5 text-[#faf4e6] shadow-md flex items-center justify-between gap-2.5 animate-fade-in">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#e58a1f] to-[#b3630a] flex items-center justify-center shrink-0 text-lg shadow-xs">
+          <div className="w-full mb-2 bg-gradient-to-r from-[#2b170a] to-[#452712] border border-[#f2c14e]/70 rounded-xl p-2 text-[#faf4e6] shadow-md flex items-center justify-between gap-2 animate-fade-in">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#e58a1f] to-[#b3630a] flex items-center justify-center shrink-0 text-base shadow-xs">
               🎲
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[8px] uppercase tracking-wider font-black bg-[#f2c14e] text-[#2b170a] px-1 py-0.2 rounded font-mono">
+              <div className="flex items-center gap-1">
+                <span className="text-[7px] uppercase tracking-wider font-black bg-[#f2c14e] text-[#2b170a] px-1 py-0.2 rounded font-mono">
                   AD
                 </span>
-                <span className="text-[11px] font-black text-[#faf4e6] truncate">
+                <span className="text-[10px] font-black text-[#faf4e6] truncate">
                   Color Run: Home Edition
                 </span>
               </div>
-              <p className="text-[10px] text-[#d8c8a7] truncate leading-tight">
+              <p className="text-[9px] text-[#d8c8a7] truncate leading-tight">
                 12 custom carved dice &amp; tabletop playmat
               </p>
             </div>
             <div className="text-right shrink-0">
               {secondsLeft > 5 ? (
-                <span className="text-[10px] font-mono font-bold text-[#f2c14e] bg-black/40 px-2 py-0.5 rounded-full border border-[#f2c14e]/30">
+                <span className="text-[9px] font-mono font-bold text-[#f2c14e] bg-black/40 px-1.5 py-0.5 rounded-full border border-[#f2c14e]/30">
                   Ad: {secondsLeft - 5}s
                 </span>
               ) : (
-                <span className="text-[10px] font-bold text-[#2f9a4f] bg-black/40 px-2 py-0.5 rounded-full border border-[#2f9a4f]/50">
-                  ✓ Ad Done
+                <span className="text-[9px] font-bold text-[#2f9a4f] bg-black/40 px-1.5 py-0.5 rounded-full border border-[#2f9a4f]/50">
+                  ✓ Done
                 </span>
               )}
             </div>

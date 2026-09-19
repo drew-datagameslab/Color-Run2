@@ -60,7 +60,10 @@ const ALL_COLORS: Array<{ id: DiceColor; name: string; hex: string; price: numbe
 
 // User specified: Backgrounds should be 50 coins as well.
 const ALL_BGS = [
-  { id: 'wood', name: 'Wood Grain', price: 0, image: '' },
+  { id: 'wood', name: 'Wood Table', price: 0, image: '/media/backgrounds/wood.jpg' },
+  { id: 'blue-abstract', name: 'Blue Abstract', price: 50, image: '/media/backgrounds/blue-abstract.jpg' },
+  { id: 'purple-abstract', name: 'Purple Abstract', price: 50, image: '/media/backgrounds/purple-abstract.jpg' },
+  { id: 'purple-dots', name: 'Purple Dots', price: 50, image: '/media/backgrounds/purple-dots.jpg' },
   { id: 'galaxy', name: 'Night Galaxy', price: 50, image: '/media/backgrounds/galaxy.jpg' },
   { id: 'sky', name: 'Puffy Clouds', price: 50, image: '/media/backgrounds/sky.jpg' },
   { id: 'castle', name: 'Castle Garden', price: 50, image: '/media/backgrounds/castle.jpg' },
@@ -181,7 +184,8 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
   const handleEquipBg = (bgId: string) => {
     const isUnlocked =
       shopSettings.unlockedBgs.includes(bgId) ||
-      (bgId === 'wood' && shopSettings.unlockedBgs.includes('bg-wood'));
+      shopSettings.unlockedBgs.includes(`bg-${bgId}`) ||
+      (bgId === 'wood' && (shopSettings.unlockedBgs.includes('bg-wood') || shopSettings.unlockedBgs.includes('wood')));
 
     if (!isUnlocked) {
       const bgDef = ALL_BGS.find(b => b.id === bgId);
@@ -793,7 +797,7 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
                       <div className="flex items-center gap-2.5 mb-2.5">
                         {/* Die with spade on the face in this color */}
                         <div className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 drop-shadow-xs">
-                          <DieComponent color={color.id} value={1} />
+                          <DieComponent color={color.id} value={4} />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-bold text-[#3e2e1e] truncate">{color.name}</div>
@@ -864,10 +868,12 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
                 {ALL_BGS.map(bg => {
                   const isUnlocked =
                     shopSettings.unlockedBgs.includes(bg.id) ||
-                    (bg.id === 'wood' && shopSettings.unlockedBgs.includes('bg-wood'));
+                    shopSettings.unlockedBgs.includes(`bg-${bg.id}`) ||
+                    (bg.id === 'wood' && (shopSettings.unlockedBgs.includes('bg-wood') || shopSettings.unlockedBgs.includes('wood')));
                   const isEquipped =
                     shopSettings.equippedBg === bg.id ||
-                    (bg.id === 'wood' && shopSettings.equippedBg === 'bg-wood');
+                    shopSettings.equippedBg === `bg-${bg.id}` ||
+                    (bg.id === 'wood' && (shopSettings.equippedBg === 'wood' || shopSettings.equippedBg === 'bg-wood'));
 
                   return (
                     <button
