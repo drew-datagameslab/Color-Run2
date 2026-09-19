@@ -9,6 +9,8 @@ import { CardsStrip } from './CardsStrip';
 import { SavedBoard } from './SavedBoard';
 import { RollArea } from './RollArea';
 import { PlayerProfileModal } from './PlayerProfileModal';
+import { Loader2 } from 'lucide-react';
+import { subscribeToRoom, markPlayerLeft, updateRoomGameState } from '../lib/matchmaking';
 
 interface PlayScreenProps {
   settings: GameSettings;
@@ -70,22 +72,39 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 }) => {
   const userDiceColors: [DiceColor, DiceColor] = user.diceColors || [settings.colorA, settings.colorB];
 
-  // Initialize players - User is the ONLY human player (Slot 0), all other slots are CPU bots
+  // Multiplayer room detection (no host concept: all players are peers in a shared room)
+  const isMultiplayer =
+    settings.mode === 'online' ||
+    !!settings.roomId ||
+    settings.slots.some(s => s.isOnlinePlayer);
+
+  // Timing for rolls in multiplayer rooms: 30s for roll 1, 20s for rolls 2 & 3
+  const ROLL_1_TIME = isMultiplayer ? 30 : 20;
+  const ROLL_2_3_TIME = isMultiplayer ? 20 : 10;
+
+  // 15 seconds on the gameplay screen to allow all players to join the room
+  const [joiningCountdown, setJoiningCountdown] = useState<number | null>(() =>
+    isMultiplayer ? 15 : null
+  );
+
+  // Initialize players from settings slots
   const [units, setUnits] = useState<PlayerUnit[]>(() => {
     return settings.slots.map((s, idx) => {
-      const isUserSlot = idx === 0;
+      const isLocalUser = s.isOwner ?? (s.uid ? s.uid === user.uid : idx === 0);
+      const isCPU = s.type === 'cpu' || (!isLocalUser && !s.isOnlinePlayer && settings.mode !== 'online');
       return {
         id: `u_${idx + 1}`,
         name: s.name,
-        isCPU: !isUserSlot,
-        isOwner: isUserSlot,
-        isOnlinePlayer: false,
+        isCPU: isCPU,
+        isOwner: isLocalUser,
+        isOnlinePlayer: !isLocalUser && s.type === 'human',
         color: s.color,
         image: s.image,
-        diceColors: isUserSlot ? (s.diceColors || userDiceColors) : ['blue', 'red'],
+        diceColors: s.diceColors || (isLocalUser ? userDiceColors : ['blue', 'red']),
         score: 0,
         history: {},
         active: true,
+        uid: s.uid,
       };
     });
   });
@@ -110,12 +129,14 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const [selectedPlayerForProfile, setSelectedPlayerForProfile] = useState<PlayerUnit | null>(null);
   const [friends, setFriends] = useState<Friend[]>(() => getLocalFriends(user.uid));
 
-  // Turn timer & AFK management - 20s for roll 1, 10s for roll 2 & 3
-  const [turnSecondsLeft, setTurnSecondsLeft] = useState(20);
+  // Turn timer & AFK management - 30s for roll 1, 20s for rolls 2 & 3 in multiplayer
+  const [turnSecondsLeft, setTurnSecondsLeft] = useState(ROLL_1_TIME);
   const [isAfkOverlay, setIsAfkOverlay] = useState(false);
   const [consecutiveAfkTurns, setConsecutiveAfkTurns] = useState(0);
   const [isAutoPilotTurn, setIsAutoPilotTurn] = useState(false);
   const prevActiveUnitIdRef = useRef<string | null>(null);
+  const doRollRef = useRef<() => void>(() => {});
+  const bankTurnRef = useRef<() => void>(() => {});
 
   const handleAddFriend = async (player: PlayerUnit) => {
     const res = await addFriend(user.uid, {
@@ -144,7 +165,12 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const activeUnits = units.filter(u => u.active);
   const curUnit = activeUnits[qIdx] || activeUnits[0];
   const isHumanOwner = curUnit ? (curUnit.isOwner && !curUnit.isCPU) : false;
-  const isCPU = curUnit ? (!curUnit.isOwner || curUnit.isCPU || isAutoPilotTurn) : false;
+  const isRemoteHuman = curUnit ? (!curUnit.isOwner && curUnit.isOnlinePlayer && !curUnit.isCPU) : false;
+  const isCPU = curUnit ? (curUnit.isCPU || isAutoPilotTurn) : false;
+
+  const humanUnits = units.filter(u => !u.isCPU && (u.isOwner || u.isOnlinePlayer));
+  const turnAuthorityUid = humanUnits.length > 0 ? (humanUnits[0].uid || user.uid) : user.uid;
+  const isTurnAuthority = settings.mode !== 'online' || user.uid === turnAuthorityUid;
 
   // Timers are added to keep the games moving when additional Users are in the room.
   // When the user is only playing against computer players (Play vs Computer rooms), no timers are needed.
@@ -192,13 +218,101 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     return () => clearTimeout(timer);
   }, [showSixCelebration]);
 
+  // 15 seconds on the gameplay screen to allow all players to join the room
+  useEffect(() => {
+    if (joiningCountdown === null) return;
+    if (joiningCountdown <= 0) {
+      setJoiningCountdown(null);
+      playSfx('fanfare');
+      showToast('🎲 All players ready! Round 1 begins');
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setJoiningCountdown(prev => (prev !== null ? prev - 1 : null));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [joiningCountdown]);
+
+  const lastActionTimestampRef = useRef(0);
+
+  // Listen for room updates & players who stepped away / disconnected
+  useEffect(() => {
+    if (!settings.roomId) return;
+    const unsub = subscribeToRoom(settings.roomId, updatedRoom => {
+      // 1. Sync players who disconnected or stepped away
+      const leftUids: string[] = updatedRoom.leftPlayers || [];
+      if (leftUids.length > 0) {
+        setUnits(prev =>
+          prev.map(u => {
+            const slot = settings.slots.find(s => s.name === u.name);
+            if (slot?.uid && leftUids.includes(slot.uid) && !u.isCPU) {
+              showToast(`${u.name} stepped away. Computer has taken over.`);
+              return { ...u, isCPU: true, isOnlinePlayer: false };
+            }
+            return u;
+          })
+        );
+      }
+
+      // 2. Sync shared real-time gameState across players
+      const gs = updatedRoom.gameState;
+      if (gs && gs.actionTimestamp > lastActionTimestampRef.current) {
+        lastActionTimestampRef.current = gs.actionTimestamp;
+
+        // Action was performed by another peer
+        if (gs.lastActionBy !== user.uid) {
+          if (gs.lastAction === 'roll') {
+            setIsRolling(true);
+            setDice(gs.dice);
+            setRollsUsed(gs.rollsUsed);
+            setTurnSecondsLeft(ROLL_2_3_TIME);
+            setTimeout(() => {
+              setIsRolling(false);
+            }, 350);
+          } else if (gs.lastAction === 'save_dice') {
+            setDice(gs.dice);
+            checkBonusChimes(gs.dice);
+          } else if (gs.lastAction === 'bank') {
+            playSfx('add');
+            if (gs.scores) {
+              setUnits(prev =>
+                prev.map(u => {
+                  if (gs.scores[u.id] !== undefined) {
+                    return {
+                      ...u,
+                      score: gs.scores[u.id],
+                      history: gs.unitHistory?.[u.id] || u.history,
+                    };
+                  }
+                  return u;
+                })
+              );
+            }
+            setRollsUsed(0);
+            setAnnouncedChimes({});
+            setShowSixCelebration(false);
+            if (gs.dice) setDice(gs.dice);
+            if (typeof gs.activeUnitIndex === 'number') setQIdx(gs.activeUnitIndex);
+            if (typeof gs.round === 'number') setRound(gs.round);
+            if (gs.phase) setPhase(gs.phase as GamePhase);
+            if (gs.elimModalMsg) setElimModalMsg(gs.elimModalMsg);
+            setTurnSecondsLeft(ROLL_1_TIME);
+          }
+        }
+      }
+    });
+    return () => unsub();
+  }, [settings.roomId, settings.slots, user.uid, ROLL_1_TIME, ROLL_2_3_TIME]);
+
   // Alert when the user's turn comes up & reset roll timer & bonus announcements
   useEffect(() => {
     if (!curUnit) return;
     if (curUnit.id !== prevActiveUnitIdRef.current) {
       prevActiveUnitIdRef.current = curUnit.id;
       stopWarningSound();
-      setTurnSecondsLeft(20);
+      setTurnSecondsLeft(ROLL_1_TIME);
       setRollSlotsCount(12);
       setIsAutoPilotTurn(false);
       setAnnouncedChimes({});
@@ -210,29 +324,62 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         showToast('👉 Your Turn! Tap ROLL');
       }
     }
-  }, [curUnit]);
+  }, [curUnit, ROLL_1_TIME]);
 
-  // Turn countdown timer for human user's turn (ONLY active when additional users are in the room):
-  // 20s on roll 1, 10s on rolls 2 & 3
+  // Turn countdown timer (active when additional users are in the room):
+  // 30s on roll 1, 20s on rolls 2 & 3 in multiplayer
   useEffect(() => {
-    if (!isTimerEnabled || !isHumanOwner || isAutoPilotTurn || isRolling || elimModalMsg) {
+    if (
+      !isTimerEnabled ||
+      (!isHumanOwner && !isRemoteHuman) ||
+      isAutoPilotTurn ||
+      isRolling ||
+      elimModalMsg ||
+      (joiningCountdown !== null && joiningCountdown > 0)
+    ) {
       stopWarningSound();
       return;
     }
 
-    // Play 5-second countdown warning audio when timer reaches 5 seconds
-    if (turnSecondsLeft === 5) {
+    // Play 5-second countdown warning audio when timer reaches 5 seconds (only for local human player)
+    if (turnSecondsLeft === 5 && isHumanOwner) {
       playWarning5sSound();
     }
 
     if (turnSecondsLeft <= 0) {
       stopWarningSound();
-      // User time ran out - auto-roll or score
-      const active = dice.filter(d => d.zone === 'active');
-      if (rollsUsed < 3 && (rollsUsed === 0 || active.length > 0)) {
-        doRoll();
-      } else {
-        bankTurn();
+      if (isHumanOwner) {
+        // Local human user ran out of time - mark as stepped away / autopilot
+        setConsecutiveAfkTurns(prev => {
+          const next = prev + 1;
+          if (next >= 1) {
+            setIsAfkOverlay(true);
+            setIsAutoPilotTurn(true);
+          }
+          return next;
+        });
+        // User time ran out - auto-roll or score
+        const active = dice.filter(d => d.zone === 'active');
+        if (rollsUsed < 3 && (rollsUsed === 0 || active.length > 0)) {
+          doRollRef.current();
+        } else {
+          bankTurnRef.current();
+        }
+      } else if (isRemoteHuman && isTurnAuthority) {
+        // Remote human ran out of time! Turn authority marks them stepped away and executes turn
+        showToast(`${curUnit?.name} ran out of time. Computer has taken over.`);
+        if (settings.roomId && curUnit?.uid) {
+          markPlayerLeft(settings.roomId, curUnit.uid);
+        }
+        setUnits(prev =>
+          prev.map(u => (u.id === curUnit?.id ? { ...u, isCPU: true, isOnlinePlayer: false } : u))
+        );
+        const active = dice.filter(d => d.zone === 'active');
+        if (rollsUsed < 3 && (rollsUsed === 0 || active.length > 0)) {
+          doRollRef.current();
+        } else {
+          bankTurnRef.current();
+        }
       }
       return;
     }
@@ -245,12 +392,17 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   }, [
     isTimerEnabled,
     isHumanOwner,
+    isRemoteHuman,
+    isTurnAuthority,
     isAutoPilotTurn,
     rollsUsed,
     isRolling,
     elimModalMsg,
+    joiningCountdown,
     turnSecondsLeft,
     dice,
+    curUnit,
+    settings.roomId,
   ]);
 
   const showToast = (msg: string) => {
@@ -347,28 +499,42 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     setTimeout(() => {
       clearInterval(shuffleTimer);
       // Lock dice values cleanly after the animation ends!
-      setDice(prev =>
-        prev.map(d => {
-          if (d.zone === 'active') {
-            const finalVal = finalValuesMap.get(d.id) ?? d.value;
-            return {
-              ...d,
-              value: finalVal,
-              selected: false,
-            };
-          }
-          return d;
-        })
-      );
-      setRollsUsed(r => {
-        const nextRoll = r + 1;
-        // Human player gets 10 seconds for rolls 2 & 3
-        if (isHumanOwner && !isCPU) {
-          setTurnSecondsLeft(10);
+      const finalDice = dice.map(d => {
+        if (d.zone === 'active') {
+          const finalVal = finalValuesMap.get(d.id) ?? d.value;
+          return {
+            ...d,
+            value: finalVal,
+            selected: false,
+          };
         }
-        return nextRoll;
+        return d;
       });
+
+      setDice(finalDice);
+
+      const nextRoll = rollsUsed + 1;
+      setRollsUsed(nextRoll);
+
+      // Human player gets time for rolls 2 & 3 (20s in multiplayer, 10s otherwise)
+      if (isHumanOwner && !isCPU) {
+        setTurnSecondsLeft(ROLL_2_3_TIME);
+      }
       setIsRolling(false);
+
+      if (settings.roomId && (isHumanOwner || (isCPU && isTurnAuthority))) {
+        updateRoomGameState(settings.roomId, {
+          round,
+          phase,
+          activeUnitIndex: qIdx,
+          activeUnitId: curUnit.id,
+          rollsUsed: nextRoll,
+          dice: finalDice,
+          lastAction: 'roll',
+          lastActionBy: user.uid,
+          actionTimestamp: Date.now(),
+        });
+      }
     }, rollDuration);
   };
 
@@ -380,7 +546,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     // Stop warning sound immediately and reset turn timer when user moves dice!
     stopWarningSound();
     if (isHumanOwner && !isCPU) {
-      setTurnSecondsLeft(rollsUsed === 0 ? 20 : 10);
+      setTurnSecondsLeft(rollsUsed === 0 ? ROLL_1_TIME : ROLL_2_3_TIME);
     }
 
     setDice(prev => {
@@ -412,6 +578,14 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           return d;
         });
         checkBonusChimes(finalized);
+        if (settings.roomId && isHumanOwner) {
+          updateRoomGameState(settings.roomId, {
+            dice: finalized,
+            lastAction: 'save_dice',
+            lastActionBy: user.uid,
+            actionTimestamp: Date.now(),
+          });
+        }
         return finalized;
       }
 
@@ -426,7 +600,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     // Stop warning sound immediately and reset turn timer when user moves dice!
     stopWarningSound();
     if (isHumanOwner && !isCPU) {
-      setTurnSecondsLeft(rollsUsed === 0 ? 20 : 10);
+      setTurnSecondsLeft(rollsUsed === 0 ? ROLL_1_TIME : ROLL_2_3_TIME);
     }
 
     setDice(prev => {
@@ -457,18 +631,28 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       const remainingSaved = prev.filter(
         d => d.zone === 'saved' && d.value === v && d.id !== id
       );
-      if (remainingSaved.length < 3) {
-        return prev.map(d =>
-          d.value === v
-            ? { ...d, zone: 'active' as const, selected: false, slotIndex: assignSlot(d.slotIndex) }
-            : d
-        );
+      const result = remainingSaved.length < 3
+        ? prev.map(d =>
+            d.value === v
+              ? { ...d, zone: 'active' as const, selected: false, slotIndex: assignSlot(d.slotIndex) }
+              : d
+          )
+        : prev.map(d =>
+            d.id === id
+              ? { ...d, zone: 'active' as const, selected: false, slotIndex: assignSlot(d.slotIndex) }
+              : d
+          );
+
+      if (settings.roomId && isHumanOwner) {
+        updateRoomGameState(settings.roomId, {
+          dice: result,
+          lastAction: 'save_dice',
+          lastActionBy: user.uid,
+          actionTimestamp: Date.now(),
+        });
       }
-      return prev.map(d =>
-        d.id === id
-          ? { ...d, zone: 'active' as const, selected: false, slotIndex: assignSlot(d.slotIndex) }
-          : d
-      );
+
+      return result;
     });
   };
 
@@ -534,8 +718,33 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       const stillActive = updatedUnits.filter(u => u.active);
       const nextTargetUnit = nextQIdx < stillActive.length ? stillActive[nextQIdx] : stillActive[0];
       const [nextColorA, nextColorB] = getUnitDiceColors(nextTargetUnit, userDiceColors);
+      const nextDiceForTurn = createInitialDice(nextColorA, nextColorB);
 
-      setDice(createInitialDice(nextColorA, nextColorB));
+      setDice(nextDiceForTurn);
+
+      if (settings.roomId && (isHumanOwner || (isCPU && isTurnAuthority))) {
+        const scoresRecord: Record<string, number> = {};
+        const histRecord: Record<string, Record<number, number>> = {};
+        updatedUnits.forEach(u => {
+          scoresRecord[u.id] = u.score;
+          histRecord[u.id] = u.history;
+        });
+
+        updateRoomGameState(settings.roomId, {
+          round: nextQIdx < stillActive.length ? round : round + 1,
+          phase,
+          activeUnitIndex: nextQIdx < stillActive.length ? nextQIdx : 0,
+          activeUnitId: nextTargetUnit.id,
+          scores: scoresRecord,
+          unitHistory: histRecord,
+          activeUnitIds: stillActive.map(u => u.id),
+          rollsUsed: 0,
+          dice: nextDiceForTurn,
+          lastAction: 'bank',
+          lastActionBy: user.uid,
+          actionTimestamp: Date.now(),
+        });
+      }
 
       if (nextQIdx < stillActive.length) {
         setQIdx(nextQIdx);
@@ -551,6 +760,9 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       finishBank();
     }
   }, [curUnit, dice, qIdx, round, settings.colorA, settings.colorB, units, userDiceColors, checkBonusChimes, showSixCelebration]);
+
+  doRollRef.current = doRoll;
+  bankTurnRef.current = bankTurn;
 
   // Round resolution (checking threshold or doing elimination)
   const resolveRound = (currentUnits: PlayerUnit[]) => {
@@ -573,7 +785,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       const [c1, c2] = getUnitDiceColors(liveUnits[0], userDiceColors);
       setDice(createInitialDice(c1, c2));
       if (liveUnits[0]?.isOwner && !liveUnits[0]?.isCPU) {
-        setTurnSecondsLeft(20);
+        setTurnSecondsLeft(ROLL_1_TIME);
         setIsAutoPilotTurn(false);
       }
     } else {
@@ -613,7 +825,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       const [c1, c2] = getUnitDiceColors(survivors[0], userDiceColors);
       setDice(createInitialDice(c1, c2));
       if (survivors[0]?.isOwner && !survivors[0]?.isCPU) {
-        setTurnSecondsLeft(20);
+        setTurnSecondsLeft(ROLL_1_TIME);
         setIsAutoPilotTurn(false);
       }
     }
@@ -633,7 +845,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       setDice(createInitialDice(c1, c2));
     }
     if (firstUnit?.isOwner && !firstUnit.isCPU) {
-      setTurnSecondsLeft(20);
+      setTurnSecondsLeft(ROLL_1_TIME);
       setIsAutoPilotTurn(false);
     }
   };
@@ -656,9 +868,22 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     return () => clearInterval(timer);
   }, [elimModalMsg]);
 
-  // CPU Automated Turn Runner (waits if elimination modal or 6-of-a-kind celebration is displayed)
+  // CPU Automated Turn Runner (waits if elimination modal or 6-of-a-kind celebration or joining countdown is displayed)
   useEffect(() => {
-    if (!isCPU || !curUnit || isRolling || elimModalMsg || showSixCelebration) return;
+    if (
+      !isCPU ||
+      !curUnit ||
+      isRolling ||
+      elimModalMsg ||
+      showSixCelebration ||
+      (joiningCountdown !== null && joiningCountdown > 0)
+    )
+      return;
+
+    // In multiplayer: only the designated turn authority client runs the CPU bots!
+    if (settings.mode === 'online' && !isTurnAuthority && !isAutoPilotTurn) {
+      return;
+    }
 
     const delay = spectatorFastForward ? 120 : 650;
 
@@ -673,6 +898,14 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           setDice(prev => {
             const next = prev.map(d => (toSaveIds.includes(d.id) ? { ...d, zone: 'saved' as const, selected: false } : d));
             checkBonusChimes(next);
+            if (settings.roomId && isTurnAuthority) {
+              updateRoomGameState(settings.roomId, {
+                dice: next,
+                lastAction: 'save_dice',
+                lastActionBy: user.uid,
+                actionTimestamp: Date.now(),
+              });
+            }
             return next;
           });
         }
@@ -690,10 +923,40 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     }, delay);
 
     return () => clearTimeout(timer);
-  }, [isCPU, curUnit, rollsUsed, isRolling, dice, spectatorFastForward, elimModalMsg, showSixCelebration, doRoll, bankTurn, checkBonusChimes]);
+  }, [
+    isCPU,
+    isTurnAuthority,
+    isAutoPilotTurn,
+    settings.mode,
+    settings.roomId,
+    user.uid,
+    curUnit,
+    rollsUsed,
+    isRolling,
+    dice,
+    spectatorFastForward,
+    elimModalMsg,
+    showSixCelebration,
+    joiningCountdown,
+    doRoll,
+    bankTurn,
+    checkBonusChimes,
+  ]);
 
-  const canRoll = rollsUsed < 3 && dice.filter(d => d.zone === 'active').length > 0 && !isCPU && !isRolling;
-  const canScore = (rollsUsed === 3 || dice.filter(d => d.zone === 'active').length === 0) && rollsUsed > 0 && !isCPU;
+  const canRoll =
+    rollsUsed < 3 &&
+    dice.filter(d => d.zone === 'active').length > 0 &&
+    isHumanOwner &&
+    !isCPU &&
+    !isRolling &&
+    (joiningCountdown === null || joiningCountdown <= 0);
+
+  const canScore =
+    (rollsUsed === 3 || dice.filter(d => d.zone === 'active').length === 0) &&
+    rollsUsed > 0 &&
+    isHumanOwner &&
+    !isCPU &&
+    (joiningCountdown === null || joiningCountdown <= 0);
 
   const humanPlayer = units.find(u => u.isOwner);
   const isHumanOut = humanPlayer ? !humanPlayer.active : false;
@@ -706,6 +969,9 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const isTimeRunningOut = isTimerEnabled && isHumanOwner && !isCPU && turnSecondsLeft <= 5 && !isRolling;
 
   const handleExitClick = () => {
+    if (settings.roomId && user?.uid) {
+      markPlayerLeft(settings.roomId, user.uid);
+    }
     if (!isHumanOut && humanPlayer?.active) {
       // Route through onOpenMenu to show forfeiture warning modal
       onOpenMenu();
@@ -829,10 +1095,48 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             activeUnitId={curUnit?.id}
             currentRound={round}
             isEliminationPhase={phase === 'elimination'}
-            isUserTurnToRoll={isHumanOwner && rollsUsed === 0 && !isAutoPilotTurn}
+            isUserTurnToRoll={isHumanOwner && rollsUsed === 0 && !isAutoPilotTurn && (joiningCountdown === null || joiningCountdown <= 0)}
             onSelectUnit={setSelectedPlayerForProfile}
           />
         </div>
+
+        {/* 15-second Gameplay Screen Waiting Period for Multiplayer Rooms */}
+        {joiningCountdown !== null && joiningCountdown > 0 && (
+          <div className="bg-[#faf4e6]/95 border-2 border-[#f2c14e] rounded-xl sm:rounded-2xl p-2 sm:p-2.5 mb-1 shadow-lg text-center animate-fade-in">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs sm:text-sm font-black text-[#3e2e1e]">
+                <Loader2 className="w-4 h-4 animate-spin text-[#2f9a4f]" />
+                <span>Waiting for all players to join…</span>
+              </div>
+              <span className="font-mono text-xs font-black px-2 py-0.5 rounded-full bg-[#f2c14e] text-[#2b170a] shadow-xs">
+                ⏱️ {joiningCountdown}s
+              </span>
+            </div>
+            <p className="text-[10px] sm:text-[11px] text-[#735c46] leading-snug mt-0.5">
+              Allowing 15 seconds for all players to finish intro screens and connect.
+            </p>
+            {/* Quick status dots of all room players */}
+            <div className="flex flex-wrap items-center justify-center gap-1.5 mt-1.5">
+              {units.map((u, idx) => (
+                <div
+                  key={u.id || idx}
+                  className="flex items-center gap-1 bg-white/90 border border-[#ebdcb9] px-2 py-0.5 rounded-full text-[10px] font-bold text-[#3e2e1e] shadow-2xs"
+                >
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: u.color }}
+                  />
+                  <span className="truncate max-w-[80px]">{u.name}</span>
+                  {u.isCPU ? (
+                    <span className="text-[9px] text-[#b3630a] font-mono">🤖 CPU</span>
+                  ) : (
+                    <span className="text-[9px] text-[#2f9a4f] font-mono">🟢 Ready</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Toast message (for friend additions/actions) */}
         {toastMsg && (
@@ -897,21 +1201,37 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             className={`flex-1 py-1.5 sm:py-2 md:py-3.5 px-2 md:px-4 bg-[#28974a] hover:bg-[#22803e] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm md:text-base rounded-xl md:rounded-2xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-1 md:gap-2 border-b-2 md:border-b-3 border-[#185e2e] ${
               isTimeRunningOut
                 ? 'ring-4 ring-yellow-400 ring-offset-2 ring-offset-black/50 animate-pulse bg-red-700 hover:bg-red-800'
-                : rollsUsed === 0 && isHumanOwner && !isCPU
+                : rollsUsed === 0 && isHumanOwner && !isCPU && (joiningCountdown === null || joiningCountdown <= 0)
                 ? 'ring-2 ring-yellow-300 ring-offset-1 ring-offset-black/40 animate-pulse shadow-[0_0_12px_rgba(242,193,78,0.5)]'
                 : ''
             }`}
           >
-            <span>{rollsUsed === 0 ? '🎲 ROLL' : 'Rolls'}</span>
-            {rollsUsed > 0 && (
-              <span className="text-[11px] md:text-xs font-mono font-normal opacity-90">
-                - {Math.max(0, 3 - rollsUsed)} left
+            {joiningCountdown !== null && joiningCountdown > 0 ? (
+              <span>⏳ Waiting for players ({joiningCountdown}s)</span>
+            ) : isRemoteHuman ? (
+              <span className="flex items-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-white/80" />
+                <span>Waiting for {curUnit.name}…</span>
+                {turnSecondsLeft <= 5 && (
+                  <span className="ml-1 bg-yellow-400 text-black text-[10px] md:text-xs font-mono font-black px-1.5 py-0.2 rounded-full">
+                    ⚠️ {turnSecondsLeft}s
+                  </span>
+                )}
               </span>
-            )}
-            {isTimeRunningOut && (
-              <span className="ml-1 bg-yellow-400 text-black text-[10px] md:text-xs font-mono font-black px-1.5 py-0.2 rounded-full animate-bounce">
-                ⚠️ {turnSecondsLeft}s!
-              </span>
+            ) : (
+              <>
+                <span>{rollsUsed === 0 ? '🎲 ROLL' : 'Rolls'}</span>
+                {rollsUsed > 0 && (
+                  <span className="text-[11px] md:text-xs font-mono font-normal opacity-90">
+                    - {Math.max(0, 3 - rollsUsed)} left
+                  </span>
+                )}
+                {isTimeRunningOut && (
+                  <span className="ml-1 bg-yellow-400 text-black text-[10px] md:text-xs font-mono font-black px-1.5 py-0.2 rounded-full animate-bounce">
+                    ⚠️ {turnSecondsLeft}s!
+                  </span>
+                )}
+              </>
             )}
           </button>
 
@@ -939,7 +1259,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
         {/* Hint tip text */}
         <div className="text-center text-[10px] sm:text-[11px] text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] mt-0.5 font-medium">
-          {isCPU
+          {joiningCountdown !== null && joiningCountdown > 0
+            ? '⏳ Waiting for all players to join before starting round 1…'
+            : isRemoteHuman
+            ? `⏳ ${curUnit?.name}'s turn — waiting for their roll…`
+            : isCPU
             ? `🤖 ${curUnit?.name} is thinking…`
             : rollsUsed === 0
               ? <span className="text-[#f2c14e] font-bold animate-pulse">👉 Your turn! Tap ROLL to roll all 12 dice</span>

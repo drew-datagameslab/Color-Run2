@@ -90,6 +90,25 @@
         "image": { "type": "string" },
         "updatedAt": { "type": "string" }
       }
+    },
+    "Room": {
+      "collection": "rooms",
+      "fields": {
+        "id": { "type": "string" },
+        "gameKey": { "type": "string" },
+        "tier": { "type": "string" },
+        "playerCount": { "type": "number" },
+        "buyIn": { "type": "number" },
+        "createdAt": { "type": "number" },
+        "expiresAt": { "type": "number" },
+        "status": { "type": "string" },
+        "players": { "type": "array" },
+        "filledBots": { "type": "array" },
+        "slots": { "type": "array" },
+        "leftPlayers": { "type": "array" },
+        "gameState": { "type": "object" },
+        "updatedAt": { "type": "number" }
+      }
     }
   }
 }

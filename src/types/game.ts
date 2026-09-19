@@ -45,6 +45,7 @@ export interface PlayerUnit {
   active: boolean;
   place?: number;
   diceColors?: [DiceColor, DiceColor];
+  uid?: string;
 }
 
 export interface TurnState {
@@ -67,13 +68,16 @@ export interface GameSettings {
   payoutMultiplier?: number;
   payouts?: number[];
   adPlayedDuringMatchmaking?: boolean;
+  roomId?: string;
   slots: Array<{
     name: string;
     type: 'human' | 'cpu';
     isOnlinePlayer?: boolean;
+    isOwner?: boolean;
     color: string;
     image?: string;
     diceColors?: [DiceColor, DiceColor];
+    uid?: string;
   }>;
 }
 

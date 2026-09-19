@@ -54,6 +54,14 @@ service cloud.firestore {
       allow read, update: if true;
     }
 
+    // Multiplayer matchmaking and game rooms
+    match /rooms/{roomId} {
+      allow read, write: if true;
+      match /{allPaths=**} {
+        allow read, write: if true;
+      }
+    }
+
     // Health check and connection validation
     match /test/{docId} {
       allow read: if true;
