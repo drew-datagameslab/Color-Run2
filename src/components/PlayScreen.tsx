@@ -123,6 +123,14 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const [toastMsg, setToastMsg] = useState('');
   const [elimModalMsg, setElimModalMsg] = useState<string | null>(null);
   const [elimCountdown, setElimCountdown] = useState(5);
+  const hasShownElimWarningRef = useRef(false);
+
+  const triggerEliminationWarning = useCallback((msg: string) => {
+    if (hasShownElimWarningRef.current) return;
+    hasShownElimWarningRef.current = true;
+    setElimModalMsg(msg);
+    setElimCountdown(5);
+  }, []);
   const [showSixCelebration, setShowSixCelebration] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [selectedPlayerForProfile, setSelectedPlayerForProfile] = useState<PlayerUnit | null>(null);
@@ -353,8 +361,12 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             if (gs.dice) setDice(gs.dice);
             if (typeof gs.activeUnitIndex === 'number') setQIdx(gs.activeUnitIndex);
             if (typeof gs.round === 'number') setRound(gs.round);
-            if (gs.phase) setPhase(gs.phase as GamePhase);
-            if (gs.elimModalMsg) setElimModalMsg(gs.elimModalMsg);
+            if (gs.phase) {
+              setPhase(gs.phase as GamePhase);
+              if (gs.phase === 'elimination' && !hasShownElimWarningRef.current) {
+                triggerEliminationWarning(`Someone reached ${settings.threshold} points! From here, every player plays a full round, then the lowest total is knocked out. Last one standing wins!`);
+              }
+            }
             setTurnSecondsLeft(ROLL_1_TIME);
           }
         }
@@ -843,7 +855,21 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       if (thresholdReached) {
         setPhase('elimination');
         const msg = `Someone reached ${settings.threshold} points! From here, every player plays a full round, then the lowest total is knocked out. Last one standing wins!`;
-        setElimModalMsg(msg);
+        triggerEliminationWarning(msg);
+
+        // Advance to round 4 (the first elimination round) and reset to first player
+        const nextRound = round + 1;
+        setRound(nextRound);
+        setQIdx(0);
+        setRollsUsed(0);
+        setRollSlotsCount(12);
+        const [c1, c2] = getUnitDiceColors(liveUnits[0], userDiceColors);
+        const nextDice = createInitialDice(c1, c2);
+        setDice(nextDice);
+        if (liveUnits[0]?.isOwner && !liveUnits[0]?.isCPU) {
+          setTurnSecondsLeft(ROLL_1_TIME);
+          setIsAutoPilotTurn(false);
+        }
 
         if (settings.roomId) {
           const scoresRecord: Record<string, number> = {};
@@ -855,17 +881,16 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           const unitStatus = buildUnitStatusRecord(currentUnits);
 
           updateRoomGameState(settings.roomId, {
-            round,
+            round: nextRound,
             phase: 'elimination',
-            activeUnitIndex: qIdx,
-            activeUnitId: curUnit?.id || currentUnits[0].id,
+            activeUnitIndex: 0,
+            activeUnitId: liveUnits[0].id,
             scores: scoresRecord,
             unitHistory: histRecord,
             activeUnitIds: liveUnits.map(u => u.id),
             unitStatus,
             rollsUsed: 0,
-            dice,
-            elimModalMsg: msg,
+            dice: nextDice,
             lastAction: 'phase_change',
             lastActionBy: user.uid,
             actionTimestamp: Date.now(),
@@ -1012,24 +1037,10 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     }
   };
 
-  // Dismiss elimination announcement and prepare the round without auto-rolling
-  const handleDismissElimModal = () => {
+  // Dismiss elimination announcement without altering round or dice (state is already synced)
+  const handleDismissElimModal = useCallback(() => {
     setElimModalMsg(null);
-    setRound(r => r + 1);
-    setQIdx(0);
-    setRollsUsed(0);
-    setRollSlotsCount(12);
-    const liveUnits = units.filter(u => u.active);
-    const firstUnit = liveUnits[0];
-    if (firstUnit) {
-      const [c1, c2] = getUnitDiceColors(firstUnit, userDiceColors);
-      setDice(createInitialDice(c1, c2));
-    }
-    if (firstUnit?.isOwner && !firstUnit.isCPU) {
-      setTurnSecondsLeft(ROLL_1_TIME);
-      setIsAutoPilotTurn(false);
-    }
-  };
+  }, []);
 
   // 5-second countdown timer on the elimination warning button
   useEffect(() => {
@@ -1047,7 +1058,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [elimModalMsg]);
+  }, [elimModalMsg, handleDismissElimModal]);
 
   // CPU Automated Turn Runner (waits if elimination modal or 6-of-a-kind celebration or joining countdown is displayed)
   useEffect(() => {
@@ -1531,8 +1542,14 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
       {/* Elimination Modal Announcement with 5-second countdown on button */}
       {elimModalMsg && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs select-none animate-fade-in">
-          <div className="w-full max-w-sm bg-[#faf4e6] border-2 border-[#e5352f] rounded-2xl p-5 shadow-2xl text-center">
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs select-none animate-fade-in"
+          onClick={handleDismissElimModal}
+        >
+          <div 
+            className="w-full max-w-sm bg-[#faf4e6] border-2 border-[#e5352f] rounded-2xl p-5 shadow-2xl text-center"
+            onClick={e => e.stopPropagation()}
+          >
             <div className="text-3xl mb-1">⚔️</div>
             <h3 className="text-xl font-black text-[#e5352f] mb-2">Elimination Round!</h3>
             <p className="text-xs text-[#4a3622] leading-relaxed mb-4">{elimModalMsg}</p>
