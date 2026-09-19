@@ -259,6 +259,10 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const qIdxRef = useRef<number>(-1);
   const rollsUsedRef = useRef<number>(-1);
 
+  useEffect(() => {
+    rollsUsedRef.current = rollsUsed;
+  }, [rollsUsed]);
+
   // Listen for room updates & players who stepped away / disconnected
   useEffect(() => {
     if (!settings.roomId) return;
@@ -539,6 +543,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       return;
     }
 
+    const activeIds = new Set(active.map(d => d.id));
     const activeCount = active.length;
     // On roll 2/3: adjust spaces. 8 remaining -> 2 rows of 4; <=6 remaining -> 1 row
     const newSlots = rollsUsed === 0 ? 12 : activeCount;
@@ -571,7 +576,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     const shuffleTimer = setInterval(() => {
       setDice(prev =>
         prev.map(d => {
-          if (d.zone === 'active') {
+          if (d.zone === 'active' && activeIds.has(d.id)) {
             return {
               ...d,
               value: Math.floor(Math.random() * 6) + 1,
@@ -586,22 +591,39 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
     setTimeout(() => {
       clearInterval(shuffleTimer);
-      // Lock dice values cleanly after the animation ends!
-      const finalDice = workingDice.map(d => {
-        if (d.zone === 'active') {
-          const finalVal = finalValuesMap.get(d.id) ?? d.value;
-          return {
-            ...d,
-            value: finalVal,
-            selected: false,
-          };
+      const nextRoll = rollsUsed + 1;
+
+      // Lock dice values cleanly after the animation ends using latest state!
+      setDice(prev => {
+        const finalDice = prev.map(d => {
+          if (d.zone === 'active' && activeIds.has(d.id)) {
+            const finalVal = finalValuesMap.get(d.id) ?? d.value;
+            return {
+              ...d,
+              value: finalVal,
+              selected: false,
+            };
+          }
+          return d;
+        });
+
+        if (settings.roomId && (isHumanOwner || (isCPU && isTurnAuthority))) {
+          updateRoomGameState(settings.roomId, {
+            round,
+            phase,
+            activeUnitIndex: qIdx,
+            activeUnitId: curUnit.id,
+            rollsUsed: nextRoll,
+            dice: finalDice,
+            lastAction: 'roll',
+            lastActionBy: user.uid,
+            actionTimestamp: Date.now(),
+          });
         }
-        return d;
+
+        return finalDice;
       });
 
-      setDice(finalDice);
-
-      const nextRoll = rollsUsed + 1;
       setRollsUsed(nextRoll);
 
       // Human player gets time for rolls 2 & 3 (20s in multiplayer, 10s otherwise)
@@ -609,20 +631,6 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         setTurnSecondsLeft(ROLL_2_3_TIME);
       }
       setIsRolling(false);
-
-      if (settings.roomId && (isHumanOwner || (isCPU && isTurnAuthority))) {
-        updateRoomGameState(settings.roomId, {
-          round,
-          phase,
-          activeUnitIndex: qIdx,
-          activeUnitId: curUnit.id,
-          rollsUsed: nextRoll,
-          dice: finalDice,
-          lastAction: 'roll',
-          lastActionBy: user.uid,
-          actionTimestamp: Date.now(),
-        });
-      }
     }, rollDuration);
   };
 
@@ -1111,33 +1119,41 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     const timer = setTimeout(() => {
       if (rollsUsed === 0) {
         doRoll();
-      } else {
-        // CPU decision on saving sets
-        const toSaveIds = decideCPUSaves(dice);
-        const remainingActive = dice.filter(d => d.zone === 'active' && !toSaveIds.includes(d.id));
+        return;
+      }
 
-        if (rollsUsed < 3 && remainingActive.length > 0) {
-          // Rolling again: save the dice first and notify room peers
-          if (toSaveIds.length > 0) {
-            setDice(prev => {
-              const next = prev.map(d => (toSaveIds.includes(d.id) ? { ...d, zone: 'saved' as const, selected: false } : d));
-              checkBonusChimes(next);
-              if (settings.roomId && isTurnAuthority) {
-                updateRoomGameState(settings.roomId, {
-                  dice: next,
-                  lastAction: 'save_dice',
-                  lastActionBy: user.uid,
-                  actionTimestamp: Date.now(),
-                });
-              }
-              return next;
-            });
-          }
-          doRoll();
-        } else {
-          // Done rolling: bank turn directly! bankTurn will automatically commit all scoring sets and reset dice cleanly for the next player without racing save_dice
-          bankTurn();
+      // Step 1: Check if there are sets of 3+ (or matching sets) in active dice to save
+      const toSaveIds = decideCPUSaves(dice);
+      if (toSaveIds.length > 0) {
+        const nextDice = dice.map(d =>
+          toSaveIds.includes(d.id) ? { ...d, zone: 'saved' as const, selected: false } : d
+        );
+        playSfx('add');
+        setDice(nextDice);
+        checkBonusChimes(nextDice);
+
+        if (settings.roomId && isTurnAuthority) {
+          updateRoomGameState(settings.roomId, {
+            rollsUsed,
+            dice: nextDice,
+            lastAction: 'save_dice',
+            lastActionBy: user.uid,
+            actionTimestamp: Date.now(),
+          });
         }
+        // Yield execution! This gives time for the dice to move to the saved area,
+        // updates component dice state, and syncs to remote peers.
+        return;
+      }
+
+      // Step 2: All valid sets are in the saved area. Decide next action:
+      const remainingActive = dice.filter(d => d.zone === 'active');
+      if (rollsUsed < 3 && remainingActive.length > 0) {
+        // Roll remaining active dice for roll 2 or roll 3
+        doRoll();
+      } else {
+        // No more rolls or no more active dice: bank turn
+        bankTurn();
       }
     }, delay);
 
