@@ -30,6 +30,7 @@ export interface RoomGameState {
   activeUnitIndex: number;
   activeUnitId: string;
   rollsUsed: number;
+  rollSlotsCount?: number;
   dice: Die[];
   scores: Record<string, number>;
   unitHistory: Record<string, Record<number, number>>;
@@ -378,38 +379,32 @@ export async function updateRoomGameState(
   roomId: string,
   stateUpdate: Partial<RoomGameState>
 ): Promise<void> {
+  const roomRef = doc(db, 'rooms', roomId);
+  // Deep-strip any undefined fields to prevent Firestore serialization errors
+  const sanitized: Partial<RoomGameState> = JSON.parse(JSON.stringify(stateUpdate));
+
+  if (!sanitized.lastActionId) {
+    sanitized.lastActionId = `${sanitized.lastAction || 'act'}_${sanitized.lastActionBy || 'p'}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  }
+  if (!sanitized.actionTimestamp) {
+    sanitized.actionTimestamp = Date.now();
+  }
+
+  // Primary: updateDoc with dot-notation merges fields cleanly inside the gameState map,
+  // preventing unrelated fields (like round, phase, activeUnitIndex) from being wiped!
+  const updatePayload: Record<string, any> = {
+    updatedAt: Date.now(),
+  };
+  Object.entries(sanitized).forEach(([key, val]) => {
+    updatePayload[`gameState.${key}`] = val;
+  });
+
   try {
-    const roomRef = doc(db, 'rooms', roomId);
-    // Deep-strip any undefined fields to prevent Firestore serialization errors
-    const sanitized: Partial<RoomGameState> = JSON.parse(JSON.stringify(stateUpdate));
-
-    if (!sanitized.lastActionId) {
-      sanitized.lastActionId = `${sanitized.lastAction || 'act'}_${sanitized.lastActionBy || 'p'}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    }
-    if (!sanitized.actionTimestamp) {
-      sanitized.actionTimestamp = Date.now();
-    }
-
-    // Use setDoc with merge: true to cleanly merge gameState map and update timestamp
-    await setDoc(roomRef, { gameState: sanitized, updatedAt: Date.now() }, { merge: true });
+    await updateDoc(roomRef, updatePayload);
   } catch (err) {
-    console.error('setDoc merge failed on room game state, trying updateDoc fallback:', err);
     try {
-      const roomRef = doc(db, 'rooms', roomId);
-      const sanitized: Partial<RoomGameState> = JSON.parse(JSON.stringify(stateUpdate));
-      if (!sanitized.lastActionId) {
-        sanitized.lastActionId = `${sanitized.lastAction || 'act'}_${sanitized.lastActionBy || 'p'}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-      }
-      if (!sanitized.actionTimestamp) {
-        sanitized.actionTimestamp = Date.now();
-      }
-      const updatePayload: Record<string, any> = {
-        updatedAt: Date.now(),
-      };
-      Object.entries(sanitized).forEach(([key, val]) => {
-        updatePayload[`gameState.${key}`] = val;
-      });
-      await updateDoc(roomRef, updatePayload);
+      // Fallback: if document has not initialized the gameState map yet, use setDoc with merge
+      await setDoc(roomRef, { gameState: sanitized, updatedAt: Date.now() }, { merge: true });
     } catch (fallbackErr) {
       console.error('All Firestore update attempts failed for game state:', fallbackErr);
     }

@@ -307,10 +307,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             setIsRolling(true);
             setDice(gs.dice);
             setRollsUsed(gs.rollsUsed);
+            if (typeof gs.rollSlotsCount === 'number') setRollSlotsCount(gs.rollSlotsCount);
             setTurnSecondsLeft(ROLL_2_3_TIME);
             setTimeout(() => {
               setIsRolling(false);
-            }, 350);
+            }, 1400);
           } else if (gs.lastAction === 'save_dice') {
             // Only accept save_dice if the turn is in progress (not before roll 1 has happened)
             if (rollsUsedRef.current > 0 || (typeof gs.rollsUsed === 'number' && gs.rollsUsed > 0)) {
@@ -402,7 +403,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
       // On new turn or new round, guarantee all 12 dice are fresh in the active zone
       setDice(prev => {
-        if (prev.some(d => d.zone === 'saved') || prev.length < 12) {
+        if (rollsUsed === 0 && (prev.some(d => d.zone === 'saved') || prev.length < 12)) {
           const [c1, c2] = getUnitDiceColors(curUnit, userDiceColors);
           return createInitialDice(c1, c2);
         }
@@ -587,8 +588,29 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       );
     }, 60);
 
-    const rollDuration = spectatorFastForward ? 100 : 380;
+    const rollDuration = spectatorFastForward ? 120 : 1400;
+    const lockPreTime = spectatorFastForward ? 60 : 980;
 
+    // Phase 1: Pre-lock true final values while the dice are still actively tumbling.
+    // This allows the browser to display and render the final symbols during the final tumble cycles,
+    // ensuring that when the animation ends, the displayed symbols are already the true result.
+    setTimeout(() => {
+      clearInterval(shuffleTimer);
+      setDice(prev =>
+        prev.map(d => {
+          if (d.zone === 'active' && activeIds.has(d.id)) {
+            return {
+              ...d,
+              value: finalValuesMap.get(d.id) ?? d.value,
+              selected: false,
+            };
+          }
+          return d;
+        })
+      );
+    }, lockPreTime);
+
+    // Phase 2: Complete roll tumble animation cleanly and sync with room peers
     setTimeout(() => {
       clearInterval(shuffleTimer);
       const nextRoll = rollsUsed + 1;
@@ -615,6 +637,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             activeUnitId: curUnit.id,
             rollsUsed: nextRoll,
             dice: finalDice,
+            rollSlotsCount: newSlots,
             lastAction: 'roll',
             lastActionBy: user.uid,
             actionTimestamp: Date.now(),
@@ -677,6 +700,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         checkBonusChimes(finalized);
         if (settings.roomId && isHumanOwner) {
           updateRoomGameState(settings.roomId, {
+            round,
+            phase,
+            activeUnitIndex: qIdx,
+            activeUnitId: curUnit.id,
+            rollsUsed,
             dice: finalized,
             lastAction: 'save_dice',
             lastActionBy: user.uid,
@@ -743,6 +771,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
       if (settings.roomId && isHumanOwner) {
         updateRoomGameState(settings.roomId, {
+          round,
+          phase,
+          activeUnitIndex: qIdx,
+          activeUnitId: curUnit.id,
+          rollsUsed,
           dice: result,
           lastAction: 'save_dice',
           lastActionBy: user.uid,
@@ -1134,6 +1167,10 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
         if (settings.roomId && isTurnAuthority) {
           updateRoomGameState(settings.roomId, {
+            round,
+            phase,
+            activeUnitIndex: qIdx,
+            activeUnitId: curUnit.id,
             rollsUsed,
             dice: nextDice,
             lastAction: 'save_dice',
@@ -1166,6 +1203,9 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     settings.roomId,
     user.uid,
     curUnit,
+    round,
+    phase,
+    qIdx,
     rollsUsed,
     isRolling,
     dice,
