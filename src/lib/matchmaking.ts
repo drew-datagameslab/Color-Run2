@@ -74,6 +74,19 @@ export const BOT_COLORS = [
 ];
 
 /**
+ * Deeply sanitizes an object for Firestore by replacing all undefined values with null
+ * or stripping them, preventing Firestore "Unsupported field value: undefined" errors.
+ */
+export function sanitizeForFirestore<T>(data: T): T {
+  return JSON.parse(
+    JSON.stringify(data, (key, value) => {
+      if (value === undefined) return null;
+      return value;
+    })
+  );
+}
+
+/**
  * Generates bot players to fill empty spots in a room
  */
 export function generateBots(countNeeded: number, existingCount: number = 0): RoomPlayer[] {
@@ -84,6 +97,7 @@ export function generateBots(countNeeded: number, existingCount: number = 0): Ro
       uid: `cpu_bot_${existingCount + i}_${Date.now()}`,
       name: BOT_NAMES[idx],
       color: BOT_COLORS[idx],
+      image: null,
       type: 'cpu',
       diceColors: ['blue', 'red'],
       joinedAt: Date.now(),
@@ -93,7 +107,7 @@ export function generateBots(countNeeded: number, existingCount: number = 0): Ro
 }
 
 /**
- * Finds an open room within the 15-20 second entry window with available spots,
+ * Finds an open room within the entry window with available spots,
  * or creates a brand-new game room. Uses an active lobby pointer so that all
  * devices selecting the same option join the exact same room.
  */
@@ -110,9 +124,9 @@ export async function findOrCreateRoom(
 
   const currentPlayer: RoomPlayer = {
     uid: user.uid,
-    name: user.name,
-    color: user.avatar.color,
-    image: user.avatar.image,
+    name: user.name || 'Player',
+    color: user.avatar?.color || '#e5352f',
+    image: user.avatar?.image || null,
     diceColors: userDiceColors,
     type: 'human',
     joinedAt: now,
@@ -120,7 +134,7 @@ export async function findOrCreateRoom(
 
   const lobbyRef = doc(db, 'lobbies', gameKey);
 
-  // 1. Atomic transaction on the lobby & room so devices joining simultaneously (e.g. iPad, Android, phone) converge into the same room
+  // 1. Atomic transaction on the lobby & room so devices joining simultaneously (e.g. iPad, Android, iPhone) converge into the same room
   try {
     const result = await runTransaction(db, async transaction => {
       const lobbySnap = await transaction.get(lobbyRef);
@@ -130,7 +144,8 @@ export async function findOrCreateRoom(
         const lobbyData = lobbySnap.data() as { roomId: string; createdAt: number; playerCount: number; maxPlayers?: number };
         const elapsed = currentTime - (lobbyData.createdAt || 0);
 
-        if (elapsed > -30000 && elapsed < 22000 && lobbyData.roomId) {
+        // Tolerant time window (up to 60s) to account for minor client clock differences
+        if (elapsed > -60000 && elapsed < 60000 && lobbyData.roomId) {
           const targetRoomRef = doc(db, 'rooms', lobbyData.roomId);
           const roomSnap = await transaction.get(targetRoomRef);
 
@@ -138,21 +153,21 @@ export async function findOrCreateRoom(
             const roomData = roomSnap.data() as GameRoom;
             const currentPlayers = roomData.players || [];
             const isFull = currentPlayers.length >= playerCount;
-            const isOpen = roomData.status === 'waiting' || roomData.status === 'starting';
+            const isOpen = roomData.status === 'waiting';
 
             if (isOpen && !isFull) {
               const alreadyIn = currentPlayers.some(p => p.uid === user.uid);
               const updatedPlayers = alreadyIn ? currentPlayers : [...currentPlayers, currentPlayer];
 
-              transaction.update(targetRoomRef, {
+              transaction.update(targetRoomRef, sanitizeForFirestore({
                 players: updatedPlayers,
                 updatedAt: currentTime,
-              });
+              }));
 
-              transaction.update(lobbyRef, {
+              transaction.update(lobbyRef, sanitizeForFirestore({
                 playerCount: updatedPlayers.length,
                 updatedAt: currentTime,
-              });
+              }));
 
               return {
                 room: { ...roomData, id: lobbyData.roomId, players: updatedPlayers },
@@ -172,7 +187,7 @@ export async function findOrCreateRoom(
         playerCount,
         buyIn,
         createdAt: currentTime,
-        expiresAt: currentTime + 20000,
+        expiresAt: currentTime + 30000,
         status: 'waiting',
         players: [currentPlayer],
         filledBots: [],
@@ -180,19 +195,22 @@ export async function findOrCreateRoom(
       };
 
       const newRoomRef = doc(db, 'rooms', newRoomId);
-      transaction.set(newRoomRef, newRoom);
-      transaction.set(lobbyRef, {
+      transaction.set(newRoomRef, sanitizeForFirestore(newRoom));
+      transaction.set(lobbyRef, sanitizeForFirestore({
         roomId: newRoomId,
         createdAt: currentTime,
         playerCount: 1,
         maxPlayers: playerCount,
+        status: 'waiting',
         updatedAt: currentTime,
-      });
+      }));
 
       return { room: newRoom, isNew: true };
     });
 
-    return result;
+    if (result) {
+      return result;
+    }
   } catch (txErr) {
     console.warn('Matchmaking transaction error, falling back to query scan:', txErr);
   }
@@ -212,22 +230,22 @@ export async function findOrCreateRoom(
     for (const docSnap of snapshot.docs) {
       const data = docSnap.data() as GameRoom;
       const elapsed = now - data.createdAt;
-      if (elapsed > -30000 && elapsed < 22000 && data.status === 'waiting') {
+      if (elapsed > -60000 && elapsed < 60000 && data.status === 'waiting') {
         if (data.players && data.players.some(p => p.uid === user.uid)) {
           return { room: { ...data, id: docSnap.id }, isNew: false };
         }
       }
     }
 
-    // 2b. Look for open candidate rooms created within 22s window with space available
+    // 2b. Look for open candidate rooms created within window with space available
     const candidateRooms: Array<GameRoom & { id: string }> = [];
     snapshot.forEach(docSnap => {
       const data = docSnap.data() as GameRoom;
       const elapsed = now - data.createdAt;
       if (
-        elapsed > -30000 &&
-        elapsed < 22000 &&
-        (data.status === 'waiting' || data.status === 'starting') &&
+        elapsed > -60000 &&
+        elapsed < 60000 &&
+        data.status === 'waiting' &&
         data.players &&
         data.players.length < playerCount
       ) {
@@ -245,28 +263,27 @@ export async function findOrCreateRoom(
         const freshSnap = await getDoc(roomRef);
         if (!freshSnap.exists()) continue;
         const freshData = freshSnap.data() as GameRoom;
-        if (freshData.status !== 'waiting' && freshData.status !== 'starting') continue;
-        const elapsed = Date.now() - freshData.createdAt;
-        if (elapsed > 25000) continue;
+        if (freshData.status !== 'waiting') continue;
         if (freshData.players && freshData.players.length >= playerCount) continue;
 
         const currentPlayers = freshData.players || [];
         const alreadyIn = currentPlayers.some(p => p.uid === user.uid);
         const updatedPlayers = alreadyIn ? currentPlayers : [...currentPlayers, currentPlayer];
 
-        await updateDoc(roomRef, {
+        await updateDoc(roomRef, sanitizeForFirestore({
           players: updatedPlayers,
           updatedAt: Date.now(),
-        });
+        }));
 
         // Set or refresh lobby pointer to this room
-        await setDoc(lobbyRef, {
+        await setDoc(lobbyRef, sanitizeForFirestore({
           roomId: targetRoom.id,
           createdAt: targetRoom.createdAt,
           playerCount: updatedPlayers.length,
           maxPlayers: playerCount,
+          status: 'waiting',
           updatedAt: Date.now(),
-        }).catch(() => {});
+        })).catch(() => {});
 
         return { room: { ...freshData, id: targetRoom.id, players: updatedPlayers }, isNew: false };
       } catch (err) {
@@ -286,7 +303,7 @@ export async function findOrCreateRoom(
     playerCount,
     buyIn,
     createdAt: now,
-    expiresAt: now + 20000,
+    expiresAt: now + 30000,
     status: 'waiting',
     players: [currentPlayer],
     filledBots: [],
@@ -295,17 +312,18 @@ export async function findOrCreateRoom(
 
   try {
     const roomRef = doc(db, 'rooms', newRoomId);
-    await setDoc(roomRef, newRoom);
+    await setDoc(roomRef, sanitizeForFirestore(newRoom));
 
     // Point active lobby to this brand-new room so phones, tablets, iPads all converge
     const lobbyRef = doc(db, 'lobbies', gameKey);
-    await setDoc(lobbyRef, {
+    await setDoc(lobbyRef, sanitizeForFirestore({
       roomId: newRoomId,
       createdAt: now,
       playerCount: 1,
       maxPlayers: playerCount,
+      status: 'waiting',
       updatedAt: now,
-    }).catch(() => {});
+    })).catch(() => {});
   } catch (err) {
     console.warn('Could not persist new room to Firestore (local fallback):', err);
   }
@@ -347,11 +365,11 @@ export async function finalizeAndStartRoom(
 ): Promise<void> {
   try {
     const roomRef = doc(db, 'rooms', roomId);
-    await updateDoc(roomRef, {
+    await updateDoc(roomRef, sanitizeForFirestore({
       status: 'in_progress',
       finalSlots,
       updatedAt: Date.now(),
-    });
+    }));
   } catch (err) {
     console.warn('Could not finalize room slots:', err);
   }
@@ -366,7 +384,7 @@ export async function setRoomStatus(
 ): Promise<void> {
   try {
     const roomRef = doc(db, 'rooms', roomId);
-    await updateDoc(roomRef, { status, updatedAt: Date.now() });
+    await updateDoc(roomRef, sanitizeForFirestore({ status, updatedAt: Date.now() }));
   } catch (err) {
     console.warn('Could not update room status:', err);
   }
@@ -381,7 +399,7 @@ export async function updateRoomGameState(
 ): Promise<void> {
   const roomRef = doc(db, 'rooms', roomId);
   // Deep-strip any undefined fields to prevent Firestore serialization errors
-  const sanitized: Partial<RoomGameState> = JSON.parse(JSON.stringify(stateUpdate));
+  const sanitized: Partial<RoomGameState> = sanitizeForFirestore(stateUpdate);
 
   if (!sanitized.lastActionId) {
     sanitized.lastActionId = `${sanitized.lastAction || 'act'}_${sanitized.lastActionBy || 'p'}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
@@ -404,7 +422,7 @@ export async function updateRoomGameState(
   } catch (err) {
     try {
       // Fallback: if document has not initialized the gameState map yet, use setDoc with merge
-      await setDoc(roomRef, { gameState: sanitized, updatedAt: Date.now() }, { merge: true });
+      await setDoc(roomRef, sanitizeForFirestore({ gameState: sanitized, updatedAt: Date.now() }), { merge: true });
     } catch (fallbackErr) {
       console.error('All Firestore update attempts failed for game state:', fallbackErr);
     }

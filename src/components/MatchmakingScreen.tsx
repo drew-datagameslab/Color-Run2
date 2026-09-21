@@ -108,6 +108,13 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
           return;
         }
 
+        // Check if room is already full upon initial connection
+        if (initialRoom.players && initialRoom.players.length >= playerCount) {
+          setStatusText('All players joined! Preparing game…');
+          setIsStarting(true);
+          setStartCountdown(c => (c === null ? 2 : Math.min(c, 2)));
+        }
+
         // Subscribe to real-time room updates from Firestore
         unsubscribe = subscribeToRoom(initialRoom.id, updatedRoom => {
           if (isCancelled) return;
@@ -122,6 +129,14 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
           // When the room is marked in_progress with final slots, launch immediately!
           if (updatedRoom.status === 'in_progress' && updatedRoom.finalSlots && !matchLaunchedRef.current) {
             launchMatchWithSlots(updatedRoom.finalSlots, updatedRoom.id);
+            return;
+          }
+
+          // When room reaches target player count, transition into quick launch!
+          if (updatedRoom.players.length >= playerCount && !matchLaunchedRef.current) {
+            setStatusText('All players joined! Preparing game…');
+            setIsStarting(true);
+            setStartCountdown(c => (c === null ? 2 : Math.min(c, 2)));
           }
         });
       } catch (err) {
@@ -152,6 +167,15 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
 
       setSecondsLeft(remainingSec);
 
+      // Accelerate launch if room is already full of players
+      if (curRoom && curRoom.players && curRoom.players.length >= playerCount && !matchLaunchedRef.current) {
+        clearInterval(interval);
+        setStatusText('All players joined! Preparing game…');
+        setIsStarting(true);
+        setStartCountdown(c => (c === null ? 2 : Math.min(c, 2)));
+        return;
+      }
+
       if (remainingSec <= 3 && remainingSec > 0) {
         setStatusText('Filling remaining spots with computer players…');
       }
@@ -159,14 +183,14 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
       // Time expired! Launch the game
       if (remainingMs <= 0 && !matchLaunchedRef.current) {
         clearInterval(interval);
-        setStatusText('All slots filled! Preparing game…');
+        setStatusText('Time up! Preparing game…');
         setIsStarting(true);
         setStartCountdown(2);
       }
     }, 250);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [playerCount]);
 
   // 3. Launch the game when countdown finishes
   useEffect(() => {
@@ -185,9 +209,9 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
       const humanPlayers: RoomPlayer[] = (curRoom?.players && curRoom.players.length > 0) ? curRoom.players : [
         {
           uid: user.uid,
-          name: user.name,
-          color: user.avatar.color,
-          image: user.avatar.image,
+          name: user.name || 'Player',
+          color: user.avatar.color || '#e5352f',
+          image: user.avatar.image || null,
           diceColors: userDiceColors,
           type: 'human',
           joinedAt: Date.now(),
@@ -203,7 +227,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
           name: p.name,
           type: p.type,
           color: p.color,
-          image: p.image,
+          image: p.image || null,
           diceColors: p.diceColors || ['blue', 'red'],
           uid: p.uid,
         };

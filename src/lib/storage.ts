@@ -66,6 +66,7 @@ export function getInitialUser(): UserAccount {
     avatar: {
       color: DEFAULT_AVATARS[0],
       name: 'P1',
+      image: null,
     },
     scoreboardUnlocked: false,
     isAdFree: !!adFreeGlobal,
