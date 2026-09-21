@@ -266,6 +266,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const rollsUsedRef = useRef<number>(-1);
   const roundRef = useRef<number>(1);
   const phaseRef = useRef<GamePhase>('regular');
+  const rollAnimTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    qIdxRef.current = qIdx;
+  }, [qIdx]);
 
   useEffect(() => {
     rollsUsedRef.current = rollsUsed;
@@ -329,67 +334,94 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
         // Action was performed by another peer
         if (!isFromSelf) {
+          // 1. Synchronize core progression fields on EVERY peer action
+          if (typeof gs.activeUnitIndex === 'number') {
+            setQIdx(gs.activeUnitIndex);
+          }
+          if (typeof gs.round === 'number') {
+            setRound(gs.round);
+          }
+          if (gs.phase) {
+            setPhase(gs.phase as GamePhase);
+            if (gs.phase === 'elimination' && !hasShownElimWarningRef.current) {
+              triggerEliminationWarning(
+                `Someone reached ${settings.threshold} points! From here, every player plays a full round, then the lowest total is knocked out. Last one standing wins!`
+              );
+            }
+          }
+          if (gs.unitStatus) {
+            setUnits(prev =>
+              prev.map(u => {
+                const st = gs.unitStatus![u.id];
+                if (st) {
+                  return {
+                    ...u,
+                    score: st.score ?? u.score,
+                    history: st.history ?? u.history,
+                    active: st.active !== undefined ? st.active : u.active,
+                    place: st.place !== undefined ? st.place : u.place,
+                  };
+                }
+                return u;
+              })
+            );
+          } else if (gs.scores) {
+            setUnits(prev =>
+              prev.map(u => {
+                const isActive = gs.activeUnitIds ? gs.activeUnitIds.includes(u.id) : u.active;
+                if (gs.scores![u.id] !== undefined) {
+                  return {
+                    ...u,
+                    score: gs.scores![u.id],
+                    history: gs.unitHistory?.[u.id] || u.history,
+                    active: isActive,
+                  };
+                }
+                return u;
+              })
+            );
+          }
+
+          if (gs.phase === 'over') {
+            setUnits(prev => {
+              const winner = prev.find(u => u.active) || prev[0];
+              if (winner) winner.place = 1;
+              onGameOver(winner, prev);
+              return prev;
+            });
+            return;
+          }
+
+          // 2. Action-specific handling
           if (gs.lastAction === 'roll') {
+            if (rollAnimTimeoutRef.current) {
+              clearTimeout(rollAnimTimeoutRef.current);
+            }
             setIsRolling(true);
             setDice(gs.dice);
             setRollsUsed(gs.rollsUsed);
             if (typeof gs.rollSlotsCount === 'number') setRollSlotsCount(gs.rollSlotsCount);
             setTurnSecondsLeft(ROLL_2_3_TIME);
-            setTimeout(() => {
+            rollAnimTimeoutRef.current = setTimeout(() => {
               setIsRolling(false);
-            }, 1400);
+              rollAnimTimeoutRef.current = null;
+            }, 1100);
           } else if (gs.lastAction === 'save_dice') {
-            // Only accept save_dice if the turn is in progress (not before roll 1 has happened)
-            if (rollsUsedRef.current > 0 || (typeof gs.rollsUsed === 'number' && gs.rollsUsed > 0)) {
-              setDice(gs.dice);
-              checkBonusChimes(gs.dice);
+            if (rollAnimTimeoutRef.current) {
+              clearTimeout(rollAnimTimeoutRef.current);
+              rollAnimTimeoutRef.current = null;
             }
+            setIsRolling(false);
+            setDice(gs.dice);
+            if (typeof gs.rollsUsed === 'number') setRollsUsed(gs.rollsUsed);
+            checkBonusChimes(gs.dice);
           } else if (gs.lastAction === 'bank' || gs.lastAction === 'elimination' || gs.lastAction === 'phase_change') {
+            if (rollAnimTimeoutRef.current) {
+              clearTimeout(rollAnimTimeoutRef.current);
+              rollAnimTimeoutRef.current = null;
+            }
             playSfx('add');
             setIsRolling(false);
-            if (gs.unitStatus) {
-              setUnits(prev =>
-                prev.map(u => {
-                  const st = gs.unitStatus![u.id];
-                  if (st) {
-                    return {
-                      ...u,
-                      score: st.score ?? u.score,
-                      history: st.history ?? u.history,
-                      active: st.active !== undefined ? st.active : u.active,
-                      place: st.place !== undefined ? st.place : u.place,
-                    };
-                  }
-                  return u;
-                })
-              );
-            } else if (gs.scores) {
-              setUnits(prev =>
-                prev.map(u => {
-                  const isActive = gs.activeUnitIds ? gs.activeUnitIds.includes(u.id) : u.active;
-                  if (gs.scores![u.id] !== undefined) {
-                    return {
-                      ...u,
-                      score: gs.scores![u.id],
-                      history: gs.unitHistory?.[u.id] || u.history,
-                      active: isActive,
-                    };
-                  }
-                  return u;
-                })
-              );
-            }
-
-            if (gs.phase === 'over') {
-              setUnits(prev => {
-                const winner = prev.find(u => u.active) || prev[0];
-                if (winner) winner.place = 1;
-                onGameOver(winner, prev);
-                return prev;
-              });
-              return;
-            }
-
             setRollsUsed(0);
             setAnnouncedChimes({});
             setShowSixCelebration(false);
@@ -397,14 +429,6 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
               // Ensure that on a banked turn transitioning to roll 0, all dice are in the active zone
               const freshActiveDice = gs.dice.map(d => ({ ...d, zone: 'active' as const, selected: false }));
               setDice(freshActiveDice);
-            }
-            if (typeof gs.activeUnitIndex === 'number') setQIdx(gs.activeUnitIndex);
-            if (typeof gs.round === 'number') setRound(gs.round);
-            if (gs.phase) {
-              setPhase(gs.phase as GamePhase);
-              if (gs.phase === 'elimination' && !hasShownElimWarningRef.current) {
-                triggerEliminationWarning(`Someone reached ${settings.threshold} points! From here, every player plays a full round, then the lowest total is knocked out. Last one standing wins!`);
-              }
             }
             setTurnSecondsLeft(ROLL_1_TIME);
           }
@@ -418,7 +442,13 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         }
       }
     });
-    return () => unsub();
+    return () => {
+      unsub();
+      if (rollAnimTimeoutRef.current) {
+        clearTimeout(rollAnimTimeoutRef.current);
+        rollAnimTimeoutRef.current = null;
+      }
+    };
   }, [settings.roomId, settings.slots, user.uid, ROLL_1_TIME, ROLL_2_3_TIME]);
 
   // Alert when the user's turn comes up & reset roll timer & bonus announcements
@@ -604,6 +634,37 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       finalValuesMap.set(d.id, Math.floor(Math.random() * 6) + 1);
     });
 
+    const nextRoll = rollsUsed + 1;
+    let nextSlot = 0;
+    const finalDice = workingDice.map(d => {
+      if (d.zone === 'active') {
+        const finalVal = finalValuesMap.get(d.id) ?? d.value;
+        return {
+          ...d,
+          slotIndex: nextSlot++,
+          value: finalVal,
+          selected: false,
+        };
+      }
+      return d;
+    });
+
+    // Broadcast roll to peers immediately when the roll starts so all devices animate in sync
+    if (settings.roomId && (isHumanOwner || (isCPU && isTurnAuthority))) {
+      updateRoomGameState(settings.roomId, {
+        round,
+        phase,
+        activeUnitIndex: qIdx,
+        activeUnitId: curUnit.id,
+        rollsUsed: nextRoll,
+        dice: finalDice,
+        rollSlotsCount: newSlots,
+        lastAction: 'roll',
+        lastActionBy: user.uid,
+        actionTimestamp: Date.now(),
+      });
+    }
+
     setIsRolling(true);
 
     // Rapid random shuffle during roll tumble animation
@@ -621,12 +682,10 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       );
     }, 60);
 
-    const rollDuration = spectatorFastForward ? 120 : 1400;
-    const lockPreTime = spectatorFastForward ? 60 : 980;
+    const rollDuration = spectatorFastForward ? 120 : 1100;
+    const lockPreTime = spectatorFastForward ? 60 : 800;
 
     // Phase 1: Pre-lock true final values while the dice are still actively tumbling.
-    // This allows the browser to display and render the final symbols during the final tumble cycles,
-    // ensuring that when the animation ends, the displayed symbols are already the true result.
     setTimeout(() => {
       clearInterval(shuffleTimer);
       setDice(prev =>
@@ -643,43 +702,10 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       );
     }, lockPreTime);
 
-    // Phase 2: Complete roll tumble animation cleanly and sync with room peers
+    // Phase 2: Complete roll tumble animation cleanly
     setTimeout(() => {
       clearInterval(shuffleTimer);
-      const nextRoll = rollsUsed + 1;
-
-      // Lock dice values cleanly after the animation ends using latest state!
-      setDice(prev => {
-        const finalDice = prev.map(d => {
-          if (d.zone === 'active' && activeIds.has(d.id)) {
-            const finalVal = finalValuesMap.get(d.id) ?? d.value;
-            return {
-              ...d,
-              value: finalVal,
-              selected: false,
-            };
-          }
-          return d;
-        });
-
-        if (settings.roomId && (isHumanOwner || (isCPU && isTurnAuthority))) {
-          updateRoomGameState(settings.roomId, {
-            round,
-            phase,
-            activeUnitIndex: qIdx,
-            activeUnitId: curUnit.id,
-            rollsUsed: nextRoll,
-            dice: finalDice,
-            rollSlotsCount: newSlots,
-            lastAction: 'roll',
-            lastActionBy: user.uid,
-            actionTimestamp: Date.now(),
-          });
-        }
-
-        return finalDice;
-      });
-
+      setDice(finalDice);
       setRollsUsed(nextRoll);
 
       // Human player gets time for rolls 2 & 3 (20s in multiplayer, 10s otherwise)
@@ -1180,7 +1206,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       return;
     }
 
-    const delay = spectatorFastForward ? 120 : 650;
+    const delay = spectatorFastForward ? 120 : settings.mode === 'online' ? 850 : 650;
 
     const timer = setTimeout(() => {
       if (rollsUsed === 0) {
