@@ -42,7 +42,7 @@ export const ModeSelectScreen: React.FC<ModeSelectScreenProps> = ({
               <div className="min-w-0">
                 <div className="text-sm font-black text-[#1c6a35]">Multiplayer Online</div>
                 <div className="text-[11px] text-[#6d5138]">
-                  Match your skills against others.
+                  Play on separate phones or match against online players (2-6 Players)
                 </div>
               </div>
             </button>
@@ -79,7 +79,7 @@ export const ModeSelectScreen: React.FC<ModeSelectScreenProps> = ({
               </div>
             </button>
 
-            {/* Mode 4: Pass & Play (2P) */}
+            {/* Mode 4: Pass & Play (1 Phone) */}
             <button
               onClick={() => onSelectMode('pass_and_play')}
               className="w-full p-3.5 bg-white hover:bg-[#f9f5ea] border-2 border-[#1f7fd6] rounded-2xl shadow-md text-left transition-all active:scale-98 flex items-center gap-3.5 group cursor-pointer"
@@ -88,9 +88,9 @@ export const ModeSelectScreen: React.FC<ModeSelectScreenProps> = ({
                 <Users className="w-6 h-6" />
               </div>
               <div className="min-w-0">
-                <div className="text-sm font-black text-[#1f7fd6]">Pass &amp; Play (2P)</div>
+                <div className="text-sm font-black text-[#1f7fd6]">Pass &amp; Play (Same Phone)</div>
                 <div className="text-[11px] text-[#6d5138]">
-                  Two players take turns rolling on the same screen
+                  Two players take turns rolling on ONE shared device (no internet needed)
                 </div>
               </div>
             </button>

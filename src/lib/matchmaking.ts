@@ -4,6 +4,7 @@ import {
   getDocs,
   getDoc,
   setDoc,
+  deleteDoc,
   updateDoc,
   runTransaction,
   query,
@@ -16,6 +17,7 @@ import { DiceColor, UserAccount, GameSettings, Die } from '../types/game';
 
 export interface RoomPlayer {
   uid: string;
+  sessionId?: string;
   name: string;
   color: string;
   image?: string;
@@ -46,12 +48,13 @@ export interface RoomGameState {
 
 export interface GameRoom {
   id: string;
+  roomCode?: string; // 4-digit code (e.g. "4821") for direct friend joining
   gameKey: string; // e.g. "standard_4", "double_2", "high_roller_6"
   tier: 'standard' | 'double' | 'high_roller';
   playerCount: 2 | 4 | 6 | 8;
   buyIn: number;
   createdAt: number; // ms timestamp when first user selected the game option
-  expiresAt: number; // createdAt + 15000
+  expiresAt: number;
   status: 'waiting' | 'starting' | 'in_progress' | 'cancelled';
   players: RoomPlayer[];
   filledBots?: RoomPlayer[];
@@ -72,6 +75,40 @@ export const BOT_COLORS = [
   '#0984e3',
   '#34495e',
 ];
+
+/**
+ * Generates a persistent browser session ID to differentiate multiple devices or tabs
+ * even if they test using the same Google or guest account.
+ */
+let cachedSessionId: string | null = null;
+export function getClientSessionId(): string {
+  if (cachedSessionId) return cachedSessionId;
+  try {
+    const existing = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('cr_session_id') : null;
+    if (existing) {
+      cachedSessionId = existing;
+      return existing;
+    }
+    const newId = 'sess_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 8);
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem('cr_session_id', newId);
+    }
+    cachedSessionId = newId;
+    return newId;
+  } catch {
+    if (!cachedSessionId) {
+      cachedSessionId = 'sess_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 8);
+    }
+    return cachedSessionId;
+  }
+}
+
+/**
+ * Generates a clean 4-digit numeric room code for direct friend sharing
+ */
+export function generateRoomCode(): string {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
 
 /**
  * Deeply sanitizes an object for Firestore by replacing all undefined values with null
@@ -121,9 +158,11 @@ export async function findOrCreateRoom(
   const gameKey = `${tier}_${playerCount}`;
   const now = Date.now();
   const userDiceColors: [DiceColor, DiceColor] = user.diceColors || equippedColors;
+  const sessionId = getClientSessionId();
 
   const currentPlayer: RoomPlayer = {
     uid: user.uid,
+    sessionId,
     name: user.name || 'Player',
     color: user.avatar?.color || '#e5352f',
     image: user.avatar?.image || null,
@@ -141,11 +180,18 @@ export async function findOrCreateRoom(
       const currentTime = Date.now();
 
       if (lobbySnap.exists()) {
-        const lobbyData = lobbySnap.data() as { roomId: string; createdAt: number; playerCount: number; maxPlayers?: number };
+        const lobbyData = lobbySnap.data() as {
+          roomId: string;
+          roomCode?: string;
+          createdAt: number;
+          playerCount: number;
+          maxPlayers?: number;
+          status?: string;
+        };
         const elapsed = currentTime - (lobbyData.createdAt || 0);
 
-        // Tolerant time window (up to 60s) to account for minor client clock differences
-        if (elapsed > -60000 && elapsed < 60000 && lobbyData.roomId) {
+        // Tolerant time window (up to 90s) to account for minor client clock differences and reading screens
+        if (elapsed > -90000 && elapsed < 90000 && lobbyData.roomId && lobbyData.status !== 'cancelled') {
           const targetRoomRef = doc(db, 'rooms', lobbyData.roomId);
           const roomSnap = await transaction.get(targetRoomRef);
 
@@ -156,8 +202,25 @@ export async function findOrCreateRoom(
             const isOpen = roomData.status === 'waiting';
 
             if (isOpen && !isFull) {
-              const alreadyIn = currentPlayers.some(p => p.uid === user.uid);
-              const updatedPlayers = alreadyIn ? currentPlayers : [...currentPlayers, currentPlayer];
+              const alreadyThisSession = currentPlayers.some(p => p.sessionId && p.sessionId === sessionId);
+              if (alreadyThisSession) {
+                return {
+                  room: { ...roomData, id: lobbyData.roomId },
+                  isNew: false,
+                };
+              }
+
+              // Multi-device testing with the same account (or distinct accounts)
+              const sameUidCount = currentPlayers.filter(p => p.uid === user.uid).length;
+              const playerToAdd: RoomPlayer = sameUidCount > 0
+                ? {
+                    ...currentPlayer,
+                    name: `${user.name || 'Player'} (${sameUidCount + 1})`,
+                    color: sameUidCount === 1 ? '#1f7fd6' : sameUidCount === 2 ? '#e58a1f' : '#8e44c9',
+                  }
+                : currentPlayer;
+
+              const updatedPlayers = [...currentPlayers, playerToAdd];
 
               transaction.update(targetRoomRef, sanitizeForFirestore({
                 players: updatedPlayers,
@@ -180,14 +243,16 @@ export async function findOrCreateRoom(
 
       // No suitable existing room found in transaction - create one atomically!
       const newRoomId = `room_${currentTime}_${Math.random().toString(36).substring(2, 7)}`;
+      const newRoomCode = generateRoomCode();
       const newRoom: GameRoom = {
         id: newRoomId,
+        roomCode: newRoomCode,
         gameKey,
         tier,
         playerCount,
         buyIn,
         createdAt: currentTime,
-        expiresAt: currentTime + 30000,
+        expiresAt: currentTime + 45000,
         status: 'waiting',
         players: [currentPlayer],
         filledBots: [],
@@ -198,6 +263,7 @@ export async function findOrCreateRoom(
       transaction.set(newRoomRef, sanitizeForFirestore(newRoom));
       transaction.set(lobbyRef, sanitizeForFirestore({
         roomId: newRoomId,
+        roomCode: newRoomCode,
         createdAt: currentTime,
         playerCount: 1,
         maxPlayers: playerCount,
@@ -226,12 +292,12 @@ export async function findOrCreateRoom(
 
     const snapshot = await getDocs(q);
 
-    // 2a. If user is ALREADY waiting in an active room for this gameKey, reuse it!
+    // 2a. If user is ALREADY waiting in an active room on this session, reuse it!
     for (const docSnap of snapshot.docs) {
       const data = docSnap.data() as GameRoom;
       const elapsed = now - data.createdAt;
-      if (elapsed > -60000 && elapsed < 60000 && data.status === 'waiting') {
-        if (data.players && data.players.some(p => p.uid === user.uid)) {
+      if (elapsed > -90000 && elapsed < 90000 && data.status === 'waiting') {
+        if (data.players && data.players.some(p => p.sessionId === sessionId)) {
           return { room: { ...data, id: docSnap.id }, isNew: false };
         }
       }
@@ -243,8 +309,8 @@ export async function findOrCreateRoom(
       const data = docSnap.data() as GameRoom;
       const elapsed = now - data.createdAt;
       if (
-        elapsed > -60000 &&
-        elapsed < 60000 &&
+        elapsed > -90000 &&
+        elapsed < 90000 &&
         data.status === 'waiting' &&
         data.players &&
         data.players.length < playerCount
@@ -267,8 +333,21 @@ export async function findOrCreateRoom(
         if (freshData.players && freshData.players.length >= playerCount) continue;
 
         const currentPlayers = freshData.players || [];
-        const alreadyIn = currentPlayers.some(p => p.uid === user.uid);
-        const updatedPlayers = alreadyIn ? currentPlayers : [...currentPlayers, currentPlayer];
+        const alreadyThisSession = currentPlayers.some(p => p.sessionId && p.sessionId === sessionId);
+        if (alreadyThisSession) {
+          return { room: { ...freshData, id: targetRoom.id }, isNew: false };
+        }
+
+        const sameUidCount = currentPlayers.filter(p => p.uid === user.uid).length;
+        const playerToAdd: RoomPlayer = sameUidCount > 0
+          ? {
+              ...currentPlayer,
+              name: `${user.name || 'Player'} (${sameUidCount + 1})`,
+              color: sameUidCount === 1 ? '#1f7fd6' : sameUidCount === 2 ? '#e58a1f' : '#8e44c9',
+            }
+          : currentPlayer;
+
+        const updatedPlayers = [...currentPlayers, playerToAdd];
 
         await updateDoc(roomRef, sanitizeForFirestore({
           players: updatedPlayers,
@@ -278,6 +357,7 @@ export async function findOrCreateRoom(
         // Set or refresh lobby pointer to this room
         await setDoc(lobbyRef, sanitizeForFirestore({
           roomId: targetRoom.id,
+          roomCode: freshData.roomCode || targetRoom.roomCode,
           createdAt: targetRoom.createdAt,
           playerCount: updatedPlayers.length,
           maxPlayers: playerCount,
@@ -296,14 +376,16 @@ export async function findOrCreateRoom(
 
   // 3. No open room with time and space available — create a brand-new room!
   const newRoomId = `room_${now}_${Math.random().toString(36).substring(2, 7)}`;
+  const newRoomCode = generateRoomCode();
   const newRoom: GameRoom = {
     id: newRoomId,
+    roomCode: newRoomCode,
     gameKey,
     tier,
     playerCount,
     buyIn,
     createdAt: now,
-    expiresAt: now + 30000,
+    expiresAt: now + 45000,
     status: 'waiting',
     players: [currentPlayer],
     filledBots: [],
@@ -315,9 +397,9 @@ export async function findOrCreateRoom(
     await setDoc(roomRef, sanitizeForFirestore(newRoom));
 
     // Point active lobby to this brand-new room so phones, tablets, iPads all converge
-    const lobbyRef = doc(db, 'lobbies', gameKey);
     await setDoc(lobbyRef, sanitizeForFirestore({
       roomId: newRoomId,
+      roomCode: newRoomCode,
       createdAt: now,
       playerCount: 1,
       maxPlayers: playerCount,
@@ -329,6 +411,76 @@ export async function findOrCreateRoom(
   }
 
   return { room: newRoom, isNew: true };
+}
+
+/**
+ * Joins an existing waiting game room directly using its 4-digit code
+ */
+export async function joinRoomByCode(
+  code: string,
+  user: UserAccount,
+  equippedColors: [DiceColor, DiceColor]
+): Promise<{ room: GameRoom } | { error: string }> {
+  try {
+    const cleanCode = code.trim();
+    if (!cleanCode) return { error: 'Please enter a 4-digit room code.' };
+
+    const roomsCol = collection(db, 'rooms');
+    const q = query(roomsCol, where('roomCode', '==', cleanCode), where('status', '==', 'waiting'));
+    const snap = await getDocs(q);
+
+    if (snap.empty) {
+      return { error: 'Room not found or match already started. Please check the 4-digit code.' };
+    }
+
+    const candidate = snap.docs[0];
+    const roomData = candidate.data() as GameRoom;
+    const currentPlayers = roomData.players || [];
+
+    if (currentPlayers.length >= roomData.playerCount) {
+      return { error: 'This room is already full.' };
+    }
+
+    const sessionId = getClientSessionId();
+    const alreadyThisSession = currentPlayers.some(p => p.sessionId && p.sessionId === sessionId);
+    if (alreadyThisSession) {
+      return { room: { ...roomData, id: candidate.id } };
+    }
+
+    const sameUidCount = currentPlayers.filter(p => p.uid === user.uid).length;
+    const userDiceColors: [DiceColor, DiceColor] = user.diceColors || equippedColors;
+    const playerToAdd: RoomPlayer = {
+      uid: user.uid,
+      sessionId,
+      name: sameUidCount > 0 ? `${user.name || 'Player'} (${sameUidCount + 1})` : (user.name || 'Player'),
+      color: sameUidCount > 0 ? '#1f7fd6' : (user.avatar?.color || '#e5352f'),
+      image: user.avatar?.image || null,
+      diceColors: userDiceColors,
+      type: 'human',
+      joinedAt: Date.now(),
+    };
+
+    const updatedPlayers = [...currentPlayers, playerToAdd];
+    const roomRef = doc(db, 'rooms', candidate.id);
+    await updateDoc(roomRef, sanitizeForFirestore({
+      players: updatedPlayers,
+      updatedAt: Date.now(),
+    }));
+
+    // Update lobby pointer if matching gameKey
+    if (roomData.gameKey) {
+      const lobbyRef = doc(db, 'lobbies', roomData.gameKey);
+      await updateDoc(lobbyRef, sanitizeForFirestore({
+        playerCount: updatedPlayers.length,
+        updatedAt: Date.now(),
+      })).catch(() => {});
+    }
+
+    return { room: { ...roomData, id: candidate.id, players: updatedPlayers } };
+  } catch (err: any) {
+    console.error('Error joining room by code:', err);
+    return { error: err?.message || 'Could not connect to room. Please try again.' };
+  }
 }
 
 /**
@@ -453,17 +605,28 @@ export async function markPlayerLeft(roomId: string, userId: string): Promise<vo
  */
 export async function leaveRoom(roomId: string, userId: string): Promise<void> {
   try {
+    const sessionId = getClientSessionId();
     const roomRef = doc(db, 'rooms', roomId);
     const snap = await getDoc(roomRef);
     if (!snap.exists()) return;
 
     const data = snap.data() as GameRoom;
-    const remainingPlayers = data.players.filter(p => p.uid !== userId);
+    const remainingPlayers = (data.players || []).filter(
+      p => (p.sessionId ? p.sessionId !== sessionId : p.uid !== userId)
+    );
 
     if (remainingPlayers.length === 0) {
       await updateDoc(roomRef, { status: 'cancelled', updatedAt: Date.now() });
+      if (data.gameKey) {
+        const lobbyRef = doc(db, 'lobbies', data.gameKey);
+        await deleteDoc(lobbyRef).catch(() => {});
+      }
     } else {
       await updateDoc(roomRef, { players: remainingPlayers, updatedAt: Date.now() });
+      if (data.gameKey) {
+        const lobbyRef = doc(db, 'lobbies', data.gameKey);
+        await updateDoc(lobbyRef, { playerCount: remainingPlayers.length, updatedAt: Date.now() }).catch(() => {});
+      }
     }
   } catch (err) {
     console.warn('Error leaving room:', err);

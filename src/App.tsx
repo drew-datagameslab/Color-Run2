@@ -422,6 +422,7 @@ export default function App() {
             onStartGame={handleStartGame}
             onBack={() => setScreen('modeselect')}
             onToast={triggerToast}
+            onAddCoins={handleUpdateCoins}
           />
         )}
 

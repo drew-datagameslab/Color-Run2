@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { DiceColor, GameSettings, UserAccount } from '../types/game';
 import { ColorRunLogo } from './Logo';
 import { playSfx } from '../lib/audio';
-import { Users, Loader2, ArrowLeft } from 'lucide-react';
+import { Users, Loader2, ArrowLeft, Copy, Check, Plus, Play } from 'lucide-react';
 import { calculatePayouts } from './PickGameScreen';
 import {
   findOrCreateRoom,
@@ -10,6 +10,7 @@ import {
   finalizeAndStartRoom,
   generateBots,
   leaveRoom,
+  getClientSessionId,
   GameRoom,
   RoomPlayer,
 } from '../lib/matchmaking';
@@ -20,6 +21,7 @@ interface MatchmakingScreenProps {
   tier: 'standard' | 'double' | 'high_roller';
   user: UserAccount;
   equippedColors: [DiceColor, DiceColor];
+  initialRoom?: GameRoom;
   onMatchReady: (settings: GameSettings) => void;
   onCancel: () => void;
 }
@@ -30,17 +32,21 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   tier,
   user,
   equippedColors,
+  initialRoom,
   onMatchReady,
   onCancel,
 }) => {
-  const [room, setRoom] = useState<GameRoom | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState(15);
-  const [statusText, setStatusText] = useState('Entering multiplayer room…');
+  const [room, setRoom] = useState<GameRoom | null>(initialRoom || null);
+  const [secondsLeft, setSecondsLeft] = useState(30);
+  const [extraSeconds, setExtraSeconds] = useState(0);
+  const [statusText, setStatusText] = useState(initialRoom ? 'Connected to room. Waiting for players…' : 'Searching for open room…');
   const [isStarting, setIsStarting] = useState(false);
   const [startCountdown, setStartCountdown] = useState<number | null>(null);
+  const [copied, setCopied] = useState(false);
   const userDiceColors: [DiceColor, DiceColor] = user.diceColors || equippedColors;
+  const currentSessionId = getClientSessionId();
 
-  const roomRef = useRef<GameRoom | null>(null);
+  const roomRef = useRef<GameRoom | null>(initialRoom || null);
   roomRef.current = room;
 
   const matchLaunchedRef = useRef(false);
@@ -53,8 +59,9 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
     const payouts = calculatePayouts(playerCount, tier);
 
     // Ensure isOwner and isOnlinePlayer are tailored for the current local client
-    const localizedSlots = slots.map(s => {
-      const isCurrentLocalUser = s.uid === user.uid;
+    const localizedSlots = slots.map((s, idx) => {
+      // First try session ID or exact uid match
+      const isCurrentLocalUser = (s.uid === user.uid && idx === 0) || (s.uid === user.uid && slots.filter(x => x.uid === user.uid).length === 1);
       return {
         ...s,
         isOwner: isCurrentLocalUser,
@@ -89,37 +96,41 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
 
     async function initRoom() {
       try {
-        setStatusText('Searching for open room…');
-        const { room: initialRoom } = await findOrCreateRoom(
-          tier,
-          playerCount,
-          buyIn,
-          user,
-          equippedColors
-        );
+        let activeRoom = initialRoom || null;
+
+        if (!activeRoom) {
+          setStatusText('Searching for open room…');
+          const { room: foundRoom } = await findOrCreateRoom(
+            tier,
+            playerCount,
+            buyIn,
+            user,
+            equippedColors
+          );
+          activeRoom = foundRoom;
+        }
 
         if (isCancelled) return;
-        setRoom(initialRoom);
+        setRoom(activeRoom);
         setStatusText('Connected to room. Waiting for players…');
 
         // Check if room was already finalized
-        if (initialRoom.status === 'in_progress' && initialRoom.finalSlots) {
-          launchMatchWithSlots(initialRoom.finalSlots, initialRoom.id);
+        if (activeRoom.status === 'in_progress' && activeRoom.finalSlots) {
+          launchMatchWithSlots(activeRoom.finalSlots, activeRoom.id);
           return;
         }
 
         // Check if room is already full upon initial connection
-        if (initialRoom.players && initialRoom.players.length >= playerCount) {
+        if (activeRoom.players && activeRoom.players.length >= playerCount) {
           setStatusText('All players joined! Preparing game…');
           setIsStarting(true);
           setStartCountdown(c => (c === null ? 2 : Math.min(c, 2)));
         }
 
         // Subscribe to real-time room updates from Firestore
-        unsubscribe = subscribeToRoom(initialRoom.id, updatedRoom => {
+        unsubscribe = subscribeToRoom(activeRoom.id, updatedRoom => {
           if (isCancelled) return;
           setRoom(prev => {
-            // Play sound chime when a new player joins
             if (prev && updatedRoom.players.length > prev.players.length) {
               playSfx('add');
             }
@@ -151,9 +162,9 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
       isCancelled = true;
       if (unsubscribe) unsubscribe();
     };
-  }, [tier, playerCount, buyIn, user, equippedColors]);
+  }, [tier, playerCount, buyIn, user, equippedColors, initialRoom]);
 
-  // 2. Countdown timer: starts immediately on mount and guarantees match progression
+  // 2. Countdown timer: starts immediately on mount with 30s search window
   useEffect(() => {
     const mountTime = Date.now();
 
@@ -162,7 +173,8 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
       const now = Date.now();
       const baseTime = curRoom ? curRoom.createdAt : mountTime;
       const elapsed = now - baseTime;
-      const remainingMs = Math.max(0, 15000 - elapsed);
+      const totalAllowedMs = 30000 + extraSeconds * 1000;
+      const remainingMs = Math.max(0, totalAllowedMs - elapsed);
       const remainingSec = Math.ceil(remainingMs / 1000);
 
       setSecondsLeft(remainingSec);
@@ -190,7 +202,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
     }, 250);
 
     return () => clearInterval(interval);
-  }, [playerCount]);
+  }, [playerCount, extraSeconds]);
 
   // 3. Launch the game when countdown finishes
   useEffect(() => {
@@ -209,6 +221,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
       const humanPlayers: RoomPlayer[] = (curRoom?.players && curRoom.players.length > 0) ? curRoom.players : [
         {
           uid: user.uid,
+          sessionId: currentSessionId,
           name: user.name || 'Player',
           color: user.avatar.color || '#e5352f',
           image: user.avatar.image || null,
@@ -248,7 +261,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
     }, 1000);
 
     return () => clearTimeout(t);
-  }, [startCountdown, playerCount, user, userDiceColors]);
+  }, [startCountdown, playerCount, user, userDiceColors, currentSessionId]);
 
   // Handle user cancelling matchmaking
   const handleCancel = async () => {
@@ -258,11 +271,27 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
     onCancel();
   };
 
+  // Immediate start with bots if user doesn't want to wait
+  const handleStartWithBotsNow = () => {
+    if (isStarting) return;
+    setStatusText('Preparing game with current players…');
+    setIsStarting(true);
+    setStartCountdown(1);
+  };
+
+  // Extend waiting time for friends (+15s)
+  const handleExtendWait = () => {
+    setExtraSeconds(prev => prev + 15);
+    setStatusText('Extended wait by +15s. Looking for players…');
+    playSfx('add');
+  };
+
   // Build display slots for the UI
   const displaySlots: Array<RoomPlayer | null> = new Array(playerCount).fill(null);
   const currentHumans = room?.players || [
     {
       uid: user.uid,
+      sessionId: currentSessionId,
       name: user.name,
       color: user.avatar.color,
       image: user.avatar.image,
@@ -289,6 +318,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   });
 
   const filledCount = displaySlots.filter(Boolean).length;
+  const humanCount = currentHumans.length;
 
   return (
     <div className="w-full max-w-sm mx-auto flex flex-col items-center justify-between min-h-0 py-2 sm:py-3 px-3 select-none animate-fade-in">
@@ -303,24 +333,51 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
           <h2 className="text-base sm:text-lg font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
             {playerCount} Players · 🪙 {buyIn} Buy-In
           </h2>
-          {room?.id && (
-            <div className="text-[9px] font-mono text-[#ecd8b0]/70 mt-0.5">
-              Room: {room.id.slice(-8)}
-            </div>
-          )}
         </div>
       </div>
 
       {/* Center Radar / Timer Widget with Loading Bar */}
       <div className="w-full bg-[#faf4e6]/95 border-2 border-[#c9b877] rounded-2xl sm:rounded-3xl p-3 sm:p-4 shadow-2xl flex flex-col items-center my-2">
+        {/* Room Code Badge for Instant Friend Connection */}
+        <div className="w-full bg-gradient-to-r from-[#1c6a35]/15 to-[#2f9a4f]/15 border border-[#1c6a35]/30 rounded-xl p-2.5 mb-2.5 flex items-center justify-between gap-2 shadow-xs">
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] uppercase font-black text-[#5e432d] tracking-wider">
+              Direct Room Code
+            </div>
+            <div className="flex items-baseline gap-2 mt-0.5">
+              <span className="font-mono text-xl sm:text-2xl font-black text-[#1c6a35] tracking-widest leading-none">
+                {room?.roomCode || '----'}
+              </span>
+              <span className="text-[10px] text-[#6d5138] leading-tight">
+                Give code to friend to connect!
+              </span>
+            </div>
+          </div>
+          {room?.roomCode && (
+            <button
+              onClick={() => {
+                navigator.clipboard?.writeText(room.roomCode!);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+                playSfx('add');
+              }}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-white hover:bg-[#fbf7ee] text-[#1c6a35] border border-[#1c6a35]/40 rounded-lg text-xs font-bold shadow-xs cursor-pointer transition-all active:scale-95 shrink-0"
+              title="Copy Room Code"
+            >
+              {copied ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copied ? 'Copied' : 'Copy'}</span>
+            </button>
+          )}
+        </div>
+
         {/* Loading Bar Timer */}
-        <div className="w-full mb-2 bg-white/80 p-2.5 rounded-xl border border-[#ebdcb9]">
+        <div className="w-full mb-2.5 bg-white/80 p-2.5 rounded-xl border border-[#ebdcb9]">
           <div className="flex items-center justify-between text-xs font-bold text-[#4a3622] mb-1.5">
-            <span className="flex items-center gap-1.5">
-              {!isStarting && <Loader2 className="w-3.5 h-3.5 animate-spin text-[#2f9a4f]" />}
-              <span>{isStarting ? `Starting game in ${startCountdown}s…` : statusText}</span>
+            <span className="flex items-center gap-1.5 min-w-0">
+              {!isStarting && <Loader2 className="w-3.5 h-3.5 animate-spin text-[#2f9a4f] shrink-0" />}
+              <span className="truncate">{isStarting ? `Starting game in ${startCountdown}s…` : statusText}</span>
             </span>
-            <span className="font-mono text-xs font-black px-2 py-0.5 rounded-md bg-[#2f9a4f]/15 text-[#1c6a35]">
+            <span className="font-mono text-xs font-black px-2 py-0.5 rounded-md bg-[#2f9a4f]/15 text-[#1c6a35] shrink-0">
               {isStarting ? `${startCountdown}s` : `${secondsLeft}s`}
             </span>
           </div>
@@ -329,19 +386,41 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
             <div
               className="h-full bg-gradient-to-r from-[#2f9a4f] via-[#3ebd63] to-[#2f9a4f] rounded-full transition-all duration-300 ease-linear shadow-xs"
               style={{
-                width: isStarting ? '100%' : `${Math.min(100, Math.max(0, ((15 - secondsLeft) / 15) * 100))}%`,
+                width: isStarting ? '100%' : `${Math.min(100, Math.max(0, (((30 + extraSeconds) - secondsLeft) / (30 + extraSeconds)) * 100))}%`,
               }}
             />
           </div>
           <div className="flex justify-between items-center mt-1 text-[10px] text-[#735c46]">
-            <span>15s matchmaking entry window</span>
-            <span className="font-bold">Slots: {filledCount}/{playerCount} filled</span>
+            <span>{secondsLeft}s search window</span>
+            <span className="font-bold">
+              {humanCount} {humanCount === 1 ? 'Player' : 'Players'} Joined ({filledCount}/{playerCount})
+            </span>
           </div>
         </div>
 
-        {/* 10-second Ad Banner during the 15s Matchmaking Lobby for non-ad-free players */}
+        {/* Wait Controls: "+15s Wait" and "Start with Bots Now" */}
+        {!isStarting && (
+          <div className="w-full grid grid-cols-2 gap-2 mb-3">
+            <button
+              onClick={handleExtendWait}
+              className="flex items-center justify-center gap-1 py-1.5 px-2 bg-[#fdfaf2] hover:bg-white text-[#4a3622] border border-[#c9b877] rounded-xl text-xs font-bold shadow-xs cursor-pointer active:scale-95 transition-all"
+            >
+              <Plus className="w-3.5 h-3.5 text-[#1c6a35]" />
+              <span>+15s Wait</span>
+            </button>
+            <button
+              onClick={handleStartWithBotsNow}
+              className="flex items-center justify-center gap-1 py-1.5 px-2 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl text-xs font-black shadow-xs cursor-pointer active:scale-95 transition-all"
+            >
+              <Play className="w-3 h-3 fill-white" />
+              <span>Play Now</span>
+            </button>
+          </div>
+        )}
+
+        {/* 10-second Ad Banner during Matchmaking Lobby for non-ad-free players */}
         {!user.isAdFree && (
-          <div className="w-full mb-2 bg-gradient-to-r from-[#2b170a] to-[#452712] border border-[#f2c14e]/70 rounded-xl p-2 text-[#faf4e6] shadow-md flex items-center justify-between gap-2 animate-fade-in">
+          <div className="w-full mb-2.5 bg-gradient-to-r from-[#2b170a] to-[#452712] border border-[#f2c14e]/70 rounded-xl p-2 text-[#faf4e6] shadow-md flex items-center justify-between gap-2 animate-fade-in">
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#e58a1f] to-[#b3630a] flex items-center justify-center shrink-0 text-base shadow-xs">
               🎲
             </div>
@@ -358,24 +437,13 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
                 12 custom carved dice &amp; tabletop playmat
               </p>
             </div>
-            <div className="text-right shrink-0">
-              {secondsLeft > 5 ? (
-                <span className="text-[9px] font-mono font-bold text-[#f2c14e] bg-black/40 px-1.5 py-0.5 rounded-full border border-[#f2c14e]/30">
-                  Ad: {secondsLeft - 5}s
-                </span>
-              ) : (
-                <span className="text-[9px] font-bold text-[#2f9a4f] bg-black/40 px-1.5 py-0.5 rounded-full border border-[#2f9a4f]/50">
-                  ✓ Done
-                </span>
-              )}
-            </div>
           </div>
         )}
 
-        {/* Slots Grid - No "host" designation: all players are peers */}
+        {/* Slots Grid */}
         <div className="w-full grid grid-cols-2 gap-2">
           {displaySlots.map((slot, idx) => {
-            const isLocal = slot?.uid === user.uid;
+            const isLocal = slot?.sessionId ? slot.sessionId === currentSessionId : slot?.uid === user.uid;
             return (
               <div
                 key={idx}
