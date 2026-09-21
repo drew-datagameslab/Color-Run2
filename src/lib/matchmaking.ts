@@ -40,6 +40,7 @@ export interface RoomGameState {
   unitStatus?: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }>;
   lastAction: 'roll' | 'save_dice' | 'bank' | 'sync' | 'step_away' | 'elimination' | 'phase_change';
   lastActionBy: string; // unitId or uid
+  lastActionSessionId?: string; // unique persistent device/browser session ID
   lastActionId?: string;
   actionTimestamp: number;
   turnAuthorityUid?: string;
@@ -555,6 +556,9 @@ export async function updateRoomGameState(
 
   if (!sanitized.lastActionId) {
     sanitized.lastActionId = `${sanitized.lastAction || 'act'}_${sanitized.lastActionBy || 'p'}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  }
+  if (!sanitized.lastActionSessionId) {
+    sanitized.lastActionSessionId = getClientSessionId();
   }
   if (!sanitized.actionTimestamp) {
     sanitized.actionTimestamp = Date.now();

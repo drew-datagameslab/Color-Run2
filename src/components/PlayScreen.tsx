@@ -10,7 +10,7 @@ import { SavedBoard } from './SavedBoard';
 import { RollArea } from './RollArea';
 import { PlayerProfileModal } from './PlayerProfileModal';
 import { Loader2 } from 'lucide-react';
-import { subscribeToRoom, markPlayerLeft, updateRoomGameState } from '../lib/matchmaking';
+import { subscribeToRoom, markPlayerLeft, updateRoomGameState, getClientSessionId } from '../lib/matchmaking';
 
 interface PlayScreenProps {
   settings: GameSettings;
@@ -87,8 +87,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
   // Initialize players from settings slots
   const [units, setUnits] = useState<PlayerUnit[]>(() => {
+    const mySessionId = getClientSessionId();
     return settings.slots.map((s, idx) => {
-      const isLocalUser = s.isOwner ?? (s.uid ? s.uid === user.uid : idx === 0);
+      const isLocalUser = s.isOwner !== undefined
+        ? s.isOwner
+        : (s.sessionId && mySessionId ? s.sessionId === mySessionId : (s.uid ? s.uid === user.uid : idx === 0));
       const isHuman = s.type === 'human' || (!!s.uid && s.type !== 'cpu');
       const isCPU = s.type === 'cpu' || (!isLocalUser && !isHuman);
       return {
@@ -104,6 +107,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         history: {},
         active: true,
         uid: s.uid,
+        sessionId: s.sessionId,
       };
     });
   });
@@ -177,18 +181,20 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const isCPU = curUnit ? (curUnit.isCPU || isAutoPilotTurn) : false;
 
   const humanUnits = units.filter(u => !u.isCPU && (u.isOwner || u.isOnlinePlayer));
-  const sortedHumanUids = humanUnits.map(u => u.uid).filter(Boolean).sort() as string[];
-  const turnAuthorityUid = sortedHumanUids.length > 0 ? sortedHumanUids[0] : (humanUnits[0]?.uid || user.uid);
-  const otherHumanUids = humanUnits
-    .filter(u => u.uid !== curUnit?.uid)
-    .map(u => u.uid)
+  const mySessionId = getClientSessionId();
+  const sortedHumanTokens = humanUnits.map(u => u.sessionId || u.uid).filter(Boolean).sort() as string[];
+  const turnAuthorityToken = sortedHumanTokens.length > 0 ? sortedHumanTokens[0] : (humanUnits[0]?.sessionId || humanUnits[0]?.uid || user.uid);
+  const otherHumanTokens = humanUnits
+    .filter(u => (u.sessionId || u.uid) !== (curUnit?.sessionId || curUnit?.uid))
+    .map(u => u.sessionId || u.uid)
     .filter(Boolean)
     .sort() as string[];
-  const fallbackAuthorityUid = otherHumanUids.length > 0 ? otherHumanUids[0] : turnAuthorityUid;
+  const fallbackAuthorityToken = otherHumanTokens.length > 0 ? otherHumanTokens[0] : turnAuthorityToken;
+  const myToken = mySessionId || user.uid;
   const isTurnAuthority =
     settings.mode !== 'online' ||
-    user.uid === turnAuthorityUid ||
-    (isRemoteHuman && user.uid === fallbackAuthorityUid);
+    myToken === turnAuthorityToken ||
+    (isRemoteHuman && myToken === fallbackAuthorityToken);
 
   // Timers are added to keep the games moving when additional Users are in the room.
   // When the user is only playing against computer players (Play vs Computer rooms), no timers are needed.
@@ -258,10 +264,20 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const lastActionRef = useRef<string>('');
   const qIdxRef = useRef<number>(-1);
   const rollsUsedRef = useRef<number>(-1);
+  const roundRef = useRef<number>(1);
+  const phaseRef = useRef<GamePhase>('regular');
 
   useEffect(() => {
     rollsUsedRef.current = rollsUsed;
   }, [rollsUsed]);
+
+  useEffect(() => {
+    roundRef.current = round;
+  }, [round]);
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   // Listen for room updates & players who stepped away / disconnected
   useEffect(() => {
@@ -292,7 +308,9 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         (gs.actionTimestamp && gs.actionTimestamp > lastActionTimestampRef.current) ||
         (gs.lastAction && gs.lastAction !== lastActionRef.current) ||
         (typeof gs.activeUnitIndex === 'number' && gs.activeUnitIndex !== qIdxRef.current) ||
-        (typeof gs.rollsUsed === 'number' && gs.rollsUsed !== rollsUsedRef.current);
+        (typeof gs.rollsUsed === 'number' && gs.rollsUsed !== rollsUsedRef.current) ||
+        (gs.phase && gs.phase !== phaseRef.current) ||
+        (typeof gs.round === 'number' && gs.round !== roundRef.current);
 
       if (isNewAction) {
         if (gs.lastActionId) lastActionIdRef.current = gs.lastActionId;
@@ -300,9 +318,17 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         if (gs.lastAction) lastActionRef.current = gs.lastAction;
         if (typeof gs.activeUnitIndex === 'number') qIdxRef.current = gs.activeUnitIndex;
         if (typeof gs.rollsUsed === 'number') rollsUsedRef.current = gs.rollsUsed;
+        if (gs.phase) phaseRef.current = gs.phase as GamePhase;
+        if (typeof gs.round === 'number') roundRef.current = gs.round;
+
+        const mySessionId = getClientSessionId();
+        // Action is from self only if executed by this specific device/session
+        const isFromSelf = (gs.lastActionSessionId && mySessionId)
+          ? gs.lastActionSessionId === mySessionId
+          : gs.lastActionBy === user.uid;
 
         // Action was performed by another peer
-        if (gs.lastActionBy !== user.uid) {
+        if (!isFromSelf) {
           if (gs.lastAction === 'roll') {
             setIsRolling(true);
             setDice(gs.dice);
@@ -382,6 +408,13 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             }
             setTurnSecondsLeft(ROLL_1_TIME);
           }
+        } else if (gs.phase === 'over') {
+          setUnits(prev => {
+            const winner = prev.find(u => u.active) || prev[0];
+            if (winner) winner.place = 1;
+            onGameOver(winner, prev);
+            return prev;
+          });
         }
       }
     });
@@ -805,7 +838,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const bankTurn = useCallback(() => {
     stopWarningSound();
     if (!curUnit) return;
-    const canAct = (curUnit.isOwner ?? false) || (curUnit.uid === user.uid) || (curUnit.isCPU && isTurnAuthority) || (isRemoteHuman && isTurnAuthority && turnSecondsLeft <= -15);
+    const canAct = (curUnit.isOwner ?? false) || (curUnit.isCPU && isTurnAuthority) || (isRemoteHuman && isTurnAuthority && turnSecondsLeft <= -15);
     if (!canAct) return;
     if (joiningCountdown !== null && joiningCountdown > 0) return;
 
@@ -911,7 +944,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     } else {
       finishBank();
     }
-  }, [curUnit, dice, qIdx, round, settings.colorA, settings.colorB, units, userDiceColors, checkBonusChimes, showSixCelebration, isTurnAuthority]);
+  }, [curUnit, dice, qIdx, round, phase, settings.colorA, settings.colorB, units, userDiceColors, checkBonusChimes, showSixCelebration, isTurnAuthority]);
 
   doRollRef.current = doRoll;
   bankTurnRef.current = bankTurn;

@@ -60,8 +60,21 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
 
     // Ensure isOwner and isOnlinePlayer are tailored for the current local client
     const localizedSlots = slots.map((s, idx) => {
-      // First try session ID or exact uid match
-      const isCurrentLocalUser = (s.uid === user.uid && idx === 0) || (s.uid === user.uid && slots.filter(x => x.uid === user.uid).length === 1);
+      let isCurrentLocalUser = false;
+      if (s.sessionId && currentSessionId) {
+        isCurrentLocalUser = s.sessionId === currentSessionId;
+      } else if (s.uid && user.uid) {
+        const sameUidSlots = slots.filter(x => x.uid === user.uid);
+        if (sameUidSlots.length === 1) {
+          isCurrentLocalUser = s.uid === user.uid;
+        } else {
+          // If testing with same UID on multiple devices, distinguish by index based on room order
+          isCurrentLocalUser = idx === 0;
+        }
+      } else {
+        isCurrentLocalUser = idx === 0;
+      }
+
       return {
         ...s,
         isOwner: isCurrentLocalUser,
@@ -243,6 +256,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
           image: p.image || null,
           diceColors: p.diceColors || ['blue', 'red'],
           uid: p.uid,
+          sessionId: p.sessionId,
         };
       });
 

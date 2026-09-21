@@ -46,6 +46,7 @@ export interface PlayerUnit {
   place?: number;
   diceColors?: [DiceColor, DiceColor];
   uid?: string;
+  sessionId?: string;
 }
 
 export interface TurnState {
@@ -78,6 +79,7 @@ export interface GameSettings {
     image?: string;
     diceColors?: [DiceColor, DiceColor];
     uid?: string;
+    sessionId?: string;
   }>;
 }
 

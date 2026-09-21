@@ -66,6 +66,7 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
 
           {/* Tournament Mode (Coming Soon) */}
           <button
+            id="tournament-play-button"
             onClick={onOpenTournament}
             className="relative w-full py-1.5 px-3 bg-[#2b241c]/10 hover:bg-[#2b241c]/15 text-[#5e4b37] font-semibold text-[11px] sm:text-xs rounded-xl transition-all flex items-center justify-center gap-1.5"
           >
@@ -75,6 +76,11 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
               Soon
             </span>
           </button>
+
+          {/* App Version */}
+          <div id="app-version-display" className="text-center text-[10px] sm:text-xs font-bold text-[#7d654c] tracking-wider pt-0.5 select-text">
+            Version 3.5
+          </div>
         </div>
       </div>
 
