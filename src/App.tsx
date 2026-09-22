@@ -25,6 +25,8 @@ import { PlayScreen } from './components/PlayScreen';
 import { WinnerScreen } from './components/WinnerScreen';
 import { ShopScreen } from './components/ShopScreen';
 import { ScoreboardScreen } from './components/ScoreboardScreen';
+import { MatchmakingScreen } from './components/MatchmakingScreen';
+import { GameInviteOverlay } from './components/GameInviteOverlay';
 import { RulesModal } from './components/RulesModal';
 import { StandingsSheet } from './components/StandingsSheet';
 import { StripAd } from './components/StripAd';
@@ -38,19 +40,33 @@ import { ChallengeFriendsOverlay } from './components/ChallengeFriendsOverlay';
 import { PortraitLockOverlay } from './components/PortraitLockOverlay';
 import { shouldShow24hReferralOverlay, dismiss24hReferralOverlay } from './lib/referrals';
 import { subscribeToAuth, logOut, syncUserProfileToFirestore } from './lib/firebase';
+import { createChallengeRoom, joinChallengeRoom, GameRoom } from './lib/matchmaking';
+import {
+  sendChallengeInvites,
+  respondToChallengeInvite,
+  subscribeToMyInvites,
+  GameInvite,
+} from './lib/invites';
 
 export default function App() {
   const [user, setUser] = useState<UserAccount>(() => getInitialUser());
   const [coins, setCoins] = useState<number>(() => getUserCoins(user.uid));
   const [shopSettings, setShopSettings] = useState<ShopSettings>(() => getShopSettings());
   const [screen, setScreen] = useState<
-    'signin' | 'avatar' | 'mainmenu' | 'modeselect' | 'pickgame' | 'play' | 'winner' | 'shop' | 'scoreboard'
+    'signin' | 'avatar' | 'mainmenu' | 'modeselect' | 'pickgame' | 'play' | 'winner' | 'shop' | 'scoreboard' | 'challenge_lobby'
   >('signin');
 
   const [gameMode, setGameMode] = useState<'online' | 'cpu' | 'pass_and_play' | 'challenge' | 'challenge_friend'>('online');
   const [friends, setFriends] = useState<Friend[]>(() => getLocalFriends(user.uid));
   const [isChallengeFriendModalOpen, setIsChallengeFriendModalOpen] = useState(false);
   const [selectedChallengeFriend, setSelectedChallengeFriend] = useState<Friend | null>(null);
+  const [incomingInvite, setIncomingInvite] = useState<GameInvite | null>(null);
+  const [challengeLobbyConfig, setChallengeLobbyConfig] = useState<{
+    room: GameRoom;
+    buyIn: number;
+    playerCount: 2 | 4 | 6 | 8;
+    isHost: boolean;
+  } | null>(null);
   const [currentGameSettings, setCurrentGameSettings] = useState<GameSettings | null>(null);
   const [pendingGameSettings, setPendingGameSettings] = useState<GameSettings | null>(null);
   const [isFullScreenAdActive, setIsFullScreenAdActive] = useState(false);
@@ -85,6 +101,82 @@ export default function App() {
       }
     }
   }, [screen, user.uid]);
+
+  // Subscribe to real-time challenge invites for this user
+  useEffect(() => {
+    if (user?.uid) {
+      const unsubscribe = subscribeToMyInvites(user, invite => {
+        setIncomingInvite(invite);
+      });
+      return () => unsubscribe();
+    }
+  }, [user]);
+
+  const handleStartChallengeRoom = async (selectedFriends: Friend[], buyIn: number) => {
+    try {
+      const equippedDice = shopSettings.equippedColors;
+      const room = await createChallengeRoom(user, equippedDice, selectedFriends, buyIn);
+      await sendChallengeInvites(room.id, room.roomCode || '', user, selectedFriends, buyIn);
+      setChallengeLobbyConfig({
+        room,
+        buyIn,
+        playerCount: room.playerCount,
+        isHost: true,
+      });
+      setScreen('challenge_lobby');
+      triggerToast('🏆 Challenge room created! Waiting for players to join…');
+    } catch (err) {
+      console.warn('Error starting challenge room:', err);
+      triggerToast('Could not create challenge room. Please try again.');
+    }
+  };
+
+  const handleAcceptInvite = async (invite: GameInvite) => {
+    try {
+      await respondToChallengeInvite(invite.id, invite.roomId, user.uid, 'joined');
+      const joinedRoom = await joinChallengeRoom(
+        invite.roomId,
+        user,
+        shopSettings.equippedColors
+      );
+      setIncomingInvite(null);
+
+      if (joinedRoom) {
+        setChallengeLobbyConfig({
+          room: joinedRoom,
+          buyIn: invite.buyIn,
+          playerCount: joinedRoom.playerCount || 2,
+          isHost: false,
+        });
+        setScreen('challenge_lobby');
+        triggerToast(`Joined ${invite.hostName}'s challenge lobby!`);
+      } else {
+        triggerToast('Could not connect to challenge room.');
+      }
+    } catch (err) {
+      console.warn('Error accepting invite:', err);
+      triggerToast('Failed to join challenge.');
+    }
+  };
+
+  const handleWillJoinWhenDone = async (invite: GameInvite) => {
+    try {
+      await respondToChallengeInvite(invite.id, invite.roomId, user.uid, 'will_join_later');
+      setIncomingInvite(null);
+      triggerToast(`Let ${invite.hostName} know you'll join when done!`);
+    } catch (err) {
+      console.warn('Error replying to invite:', err);
+    }
+  };
+
+  const handleDismissInvite = async (invite: GameInvite) => {
+    try {
+      await respondToChallengeInvite(invite.id, invite.roomId, user.uid, 'dismissed');
+      setIncomingInvite(null);
+    } catch (err) {
+      console.warn('Error dismissing invite:', err);
+    }
+  };
 
   // Check 24-hour post-signup Referral Overlay:
   // "After the user has signed up, after 24 hours, let's create an overlay that says:
@@ -324,6 +416,15 @@ export default function App() {
           </div>
         )}
 
+        {/* Live Challenge Game Invite Banner Overlay */}
+        <GameInviteOverlay
+          invite={incomingInvite}
+          isInActiveGame={screen === 'play'}
+          onAcceptAndJoin={handleAcceptInvite}
+          onJoinWhenDone={handleWillJoinWhenDone}
+          onDismiss={handleDismissInvite}
+        />
+
         {/* Screen Router */}
         <main className={`flex-1 flex flex-col min-h-0 overflow-hidden ${screen === 'play' ? 'justify-between' : screen === 'shop' ? 'justify-start' : 'justify-center'}`}>
         {screen === 'signin' && (
@@ -470,6 +571,29 @@ export default function App() {
             onBack={() => setScreen('mainmenu')}
           />
         )}
+
+        {screen === 'challenge_lobby' && challengeLobbyConfig && (
+          <MatchmakingScreen
+            playerCount={challengeLobbyConfig.playerCount}
+            buyIn={challengeLobbyConfig.buyIn}
+            tier="standard"
+            user={user}
+            equippedColors={shopSettings.equippedColors}
+            initialRoom={challengeLobbyConfig.room}
+            friends={friends}
+            isChallengeMode={true}
+            onMatchReady={settings => {
+              setChallengeLobbyConfig(null);
+              handleStartGame(settings);
+            }}
+            onCancel={() => {
+              setChallengeLobbyConfig(null);
+              setScreen('modeselect');
+              triggerToast('Challenge cancelled.');
+            }}
+            onToast={triggerToast}
+          />
+        )}
       </main>
 
         {/* Placeholder Strip Ad at Bottom (PlayScreen includes its own native compact banner) */}
@@ -560,12 +684,7 @@ export default function App() {
           user={user}
           coins={coins}
           equippedColors={shopSettings.equippedColors}
-          onStartGame={handleStartGame}
-          onRemoveFriend={async friendId => {
-            const updated = await removeFriend(user.uid, friendId);
-            setFriends(updated);
-            triggerToast('Friend removed.');
-          }}
+          onStartChallengeRoom={handleStartChallengeRoom}
           onClose={() => setIsChallengeFriendModalOpen(false)}
           onToast={triggerToast}
         />

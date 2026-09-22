@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { DiceColor, GameSettings, UserAccount } from '../types/game';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { DiceColor, GameSettings, UserAccount, Friend } from '../types/game';
 import { ColorRunLogo } from './Logo';
 import { playSfx } from '../lib/audio';
 import { Users, Loader2, ArrowLeft, Copy, Check, Plus, Play } from 'lucide-react';
 import { calculatePayouts } from './PickGameScreen';
+import { FriendBlock } from './FriendBlock';
+import { sendChallengeInvites } from '../lib/invites';
 import {
   findOrCreateRoom,
   subscribeToRoom,
@@ -22,8 +24,11 @@ interface MatchmakingScreenProps {
   user: UserAccount;
   equippedColors: [DiceColor, DiceColor];
   initialRoom?: GameRoom;
+  friends?: Friend[];
+  isChallengeMode?: boolean;
   onMatchReady: (settings: GameSettings) => void;
   onCancel: () => void;
+  onToast?: (msg: string) => void;
 }
 
 export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
@@ -33,8 +38,11 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   user,
   equippedColors,
   initialRoom,
+  friends = [],
+  isChallengeMode = false,
   onMatchReady,
   onCancel,
+  onToast,
 }) => {
   const [room, setRoom] = useState<GameRoom | null>(initialRoom || null);
   const [secondsLeft, setSecondsLeft] = useState(30);
@@ -45,6 +53,53 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   const [copied, setCopied] = useState(false);
   const userDiceColors: [DiceColor, DiceColor] = user.diceColors || equippedColors;
   const currentSessionId = getClientSessionId();
+
+  // Check if current user is the host
+  const isHost = room?.hostUid ? room.hostUid === user.uid : (isChallengeMode || !initialRoom);
+
+  // Sort friends: Online friends to the left-hand side first, Offline friends to the right
+  const sortedFriends = useMemo(() => {
+    if (!friends || friends.length === 0) return [];
+    return [...friends].sort((a, b) => {
+      const aOnline = a.status === 'online' ? 1 : 0;
+      const bOnline = b.status === 'online' ? 1 : 0;
+      return bOnline - aOnline;
+    });
+  }, [friends]);
+
+  const handleInviteFriendInLobby = async (friend: Friend) => {
+    if (friend.status !== 'online') {
+      onToast?.(`${friend.name} is offline. Only online friends can be invited.`);
+      return;
+    }
+    if (!room) return;
+
+    const currentResponse = room.invitedResponses?.[friend.id];
+    if (currentResponse === 'joined') {
+      onToast?.(`${friend.name} has already joined the game!`);
+      return;
+    }
+
+    try {
+      await sendChallengeInvites(room.id, room.roomCode || '', user, [friend], buyIn);
+      onToast?.(`📨 Invite sent to ${friend.name}!`);
+
+      // Optimistic update
+      setRoom(prev => {
+        if (!prev) return prev;
+        const prevResponses = prev.invitedResponses || {};
+        return {
+          ...prev,
+          invitedResponses: {
+            ...prevResponses,
+            [friend.id]: 'pending',
+          },
+        };
+      });
+    } catch {
+      onToast?.(`Could not send invite to ${friend.name}.`);
+    }
+  };
 
   const roomRef = useRef<GameRoom | null>(initialRoom || null);
   roomRef.current = room;
@@ -335,20 +390,61 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   const humanCount = currentHumans.length;
 
   return (
-    <div className="w-full max-w-sm mx-auto flex flex-col items-center justify-between min-h-0 py-2 sm:py-3 px-3 select-none animate-fade-in">
+    <div className="w-full max-w-sm mx-auto flex flex-col items-center justify-start max-h-[calc(100dvh-65px)] overflow-y-auto custom-scrollbar py-2 sm:py-3 px-3 select-none animate-fade-in">
       {/* Top Header */}
       <div className="flex flex-col items-center w-full mt-1">
         <ColorRunLogo size="sm" />
 
         <div className="mt-1 text-center">
           <div className="text-[10px] font-black uppercase tracking-widest text-[#d9ba6d]">
-            MULTIPLAYER MATCHMAKING
+            {isChallengeMode ? 'FRIEND CHALLENGE LOBBY' : 'MULTIPLAYER MATCHMAKING'}
           </div>
           <h2 className="text-base sm:text-lg font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
             {playerCount} Players · 🪙 {buyIn} Buy-In
           </h2>
         </div>
       </div>
+
+      {/* Host's Friends Bar across the top of the screen (in case one dismissed, allowing host to invite another) */}
+      {isChallengeMode && isHost && sortedFriends.length > 0 && (
+        <div className="w-full mt-2.5 bg-[#faf4e6]/95 border-2 border-[#c9b877] rounded-2xl p-2.5 shadow-xl">
+          <div className="flex items-center justify-between mb-1.5 px-0.5">
+            <span className="text-[11px] font-black uppercase text-[#4a3622] tracking-wider flex items-center gap-1">
+              <Users className="w-3.5 h-3.5 text-[#e58a1f]" />
+              <span>Your Friends (Invite Players)</span>
+            </span>
+            <span className="text-[9.5px] font-bold text-[#7d6045]">
+              Tap online friend to invite
+            </span>
+          </div>
+
+          {/* Horizontal scroll container with scrollbar underneath */}
+          <div className="w-full flex gap-2 overflow-x-auto pb-1.5 scrollbar-thin">
+            {sortedFriends.map(friend => {
+              const response = room?.invitedResponses?.[friend.id];
+              let bubble: string | null = null;
+              if (response === 'dismissed') bubble = "Can't make it.";
+              else if (response === 'will_join_later') bubble = 'Will join shortly!';
+              else if (response === 'joined') bubble = 'Joined!';
+              else if (response === 'pending') bubble = 'Invited…';
+
+              const isInvitedOrJoined =
+                response === 'pending' || response === 'joined' || response === 'will_join_later';
+
+              return (
+                <FriendBlock
+                  key={friend.id}
+                  friend={friend}
+                  compact
+                  isSelected={isInvitedOrJoined}
+                  bubbleMessage={bubble}
+                  onClick={() => handleInviteFriendInLobby(friend)}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Center Radar / Timer Widget with Loading Bar */}
       <div className="w-full bg-[#faf4e6]/95 border-2 border-[#c9b877] rounded-2xl sm:rounded-3xl p-3 sm:p-4 shadow-2xl flex flex-col items-center my-2">

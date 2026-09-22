@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Friend, GameSettings, UserAccount, DiceColor } from '../types/game';
-import { Swords, X, UserPlus, Check, Sparkles, UserMinus } from 'lucide-react';
+import { Swords, X, Users, AlertCircle } from 'lucide-react';
+import { FriendBlock } from './FriendBlock';
 
 interface ChallengeFriendModalProps {
   friends: Friend[];
@@ -8,8 +9,7 @@ interface ChallengeFriendModalProps {
   user: UserAccount;
   coins: number;
   equippedColors: [DiceColor, DiceColor];
-  onStartGame: (settings: GameSettings) => void;
-  onRemoveFriend?: (friendId: string) => void;
+  onStartChallengeRoom: (selectedFriends: Friend[], buyIn: number) => void;
   onClose: () => void;
   onToast: (msg: string) => void;
 }
@@ -20,74 +20,70 @@ export const ChallengeFriendModal: React.FC<ChallengeFriendModalProps> = ({
   user,
   coins,
   equippedColors,
-  onStartGame,
-  onRemoveFriend,
+  onStartChallengeRoom,
   onClose,
   onToast,
 }) => {
-  const [selectedFriend, setSelectedFriend] = useState<Friend | null>(
-    initialFriend || friends[0] || null
-  );
-  const [buyIn, setBuyIn] = useState<number>(10);
-  const [customName, setCustomName] = useState('');
-  const [isAddingNew, setIsAddingNew] = useState(false);
+  // Sort friends: Online friends to the left-hand side first, Offline friends to the right
+  const sortedFriends = useMemo(() => {
+    return [...friends].sort((a, b) => {
+      const aOnline = a.status === 'online' ? 1 : 0;
+      const bOnline = b.status === 'online' ? 1 : 0;
+      return bOnline - aOnline;
+    });
+  }, [friends]);
 
-  const userDiceColors: [DiceColor, DiceColor] = user.diceColors || equippedColors;
+  // Initial selection: if initialFriend is provided and online, select them; else select first online friend
+  const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>(() => {
+    if (initialFriend && initialFriend.status === 'online') {
+      return [initialFriend.id];
+    }
+    const firstOnline = sortedFriends.find(f => f.status === 'online');
+    return firstOnline ? [firstOnline.id] : [];
+  });
+
+  const [buyIn, setBuyIn] = useState<number>(10);
+
+  const handleToggleFriend = (friend: Friend) => {
+    if (friend.status !== 'online') {
+      onToast(`${friend.name} is offline. Only online friends can be invited.`);
+      return;
+    }
+
+    setSelectedFriendIds(prev => {
+      if (prev.includes(friend.id)) {
+        return prev.filter(id => id !== friend.id);
+      } else {
+        return [...prev, friend.id];
+      }
+    });
+  };
 
   const handleLaunchChallenge = () => {
-    const opponentName = isAddingNew
-      ? customName.trim() || 'Opponent'
-      : selectedFriend?.name || 'Friend';
-
-    const opponentColor = isAddingNew ? '#e5352f' : selectedFriend?.color || '#e5352f';
+    if (selectedFriendIds.length === 0) {
+      onToast('Please select at least one online friend to challenge.');
+      return;
+    }
 
     if (buyIn > 0 && coins < buyIn) {
       onToast(`Not enough coins — you need 🪙 ${buyIn} to play this match!`);
       return;
     }
 
-    const slots: GameSettings['slots'] = [
-      {
-        name: user.name,
-        type: 'human',
-        color: user.avatar.color,
-        image: user.avatar.image,
-        diceColors: userDiceColors,
-      },
-      {
-        name: opponentName,
-        type: 'human',
-        isOnlinePlayer: true,
-        color: opponentColor,
-        image: selectedFriend?.image,
-        diceColors: ['blue', 'red'],
-      },
-    ];
-
-    const payouts = buyIn > 0 ? [buyIn * 2, 0] : [0, 0];
-
-    onStartGame({
-      playersCount: 2,
-      mode: 'challenge_friend',
-      threshold: 250,
-      buyIn,
-      payoutMultiplier: 1,
-      payouts,
-      colorA: userDiceColors[0],
-      colorB: userDiceColors[1],
-      slots,
-    });
-
+    const selectedFriends = sortedFriends.filter(f => selectedFriendIds.includes(f.id));
+    onStartChallengeRoom(selectedFriends, buyIn);
     onClose();
   };
 
+  const onlineCount = sortedFriends.filter(f => f.status === 'online').length;
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs animate-fade-in select-none"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/65 backdrop-blur-xs animate-fade-in select-none"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-sm bg-[#faf4e6] border-2 border-[#c9b877] rounded-3xl p-5 shadow-2xl flex flex-col items-center animate-scale-up"
+        className="relative w-full max-w-sm sm:max-w-md bg-[#faf4e6] border-2 border-[#c9b877] rounded-3xl p-4 sm:p-5 shadow-2xl flex flex-col items-center animate-scale-up max-h-[92vh] overflow-y-auto custom-scrollbar"
         onClick={e => e.stopPropagation()}
       >
         {/* Close Button */}
@@ -99,74 +95,45 @@ export const ChallengeFriendModal: React.FC<ChallengeFriendModalProps> = ({
         </button>
 
         {/* Title */}
-        <div className="w-12 h-12 rounded-2xl bg-[#e58a1f] text-white flex items-center justify-center shadow-md mb-2">
-          <Swords className="w-6 h-6" />
+        <div className="w-11 h-11 rounded-2xl bg-[#e58a1f] text-white flex items-center justify-center shadow-md mb-1.5">
+          <Swords className="w-5 h-5" />
         </div>
-        <h3 className="text-lg font-black text-[#e58a1f] text-center">Challenge A Friend</h3>
-        <p className="text-xs text-[#6e533c] text-center mb-4 font-medium">
-          Roll head-to-head in a live 2-player match to 250 points
+        <h3 className="text-lg font-black text-[#e58a1f] text-center">Friend(s) Challenge</h3>
+        <p className="text-xs text-[#6e533c] text-center mb-3 font-medium">
+          Select friends to invite to a live challenge match
         </p>
 
-        {/* Friend Selector */}
-        <div className="w-full mb-3">
+        {/* Select Opponent(s) Section */}
+        <div className="w-full mb-3.5">
           <div className="flex justify-between items-center mb-1.5 px-0.5">
-            <span className="text-xs font-black text-[#4a3622] uppercase tracking-wide">
-              Select Opponent
+            <span className="text-xs font-black text-[#4a3622] uppercase tracking-wide flex items-center gap-1">
+              <Users className="w-3.5 h-3.5 text-[#e58a1f]" />
+              <span>Select Opponent(s)</span>
             </span>
-            <button
-              onClick={() => setIsAddingNew(!isAddingNew)}
-              className="text-[11px] font-bold text-[#1f7fd6] hover:underline cursor-pointer"
-            >
-              {isAddingNew ? 'Choose Saved Friend' : '+ Enter Username'}
-            </button>
+            <span className="text-[11px] font-bold text-[#1f7fd6]">
+              {selectedFriendIds.length} Selected ({onlineCount} Online)
+            </span>
           </div>
 
-          {isAddingNew ? (
-            <input
-              type="text"
-              placeholder="Friend's Nickname (e.g. LuckyAce)"
-              value={customName}
-              onChange={e => setCustomName(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-white border border-[#d8c89f] rounded-xl text-[#2e2316] placeholder-[#9c8a74] focus:outline-hidden focus:ring-2 focus:ring-[#e58a1f]"
-            />
-          ) : (
-            <div className="flex gap-2 overflow-x-auto scrollbar-none py-1 px-0.5">
-              {friends.map(f => {
-                const isSelected = selectedFriend?.id === f.id;
+          {/* Horizontal scroll container with scrollbar underneath */}
+          <div className="w-full bg-[#f4ebd6] p-2.5 rounded-2xl border border-[#d8c89f] shadow-inner">
+            <div className="w-full flex gap-2.5 overflow-x-auto pb-2 scrollbar-thin">
+              {sortedFriends.map(friend => {
+                const isSelected = selectedFriendIds.includes(friend.id);
                 return (
-                  <button
-                    key={f.id}
-                    onClick={() => setSelectedFriend(f)}
-                    className={`flex items-center gap-2 p-2 rounded-xl border-2 transition-all cursor-pointer shrink-0 ${
-                      isSelected
-                        ? 'bg-[#fff9ea] border-[#e58a1f] shadow-xs'
-                        : 'bg-white border-[#d8c89f] hover:bg-[#faf4e6]'
-                    }`}
-                  >
-                    <div
-                      className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs text-white shadow-xs"
-                      style={{ backgroundColor: f.color }}
-                    >
-                      {f.name.slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="text-left">
-                      <div className="text-xs font-black text-[#2e2316] leading-tight truncate max-w-[90px]">
-                        {f.name}
-                      </div>
-                      <div className="text-[10px] text-[#735c46] flex items-center gap-1">
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            f.status === 'online' ? 'bg-green-500' : 'bg-red-500'
-                          }`}
-                        />
-                        <span>{f.status}</span>
-                      </div>
-                    </div>
-                  </button>
+                  <FriendBlock
+                    key={friend.id}
+                    friend={friend}
+                    isSelected={isSelected}
+                    onClick={() => handleToggleFriend(friend)}
+                  />
                 );
               })}
             </div>
-          )}
+            <div className="text-[10px] text-[#7d6045] font-semibold text-center mt-1 flex items-center justify-center gap-1">
+              <span>Scroll sideways to view all friends • Online friends appear first</span>
+            </div>
+          </div>
         </div>
 
         {/* Buy-in Selector */}
@@ -178,6 +145,7 @@ export const ChallengeFriendModal: React.FC<ChallengeFriendModalProps> = ({
             {[0, 10, 20, 50].map(amount => (
               <button
                 key={amount}
+                type="button"
                 onClick={() => setBuyIn(amount)}
                 className={`py-2 px-1 rounded-xl font-black text-xs transition-all flex flex-col items-center justify-center cursor-pointer border ${
                   buyIn === amount
@@ -187,7 +155,7 @@ export const ChallengeFriendModal: React.FC<ChallengeFriendModalProps> = ({
               >
                 <span>{amount === 0 ? 'Free' : `🪙 ${amount}`}</span>
                 <span className="text-[9px] opacity-85 font-mono">
-                  {amount === 0 ? 'Casual' : `Win ${amount * 2}`}
+                  {amount === 0 ? 'Casual' : `Win ${amount * (selectedFriendIds.length + 1 || 2)}`}
                 </span>
               </button>
             ))}
@@ -200,7 +168,7 @@ export const ChallengeFriendModal: React.FC<ChallengeFriendModalProps> = ({
           className="w-full py-3 px-4 bg-gradient-to-r from-[#e58a1f] to-[#cb7512] hover:from-[#f0952a] hover:to-[#da7f1b] text-white font-black text-sm rounded-2xl shadow-lg border-b-3 border-[#9c570b] transition-transform active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
         >
           <Swords className="w-4 h-4" />
-          <span>Challenge &amp; Start Rolling!</span>
+          <span>Challenge and Start Rolling!</span>
         </button>
       </div>
     </div>

@@ -4,12 +4,21 @@ import { doc, setDoc, deleteDoc, collection, getDocs } from 'firebase/firestore'
 
 const FRIENDS_PREFIX = 'cr_friends_';
 
+export const DEFAULT_FRIENDS: Friend[] = [
+  { id: 'f_alex', name: 'Alex M.', color: '#2f9a4f', status: 'online', gamesPlayed: 8, addedAt: '2025-01-10T12:00:00Z' },
+  { id: 'f_taylor', name: 'Taylor Swift-Roll', color: '#1f7fd6', status: 'online', gamesPlayed: 14, addedAt: '2025-01-11T12:00:00Z' },
+  { id: 'f_jordan', name: 'Jordan B.', color: '#e58a1f', status: 'online', gamesPlayed: 5, addedAt: '2025-01-12T12:00:00Z' },
+  { id: 'f_sam', name: 'Sammy Star', color: '#8e44c9', status: 'offline', gamesPlayed: 3, addedAt: '2025-01-13T12:00:00Z' },
+  { id: 'f_casey', name: 'Casey Dice', color: '#d61f7a', status: 'offline', gamesPlayed: 19, addedAt: '2025-01-14T12:00:00Z' },
+  { id: 'f_morgan', name: 'Morgan V.', color: '#0984e3', status: 'offline', gamesPlayed: 7, addedAt: '2025-01-15T12:00:00Z' },
+];
+
 export function getLocalFriends(userId: string): Friend[] {
   try {
     const raw = localStorage.getItem(FRIENDS_PREFIX + userId);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
+      if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed;
       }
     }
@@ -17,7 +26,9 @@ export function getLocalFriends(userId: string): Friend[] {
     // fallback
   }
 
-  return [];
+  // Seed default friends so user has friends to challenge immediately
+  saveLocalFriends(userId, DEFAULT_FRIENDS);
+  return DEFAULT_FRIENDS;
 }
 
 export function saveLocalFriends(userId: string, friends: Friend[]): void {

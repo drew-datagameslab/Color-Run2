@@ -13,7 +13,7 @@ import {
   FirestoreError,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { DiceColor, UserAccount, GameSettings, Die } from '../types/game';
+import { DiceColor, UserAccount, GameSettings, Die, Friend } from '../types/game';
 
 export interface RoomPlayer {
   uid: string;
@@ -63,6 +63,17 @@ export interface GameRoom {
   leftPlayers?: string[];
   gameState?: RoomGameState;
   updatedAt: number;
+  hostUid?: string;
+  hostName?: string;
+  isChallenge?: boolean;
+  invitedResponses?: Record<string, 'pending' | 'joined' | 'will_join_later' | 'dismissed'>;
+  invitedFriends?: {
+    id: string;
+    name: string;
+    color: string;
+    image?: string;
+    status?: 'pending' | 'joined' | 'will_join_later' | 'dismissed';
+  }[];
 }
 
 export const BOT_NAMES = ['Ava', 'Pixel', 'Chip', 'Byte', 'Vector', 'Nova', 'Key', 'Mouse'];
@@ -636,3 +647,126 @@ export async function leaveRoom(roomId: string, userId: string): Promise<void> {
     console.warn('Error leaving room:', err);
   }
 }
+
+/**
+ * Creates a challenge room hosted by a player with invited friends
+ */
+export async function createChallengeRoom(
+  user: UserAccount,
+  equippedColors: [DiceColor, DiceColor],
+  invitedFriends: Friend[],
+  buyIn: number
+): Promise<GameRoom> {
+  const code = generateRoomCode();
+  const roomId = 'room_ch_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+  const now = Date.now();
+  const sessionId = getClientSessionId();
+  const userDiceColors: [DiceColor, DiceColor] = user.diceColors || equippedColors;
+
+  const hostPlayer: RoomPlayer = {
+    uid: user.uid,
+    sessionId,
+    name: user.name || 'Host',
+    color: user.avatar?.color || '#e58a1f',
+    image: user.avatar?.image || null,
+    diceColors: userDiceColors,
+    type: 'human',
+    joinedAt: now,
+  };
+
+  const initialResponses: Record<string, 'pending' | 'joined' | 'will_join_later' | 'dismissed'> = {};
+  invitedFriends.forEach(f => {
+    initialResponses[f.id] = 'pending';
+  });
+
+  const totalCount = invitedFriends.length + 1;
+  const clampedPlayerCount: 2 | 4 | 6 | 8 =
+    totalCount <= 2 ? 2 : totalCount <= 4 ? 4 : totalCount <= 6 ? 6 : 8;
+
+  const room: GameRoom = {
+    id: roomId,
+    roomCode: code,
+    gameKey: `challenge_${clampedPlayerCount}_${buyIn}`,
+    tier: 'standard',
+    playerCount: clampedPlayerCount,
+    buyIn,
+    createdAt: now,
+    expiresAt: now + 300000,
+    status: 'waiting',
+    players: [hostPlayer],
+    updatedAt: now,
+    hostUid: user.uid,
+    hostName: user.name,
+    isChallenge: true,
+    invitedResponses: initialResponses,
+    invitedFriends: invitedFriends.map(f => ({
+      id: f.id,
+      name: f.name,
+      color: f.color,
+      image: f.image,
+      status: 'pending',
+    })),
+  };
+
+  if (db) {
+    try {
+      await setDoc(doc(db, 'rooms', roomId), sanitizeForFirestore(room));
+    } catch (err) {
+      console.warn('Error creating challenge room in Firestore:', err);
+    }
+  }
+
+  return room;
+}
+
+/**
+ * Joins an existing challenge room
+ */
+export async function joinChallengeRoom(
+  roomId: string,
+  user: UserAccount,
+  equippedColors: [DiceColor, DiceColor]
+): Promise<GameRoom | null> {
+  if (!db) return null;
+  const roomRef = doc(db, 'rooms', roomId);
+  const sessionId = getClientSessionId();
+  const userDiceColors: [DiceColor, DiceColor] = user.diceColors || equippedColors;
+
+  try {
+    const snap = await getDoc(roomRef);
+    if (!snap.exists()) return null;
+    const room = snap.data() as GameRoom;
+
+    // Check if player already in room
+    const alreadyIn = room.players.some(
+      p => p.uid === user.uid || (p.sessionId && p.sessionId === sessionId)
+    );
+    if (alreadyIn) return room;
+
+    const newPlayer: RoomPlayer = {
+      uid: user.uid,
+      sessionId,
+      name: user.name || 'Player',
+      color: user.avatar?.color || '#1f7fd6',
+      image: user.avatar?.image || null,
+      diceColors: userDiceColors,
+      type: 'human',
+      joinedAt: Date.now(),
+    };
+
+    const updatedPlayers = [...room.players, newPlayer];
+    await updateDoc(roomRef, {
+      players: sanitizeForFirestore(updatedPlayers),
+      updatedAt: Date.now(),
+    });
+
+    return {
+      ...room,
+      players: updatedPlayers,
+    };
+  } catch (err) {
+    console.warn('Error joining challenge room:', err);
+    return null;
+  }
+}
+

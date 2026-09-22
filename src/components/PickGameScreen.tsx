@@ -187,26 +187,21 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
   }
 
   return (
-    <div className="w-full max-w-sm mx-auto flex flex-col items-center min-h-[85vh] p-3 pb-8 select-none">
+    <div className="w-full max-w-sm mx-auto flex flex-col items-center max-h-[calc(100dvh-65px)] overflow-y-auto custom-scrollbar p-2.5 sm:p-3 pb-8 select-none">
       {/* Color Run Logo */}
-      <div className="flex flex-col items-center mt-2 mb-1">
-        <ColorRunLogo size="lg" className="h-20 max-h-20 sm:h-22 sm:max-h-22" />
+      <div className="flex flex-col items-center mt-1 mb-1">
+        <ColorRunLogo size="sm" className="h-10 max-h-10 sm:h-12 sm:max-h-12" />
 
         {/* Top headline under logo */}
-        <h1 className="text-white font-black text-xl tracking-wider uppercase text-center mt-2 mb-0.5 drop-shadow-[0_2px_4px_rgba(0,0,0,0.7)]">
+        <h1 className="text-white font-black text-lg sm:text-xl tracking-wider uppercase text-center mt-1.5 mb-0.5 drop-shadow-[0_2px_4px_rgba(0,0,0,0.7)]">
           {mode === 'online'
-            ? 'Multiplayer Online Rooms'
+            ? 'Online Game Rooms'
             : mode === 'cpu'
             ? 'Beat our Computer Overlords'
             : 'PICK YOUR GAME'}
         </h1>
-        {mode === 'online' && (
-          <p className="text-xs text-[#d9ba6d] font-bold text-center mb-2">
-            Match with live online players or connect via Room Code
-          </p>
-        )}
         {mode === 'cpu' && (
-          <p className="text-xs text-[#d9ba6d] font-bold text-center mb-2">
+          <p className="text-xs text-[#d9ba6d] font-bold text-center mb-1.5">
             Match your skills against virtual opponents
           </p>
         )}
@@ -214,7 +209,7 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
 
       {/* Online Friend Room Code Card */}
       {mode === 'online' && (
-        <div className="w-full bg-[#faf4e6] border-2 border-[#d9c79e] rounded-2xl p-2.5 mb-2.5 flex items-center justify-between gap-2 shadow-md">
+        <div className="w-full bg-[#faf4e6] border-2 border-[#d9c79e] rounded-2xl p-2 sm:p-2.5 mb-2 flex items-center justify-between gap-2 shadow-md">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1 text-[11px] font-black text-[#5e432d]">
               <KeyRound className="w-3.5 h-3.5 text-[#1c6a35]" />
@@ -239,7 +234,7 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
       )}
 
       {/* Cards Container with styled custom scrollbar */}
-      <div className="w-full flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1.5 flex flex-col gap-2.5 max-h-[calc(100dvh-220px)]">
+      <div className="w-full flex flex-col gap-2.5">
         {/* Tier 1: STANDARD GAME - 🪙 10 Coins Buy-In */}
         <div className="w-full bg-[#fbf7ee] rounded-2xl border-2 border-[#d9c79e] p-3 sm:p-3.5 shadow-lg">
           <div className="font-black text-xs text-[#5e432d] uppercase tracking-wider mb-2">

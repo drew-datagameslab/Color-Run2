@@ -1302,6 +1302,26 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   // 5-second warning indicator when turn time is almost up (ONLY active when timers are enabled in room)
   const isTimeRunningOut = isTimerEnabled && isHumanOwner && !isCPU && turnSecondsLeft <= 5 && !isRolling;
 
+  // In a multiplayer online game, when 15 seconds remain to either touch the screen or roll,
+  // have a bar slide down under the Saved Dice/Points label.
+  const isMultiplayerGame = settings.mode === 'online' || isTimerEnabled;
+  const show15sWarning =
+    isMultiplayerGame &&
+    isHumanOwner &&
+    !isCPU &&
+    !isRolling &&
+    !elimModalMsg &&
+    (joiningCountdown === null || joiningCountdown <= 0) &&
+    turnSecondsLeft <= 15 &&
+    turnSecondsLeft > 0;
+
+  const handleScreenTouchAction = () => {
+    stopWarningSound();
+    if (isHumanOwner && isMultiplayerGame && turnSecondsLeft <= 15 && turnSecondsLeft > 0) {
+      setTurnSecondsLeft(rollsUsed === 0 ? ROLL_1_TIME : ROLL_2_3_TIME);
+    }
+  };
+
   const handleExitClick = () => {
     if (settings.roomId && user?.uid) {
       markPlayerLeft(settings.roomId, user.uid);
@@ -1322,7 +1342,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   };
 
   return (
-    <div className="w-full max-w-lg md:max-w-2xl mx-auto flex flex-col h-full max-h-[100dvh] p-1 sm:p-2 md:p-3 select-none relative overflow-hidden">
+    <div
+      onTouchStart={handleScreenTouchAction}
+      onMouseDown={handleScreenTouchAction}
+      className="w-full max-w-lg md:max-w-2xl mx-auto flex flex-col h-full max-h-[100dvh] p-1 sm:p-2 md:p-3 select-none relative overflow-hidden"
+    >
       {/* AFK Grey Overlay if user stepped away */}
       {isAfkOverlay && (
         <div
@@ -1482,8 +1506,8 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
       {/* Middle Game Area (Saved Dice & Active Roll Area) - SavedBoard is the MAIN FLEX POINT */}
       <div
-        onTouchStart={() => stopWarningSound()}
-        onMouseDown={() => stopWarningSound()}
+        onTouchStart={handleScreenTouchAction}
+        onMouseDown={handleScreenTouchAction}
         className="flex-1 flex flex-col justify-between min-h-0 py-0.5 md:py-2 gap-1 md:gap-3 overflow-hidden"
       >
         {/* Saved Dice Board - MAIN FLEX POINT: grows and shrinks as needed */}
@@ -1495,6 +1519,8 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             isCPU={isCPU}
             showSixCelebration={showSixCelebration}
             onDismissSixCelebration={() => setShowSixCelebration(false)}
+            warningSecondsLeft={show15sWarning ? turnSecondsLeft : null}
+            onTouchScreen={handleScreenTouchAction}
           />
         </div>
 

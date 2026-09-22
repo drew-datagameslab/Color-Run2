@@ -1,4 +1,6 @@
 import React from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { AlertTriangle } from 'lucide-react';
 import { Die, ScoreResult } from '../types/game';
 import { DieComponent } from './DieComponent';
 import { ColorRunCelebration } from './ColorRunCelebration';
@@ -10,6 +12,8 @@ interface SavedBoardProps {
   isCPU?: boolean;
   showSixCelebration?: boolean;
   onDismissSixCelebration?: () => void;
+  warningSecondsLeft?: number | null;
+  onTouchScreen?: () => void;
 }
 
 export const SavedBoard: React.FC<SavedBoardProps> = ({
@@ -19,6 +23,8 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
   isCPU = false,
   showSixCelebration = false,
   onDismissSixCelebration,
+  warningSecondsLeft,
+  onTouchScreen,
 }) => {
   const sets = scoreResult.sets;
 
@@ -212,6 +218,40 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
           </span>
         </div>
       </div>
+
+      {/* Slide-down 15-second Turn / Idle Warning Bar for Multiplayer Online Games */}
+      <AnimatePresence>
+        {warningSecondsLeft !== null &&
+          warningSecondsLeft !== undefined &&
+          warningSecondsLeft <= 15 &&
+          warningSecondsLeft > 0 && (
+            <motion.div
+              key="turn-warning-bar"
+              initial={{ height: 0, opacity: 0, scaleY: 0.8 }}
+              animate={{ height: 'auto', opacity: 1, scaleY: 1 }}
+              exit={{ height: 0, opacity: 0, scaleY: 0.8 }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
+              className="overflow-hidden w-full px-1 pb-1 shrink-0"
+            >
+              <div
+                onClick={onTouchScreen}
+                className="cursor-pointer bg-gradient-to-r from-[#d97706]/95 via-[#dc2626]/95 to-[#d97706]/95 border border-amber-300/80 rounded-lg px-2 sm:px-3 py-1 flex items-center justify-between shadow-md select-none transition-transform active:scale-[0.98]"
+              >
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-200 shrink-0 animate-bounce" />
+                  <span className="text-[10px] sm:text-xs font-black tracking-wide text-white uppercase drop-shadow-xs truncate">
+                    Touch screen or roll to play!
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0 pl-1.5">
+                  <span className="font-mono font-black text-[11px] sm:text-xs bg-black/60 text-[#fef08a] px-1.5 py-0.5 rounded border border-amber-300/50 shadow-inner">
+                    {warningSecondsLeft}s
+                  </span>
+                </div>
+              </div>
+            </motion.div>
+          )}
+      </AnimatePresence>
 
       {/* Rows Container: Each set pairs its dice and points total together */}
       <div className={`flex-1 flex flex-col justify-center ${rowGapClass} min-h-0 w-full px-0.5`}>
