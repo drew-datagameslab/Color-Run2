@@ -1345,7 +1345,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     <div
       onTouchStart={handleScreenTouchAction}
       onMouseDown={handleScreenTouchAction}
-      className="w-full max-w-lg md:max-w-2xl mx-auto flex flex-col h-full max-h-[100dvh] p-1 sm:p-2 md:p-3 select-none relative overflow-hidden"
+      className="w-full max-w-none mx-auto flex flex-col h-full max-h-[100dvh] p-1 sm:p-2 md:p-3 select-none relative overflow-hidden"
     >
       {/* AFK Grey Overlay if user stepped away */}
       {isAfkOverlay && (

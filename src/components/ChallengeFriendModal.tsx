@@ -1,7 +1,13 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Friend, GameSettings, UserAccount, DiceColor } from '../types/game';
 import { Swords, X, Users, AlertCircle } from 'lucide-react';
 import { FriendBlock } from './FriendBlock';
+import { calculatePayouts } from './PickGameScreen';
+import {
+  subscribeToOnlinePresence,
+  mergeFriendsWithPresence,
+  UserPresence,
+} from '../lib/presence';
 
 interface ChallengeFriendModalProps {
   friends: Friend[];
@@ -24,14 +30,29 @@ export const ChallengeFriendModal: React.FC<ChallengeFriendModalProps> = ({
   onClose,
   onToast,
 }) => {
+  // Real-time online presence map from Firestore
+  const [presenceMap, setPresenceMap] = useState<Map<string, UserPresence>>(() => new Map());
+
+  useEffect(() => {
+    const unsub = subscribeToOnlinePresence(map => {
+      setPresenceMap(new Map(map));
+    });
+    return () => unsub();
+  }, []);
+
+  // Merge friends with live presence from Firestore
+  const liveFriends = useMemo(() => {
+    return mergeFriendsWithPresence(friends, presenceMap, user.uid);
+  }, [friends, presenceMap, user.uid]);
+
   // Sort friends: Online friends to the left-hand side first, Offline friends to the right
   const sortedFriends = useMemo(() => {
-    return [...friends].sort((a, b) => {
+    return [...liveFriends].sort((a, b) => {
       const aOnline = a.status === 'online' ? 1 : 0;
       const bOnline = b.status === 'online' ? 1 : 0;
       return bOnline - aOnline;
     });
-  }, [friends]);
+  }, [liveFriends]);
 
   // Initial selection: if initialFriend is provided and online, select them; else select first online friend
   const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>(() => {
@@ -54,6 +75,10 @@ export const ChallengeFriendModal: React.FC<ChallengeFriendModalProps> = ({
       if (prev.includes(friend.id)) {
         return prev.filter(id => id !== friend.id);
       } else {
+        if (prev.length >= 5) {
+          onToast('You can choose up to 5 friends (6 players total).');
+          return prev;
+        }
         return [...prev, friend.id];
       }
     });
@@ -61,7 +86,12 @@ export const ChallengeFriendModal: React.FC<ChallengeFriendModalProps> = ({
 
   const handleLaunchChallenge = () => {
     if (selectedFriendIds.length === 0) {
-      onToast('Please select at least one online friend to challenge.');
+      onToast('Please select at least one online friend to challenge (up to 5).');
+      return;
+    }
+
+    if (selectedFriendIds.length > 5) {
+      onToast('You can select a maximum of 5 friends.');
       return;
     }
 
@@ -100,7 +130,7 @@ export const ChallengeFriendModal: React.FC<ChallengeFriendModalProps> = ({
         </div>
         <h3 className="text-lg font-black text-[#e58a1f] text-center">Friend(s) Challenge</h3>
         <p className="text-xs text-[#6e533c] text-center mb-3 font-medium">
-          Select friends to invite to a live challenge match
+          Select up to 5 friends to invite to a live challenge match (up to 6 players total)
         </p>
 
         {/* Select Opponent(s) Section */}
@@ -111,7 +141,7 @@ export const ChallengeFriendModal: React.FC<ChallengeFriendModalProps> = ({
               <span>Select Opponent(s)</span>
             </span>
             <span className="text-[11px] font-bold text-[#1f7fd6]">
-              {selectedFriendIds.length} Selected ({onlineCount} Online)
+              {selectedFriendIds.length} of 5 Selected ({onlineCount} Online)
             </span>
           </div>
 
@@ -131,7 +161,7 @@ export const ChallengeFriendModal: React.FC<ChallengeFriendModalProps> = ({
               })}
             </div>
             <div className="text-[10px] text-[#7d6045] font-semibold text-center mt-1 flex items-center justify-center gap-1">
-              <span>Scroll sideways to view all friends • Online friends appear first</span>
+              <span>Scroll sideways • Tap up to 5 online friends • Online friends appear first</span>
             </div>
           </div>
         </div>
@@ -141,25 +171,49 @@ export const ChallengeFriendModal: React.FC<ChallengeFriendModalProps> = ({
           <div className="text-xs font-black text-[#4a3622] uppercase tracking-wide mb-1.5 px-0.5">
             Wager / Buy-In
           </div>
-          <div className="grid grid-cols-4 gap-1.5">
-            {[0, 10, 20, 50].map(amount => (
-              <button
-                key={amount}
-                type="button"
-                onClick={() => setBuyIn(amount)}
-                className={`py-2 px-1 rounded-xl font-black text-xs transition-all flex flex-col items-center justify-center cursor-pointer border ${
-                  buyIn === amount
-                    ? 'bg-[#e58a1f] text-white border-[#b5670b] shadow-sm scale-[1.02]'
-                    : 'bg-white text-[#4a3622] border-[#d8c89f] hover:bg-[#faf5e8]'
-                }`}
-              >
-                <span>{amount === 0 ? 'Free' : `🪙 ${amount}`}</span>
-                <span className="text-[9px] opacity-85 font-mono">
-                  {amount === 0 ? 'Casual' : `Win ${amount * (selectedFriendIds.length + 1 || 2)}`}
-                </span>
-              </button>
-            ))}
-          </div>
+          {(() => {
+            const activePlayerCount = Math.min(6, Math.max(2, selectedFriendIds.length + 1));
+            const currentPayouts = calculatePayouts(activePlayerCount, 'standard', buyIn);
+            return (
+              <>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[0, 10, 20, 50].map(amount => {
+                    const samplePayouts = calculatePayouts(activePlayerCount, 'standard', amount);
+                    const topPrize = samplePayouts[0] || 0;
+                    return (
+                      <button
+                        key={amount}
+                        type="button"
+                        onClick={() => setBuyIn(amount)}
+                        className={`py-2 px-1 rounded-xl font-black text-xs transition-all flex flex-col items-center justify-center cursor-pointer border ${
+                          buyIn === amount
+                            ? 'bg-[#e58a1f] text-white border-[#b5670b] shadow-sm scale-[1.02]'
+                            : 'bg-white text-[#4a3622] border-[#d8c89f] hover:bg-[#faf5e8]'
+                        }`}
+                      >
+                        <span>{amount === 0 ? 'Free' : `🪙 ${amount}`}</span>
+                        <span className="text-[9px] opacity-85 font-mono">
+                          {amount === 0 ? 'Casual' : `Win ${topPrize}`}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {buyIn > 0 ? (
+                  <div className="mt-2 px-2 py-1.5 rounded-xl bg-amber-500/10 border border-amber-300/60 text-[10.5px] text-[#5e432d] flex items-center justify-between font-bold">
+                    <span className="text-[#a46410]">Payouts ({activePlayerCount} Players):</span>
+                    <span className="font-mono font-black text-[#2e1d0c]">
+                      {currentPayouts.map((p, i) => `${i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'} ${p} 🪙`).join('  ·  ')}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="mt-2 px-2 py-1.5 rounded-xl bg-stone-500/10 border border-stone-300/40 text-[10px] text-[#5e432d] text-center font-bold">
+                    Casual Game · Friendly play without coin wager
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* Start Button */}
@@ -168,7 +222,13 @@ export const ChallengeFriendModal: React.FC<ChallengeFriendModalProps> = ({
           className="w-full py-3 px-4 bg-gradient-to-r from-[#e58a1f] to-[#cb7512] hover:from-[#f0952a] hover:to-[#da7f1b] text-white font-black text-sm rounded-2xl shadow-lg border-b-3 border-[#9c570b] transition-transform active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
         >
           <Swords className="w-4 h-4" />
-          <span>Challenge and Start Rolling!</span>
+          <span>
+            {selectedFriendIds.length > 0
+              ? `Challenge ${selectedFriendIds.length} ${
+                  selectedFriendIds.length === 1 ? 'Friend' : 'Friends'
+                } (${selectedFriendIds.length + 1} Players)`
+              : 'Select Friends to Challenge'}
+          </span>
         </button>
       </div>
     </div>

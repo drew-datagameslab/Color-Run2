@@ -22,16 +22,26 @@ const CPU_COLORS = ['#1f7fd6', '#e58a1f', '#8e44c9', '#0d4d23', '#d61f7a', '#00b
 
 export const STANDARD_PAYOUTS: Record<number, number[]> = {
   2: [16],
+  3: [18, 6],
   4: [20, 10],
+  5: [25, 10, 5],
   6: [30, 15, 5],
   8: [40, 20, 10],
 };
 
 export function calculatePayouts(
   playerCount: number,
-  tier: 'standard' | 'double' | 'high_roller'
+  tier: 'standard' | 'double' | 'high_roller' = 'standard',
+  customBuyIn?: number
 ): number[] {
   const base = STANDARD_PAYOUTS[playerCount] || [16];
+  if (customBuyIn === 0) {
+    return base.map(() => 0);
+  }
+  if (typeof customBuyIn === 'number' && customBuyIn > 0) {
+    const scale = customBuyIn / 10;
+    return base.map(p => Math.round(p * scale));
+  }
   const mult = tier === 'high_roller' ? 5 : tier === 'double' ? 2 : 1;
   return base.map(p => p * mult);
 }
@@ -50,7 +60,7 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
 
   // State for active online matchmaking lobby
   const [matchmakingConfig, setMatchmakingConfig] = useState<{
-    playerCount: 2 | 4 | 6 | 8;
+    playerCount: 2 | 3 | 4 | 5 | 6 | 8;
     buyIn: number;
     tier: 'standard' | 'double' | 'high_roller';
     initialRoom?: GameRoom;
@@ -187,7 +197,7 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
   }
 
   return (
-    <div className="w-full max-w-sm mx-auto flex flex-col items-center max-h-[calc(100dvh-65px)] overflow-y-auto custom-scrollbar p-2.5 sm:p-3 pb-8 select-none">
+    <div className="w-full max-w-sm sm:max-w-md md:max-w-lg mx-auto flex flex-col items-center max-h-[calc(100dvh-65px)] overflow-y-auto custom-scrollbar p-2.5 sm:p-3 pb-8 select-none">
       {/* Color Run Logo */}
       <div className="flex flex-col items-center mt-1 mb-1">
         <ColorRunLogo size="sm" className="h-10 max-h-10 sm:h-12 sm:max-h-12" />

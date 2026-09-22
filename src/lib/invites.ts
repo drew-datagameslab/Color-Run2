@@ -62,7 +62,7 @@ export async function sendChallengeInvites(
       hostAvatar: host.avatar,
       targetFriendId: friend.id,
       targetFriendName: friend.name,
-      targetUid: friend.id.startsWith('friend_') || friend.id.startsWith('f_') ? undefined : friend.id,
+      targetUid: friend.uid || (friend.id.startsWith('friend_') || friend.id.startsWith('f_') ? undefined : friend.id),
       buyIn,
       status: 'pending',
       createdAt: now,
@@ -76,8 +76,10 @@ export async function sendChallengeInvites(
       }
     }
 
-    // Also simulate realistic responses for sample offline/online bots if not a real user
-    scheduleSimulatedFriendResponse(roomId, friend, buyIn);
+    // Only simulate realistic responses for sample offline/online bots if not a real user with a uid
+    if (!friend.uid && (friend.id.startsWith('f_') || friend.id.startsWith('friend_bot_'))) {
+      scheduleSimulatedFriendResponse(roomId, friend, buyIn);
+    }
   }
 }
 
@@ -154,14 +156,29 @@ export function subscribeToMyInvites(
     const invitesRef = collection(db, 'game_invites');
     const q = query(
       invitesRef,
-      where('targetFriendName', '==', user.name),
-      limit(5)
+      where('status', '==', 'pending'),
+      limit(25)
     );
 
     unsubFirestore = onSnapshot(q, snap => {
       const pending = snap.docs
         .map(d => d.data() as GameInvite)
-        .filter(inv => inv.status === 'pending' && inv.hostUid !== user.uid && Date.now() - inv.createdAt < 300000);
+        .filter(inv => {
+          if (inv.status !== 'pending') return false;
+          if (inv.hostUid === user.uid) return false;
+          if (Date.now() - inv.createdAt > 300000) return false;
+
+          const uidMatches =
+            (inv.targetUid && inv.targetUid === user.uid) ||
+            inv.targetFriendId === user.uid;
+
+          const nameMatches =
+            Boolean(inv.targetFriendName) &&
+            Boolean(user.name) &&
+            inv.targetFriendName.trim().toLowerCase() === user.name.trim().toLowerCase();
+
+          return uidMatches || nameMatches;
+        });
 
       if (pending.length > 0) {
         onInvite(pending[0]);

@@ -17,7 +17,7 @@ export const ModeSelectScreen: React.FC<ModeSelectScreenProps> = ({
   return (
     <div className="w-full max-h-[calc(100vh-65px)] overflow-y-auto custom-scrollbar flex flex-col justify-center items-center select-none py-4 px-2">
       {/* 1. Main Select Game Mode Card (centered, scrollable if height constrained) */}
-      <div className="w-full max-w-sm mx-auto my-auto py-2 flex flex-col items-center">
+      <div className="w-full max-w-sm sm:max-w-md md:max-w-lg mx-auto my-auto py-2 flex flex-col items-center">
         <div className="w-full bg-[#faf4e6]/95 border-2 border-[#c9b877] rounded-3xl p-4 sm:p-5 shadow-2xl flex flex-col items-center">
           <h2 className="text-lg sm:text-xl font-black text-[#1c6a35] mb-0.5 text-center">
             Select Game Mode

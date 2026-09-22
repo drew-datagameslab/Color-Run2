@@ -5,6 +5,11 @@ import { playSfx } from '../lib/audio';
 import { Users, Loader2, ArrowLeft, Copy, Check, Plus, Play } from 'lucide-react';
 import { calculatePayouts } from './PickGameScreen';
 import { FriendBlock } from './FriendBlock';
+import {
+  subscribeToOnlinePresence,
+  mergeFriendsWithPresence,
+  UserPresence,
+} from '../lib/presence';
 import { sendChallengeInvites } from '../lib/invites';
 import {
   findOrCreateRoom,
@@ -18,7 +23,7 @@ import {
 } from '../lib/matchmaking';
 
 interface MatchmakingScreenProps {
-  playerCount: 2 | 4 | 6 | 8;
+  playerCount: 2 | 3 | 4 | 5 | 6 | 8;
   buyIn: number;
   tier: 'standard' | 'double' | 'high_roller';
   user: UserAccount;
@@ -57,15 +62,29 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   // Check if current user is the host
   const isHost = room?.hostUid ? room.hostUid === user.uid : (isChallengeMode || !initialRoom);
 
+  // Real-time presence map
+  const [presenceMap, setPresenceMap] = useState<Map<string, UserPresence>>(() => new Map());
+
+  useEffect(() => {
+    const unsub = subscribeToOnlinePresence(map => {
+      setPresenceMap(new Map(map));
+    });
+    return () => unsub();
+  }, []);
+
+  const liveFriends = useMemo(() => {
+    return mergeFriendsWithPresence(friends || [], presenceMap, user.uid);
+  }, [friends, presenceMap, user.uid]);
+
   // Sort friends: Online friends to the left-hand side first, Offline friends to the right
   const sortedFriends = useMemo(() => {
-    if (!friends || friends.length === 0) return [];
-    return [...friends].sort((a, b) => {
+    if (!liveFriends || liveFriends.length === 0) return [];
+    return [...liveFriends].sort((a, b) => {
       const aOnline = a.status === 'online' ? 1 : 0;
       const bOnline = b.status === 'online' ? 1 : 0;
       return bOnline - aOnline;
     });
-  }, [friends]);
+  }, [liveFriends]);
 
   const handleInviteFriendInLobby = async (friend: Friend) => {
     if (friend.status !== 'online') {
@@ -107,11 +126,22 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   const matchLaunchedRef = useRef(false);
   const initRanRef = useRef(false);
 
-  const launchMatchWithSlots = (slots: GameSettings['slots'], roomId: string) => {
+  const launchMatchWithSlots = (
+    slots: GameSettings['slots'],
+    roomId: string,
+    overridePayouts?: number[]
+  ) => {
     if (matchLaunchedRef.current) return;
     matchLaunchedRef.current = true;
+
+    // Actual active player count who joined and whose buy-ins are collected
+    const actualPlayerCount = slots.length;
     const mult = tier === 'high_roller' ? 5 : tier === 'double' ? 2 : 1;
-    const payouts = calculatePayouts(playerCount, tier);
+
+    // Do not hard code the payout until the game has started and buy-ins are collected!
+    const payouts = overridePayouts && overridePayouts.length > 0
+      ? overridePayouts
+      : calculatePayouts(actualPlayerCount, tier, buyIn);
 
     // Ensure isOwner and isOnlinePlayer are tailored for the current local client
     const localizedSlots = slots.map((s, idx) => {
@@ -139,7 +169,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
 
     playSfx('fanfare');
     onMatchReady({
-      playersCount: playerCount,
+      playersCount: actualPlayerCount,
       mode: 'online',
       threshold: 250,
       buyIn,
@@ -184,7 +214,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
 
         // Check if room was already finalized
         if (activeRoom.status === 'in_progress' && activeRoom.finalSlots) {
-          launchMatchWithSlots(activeRoom.finalSlots, activeRoom.id);
+          launchMatchWithSlots(activeRoom.finalSlots, activeRoom.id, activeRoom.finalPayouts);
           return;
         }
 
@@ -207,7 +237,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
 
           // When the room is marked in_progress with final slots, launch immediately!
           if (updatedRoom.status === 'in_progress' && updatedRoom.finalSlots && !matchLaunchedRef.current) {
-            launchMatchWithSlots(updatedRoom.finalSlots, updatedRoom.id);
+            launchMatchWithSlots(updatedRoom.finalSlots, updatedRoom.id, updatedRoom.finalPayouts);
             return;
           }
 
@@ -282,7 +312,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
 
       // If room already has finalSlots, launch using them
       if (curRoom?.finalSlots && curRoom.finalSlots.length > 0) {
-        launchMatchWithSlots(curRoom.finalSlots, curRoom.id);
+        launchMatchWithSlots(curRoom.finalSlots, curRoom.id, curRoom.finalPayouts);
         return;
       }
 
@@ -299,11 +329,21 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
         },
       ];
 
-      const neededBots = Math.max(0, playerCount - humanPlayers.length);
+      // In Challenge Mode: If at least 2 humans joined (e.g. host + 2 friends = 3 players),
+      // we play with EXACTLY those joined players! No bots added to force initial invited count.
+      // If only 1 human is present (the host alone), add 1 bot to enable a 2-player minimum game.
+      // In Public Online matchmaking: fill remaining spots with bots up to playerCount.
+      const neededBots = isChallengeMode
+        ? Math.max(0, 2 - humanPlayers.length)
+        : Math.max(0, playerCount - humanPlayers.length);
+
       const bots = generateBots(neededBots, humanPlayers.length);
       const combined = [...humanPlayers, ...bots];
+      const actualStartingPlayers = isChallengeMode
+        ? combined
+        : combined.slice(0, playerCount);
 
-      const canonicalSlots: GameSettings['slots'] = combined.slice(0, playerCount).map(p => {
+      const canonicalSlots: GameSettings['slots'] = actualStartingPlayers.map(p => {
         return {
           name: p.name,
           type: p.type,
@@ -315,12 +355,16 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
         };
       });
 
+      const actualStartingCount = canonicalSlots.length;
+      // Calculate dynamic payout based on actual players whose buy-ins are collected
+      const dynamicPayouts = calculatePayouts(actualStartingCount, tier, buyIn);
+
       const targetRoomId = curRoom?.id || `room_${Date.now()}_local`;
       if (curRoom?.id) {
-        finalizeAndStartRoom(curRoom.id, canonicalSlots);
+        finalizeAndStartRoom(curRoom.id, canonicalSlots, dynamicPayouts, actualStartingCount as any);
       }
 
-      launchMatchWithSlots(canonicalSlots, targetRoomId);
+      launchMatchWithSlots(canonicalSlots, targetRoomId, dynamicPayouts);
       return;
     }
 
@@ -369,8 +413,10 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
       joinedAt: Date.now(),
     },
   ];
-  const neededBotsPreview = Math.max(0, playerCount - currentHumans.length);
-  const currentBots = secondsLeft <= 3
+  const neededBotsPreview = isChallengeMode
+    ? 0
+    : Math.max(0, playerCount - currentHumans.length);
+  const currentBots = (!isChallengeMode && secondsLeft <= 3)
     ? generateBots(neededBotsPreview, currentHumans.length)
     : (room?.filledBots || []);
 
@@ -390,7 +436,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   const humanCount = currentHumans.length;
 
   return (
-    <div className="w-full max-w-sm mx-auto flex flex-col items-center justify-start max-h-[calc(100dvh-65px)] overflow-y-auto custom-scrollbar py-2 sm:py-3 px-3 select-none animate-fade-in">
+    <div className="w-full max-w-sm sm:max-w-md md:max-w-lg mx-auto flex flex-col items-center justify-start max-h-[calc(100dvh-65px)] overflow-y-auto custom-scrollbar py-2 sm:py-3 px-3 select-none animate-fade-in">
       {/* Top Header */}
       <div className="flex flex-col items-center w-full mt-1">
         <ColorRunLogo size="sm" />
@@ -400,7 +446,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
             {isChallengeMode ? 'FRIEND CHALLENGE LOBBY' : 'MULTIPLAYER MATCHMAKING'}
           </div>
           <h2 className="text-base sm:text-lg font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
-            {playerCount} Players · 🪙 {buyIn} Buy-In
+            {isChallengeMode ? `Friend Challenge (Up to ${playerCount} Players)` : `${playerCount} Players`} · 🪙 {buyIn > 0 ? `${buyIn} Buy-In` : 'Casual'}
           </h2>
         </div>
       </div>
@@ -508,7 +554,41 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
           </div>
         </div>
 
-        {/* Wait Controls: "+15s Wait" and "Start with Bots Now" */}
+        {/* Dynamic Payout & Collected Buy-In Card */}
+        <div className="w-full mb-2.5 px-3 py-2 rounded-xl bg-[#faf6eb] border border-[#ebdcb9] text-[11px] text-[#4a3622] shadow-xs">
+          <div className="flex justify-between items-center font-black">
+            <span className="text-[#1c6a35]">
+              {buyIn > 0 ? `Collected Pot: 🪙 ${humanCount * buyIn}` : 'Casual Friendly Match'}
+            </span>
+            <span className="text-[10px] text-[#7d6045] font-bold">
+              {humanCount} {humanCount === 1 ? 'Player' : 'Players'} Joined
+            </span>
+          </div>
+
+          {buyIn > 0 ? (
+            <div className="mt-1 pt-1 border-t border-[#ebdcb9] flex flex-col gap-0.5">
+              <div className="flex justify-between items-center text-[10.5px]">
+                <span className="font-bold text-[#8c673e]">
+                  Payout Schedule ({Math.max(2, humanCount)} Players):
+                </span>
+                <span className="font-mono font-black text-[#2e1d0c]">
+                  {calculatePayouts(Math.max(2, humanCount), tier, buyIn)
+                    .map((p, i) => `${i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'} ${p} 🪙`)
+                    .join(' · ')}
+                </span>
+              </div>
+              <div className="text-[9px] text-[#8a6e50] italic leading-tight">
+                * Payouts are finalized dynamically when the game starts based on collected buy-ins.
+              </div>
+            </div>
+          ) : (
+            <div className="text-[9.5px] text-[#7d6045] mt-0.5">
+              Free casual play · No coins wagered
+            </div>
+          )}
+        </div>
+
+        {/* Wait Controls: "+15s Wait" and "Play Now" / "Start Game" */}
         {!isStarting && (
           <div className="w-full grid grid-cols-2 gap-2 mb-3">
             <button
@@ -523,7 +603,11 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
               className="flex items-center justify-center gap-1 py-1.5 px-2 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl text-xs font-black shadow-xs cursor-pointer active:scale-95 transition-all"
             >
               <Play className="w-3 h-3 fill-white" />
-              <span>Play Now</span>
+              <span>
+                {isChallengeMode && humanCount >= 2
+                  ? `Start Game (${humanCount}P)`
+                  : 'Play Now'}
+              </span>
             </button>
           </div>
         )}

@@ -109,6 +109,19 @@
         "gameState": { "type": "object" },
         "updatedAt": { "type": "number" }
       }
+    },
+    "Presence": {
+      "collection": "presence",
+      "fields": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "color": { "type": "string" },
+        "image": { "type": "string" },
+        "status": { "type": "string" },
+        "inGame": { "type": "boolean" },
+        "lastSeen": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      }
     }
   }
 }

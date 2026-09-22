@@ -11,23 +11,26 @@ export const PortraitLockOverlay: React.FC = () => {
       const h = window.innerHeight;
       const ratio = w / Math.max(h, 1);
 
-      // Foldable phones unfolded (like Samsung Galaxy Z Fold) and tablets have square-ish ratios (~0.75 to 1.33)
-      // or substantial dimensions (min dimension >= 550px).
-      // With our maximum screen width constraint (9:16 screen ratio), they display the game with zero issues.
-      const isFoldableOrTablet = Math.min(w, h) >= 550 || (ratio >= 0.75 && ratio <= 1.35);
+      // Foldable phones unfolded (Apple Duo, Samsung Galaxy Z-Fold 8, Z-Fold 8 Ultra) and tablets:
+      // Substantial dimension (min dimension >= 480px), width >= 540, or square/tablet ratios (~0.65 to ~1.48).
+      // They display the game natively without requiring rotation.
+      const isFoldableOrTablet =
+        Math.min(w, h) >= 480 ||
+        (w >= 540 && h >= 480) ||
+        (ratio >= 0.65 && ratio <= 1.48);
 
       if (isFoldableOrTablet) {
         setIsLandscape(false);
         return;
       }
 
-      // Only trigger if it is a phone held sideways in true landscape (aspect ratio > 1.38 and height < 520px)
+      // Only trigger if it is a narrow single-screen phone held sideways in true landscape (aspect ratio > 1.50 and short height < 460px)
       const isTouchDevice =
         'ontouchstart' in window ||
         navigator.maxTouchPoints > 0 ||
         window.matchMedia('(pointer: coarse)').matches;
 
-      if (isTouchDevice && ratio > 1.38 && h < 520) {
+      if (isTouchDevice && ratio > 1.50 && h < 460 && Math.min(w, h) < 480) {
         setIsLandscape(true);
       } else {
         setIsLandscape(false);

@@ -8,9 +8,9 @@ export const DEFAULT_FRIENDS: Friend[] = [
   { id: 'f_alex', name: 'Alex M.', color: '#2f9a4f', status: 'online', gamesPlayed: 8, addedAt: '2025-01-10T12:00:00Z' },
   { id: 'f_taylor', name: 'Taylor Swift-Roll', color: '#1f7fd6', status: 'online', gamesPlayed: 14, addedAt: '2025-01-11T12:00:00Z' },
   { id: 'f_jordan', name: 'Jordan B.', color: '#e58a1f', status: 'online', gamesPlayed: 5, addedAt: '2025-01-12T12:00:00Z' },
-  { id: 'f_sam', name: 'Sammy Star', color: '#8e44c9', status: 'offline', gamesPlayed: 3, addedAt: '2025-01-13T12:00:00Z' },
-  { id: 'f_casey', name: 'Casey Dice', color: '#d61f7a', status: 'offline', gamesPlayed: 19, addedAt: '2025-01-14T12:00:00Z' },
-  { id: 'f_morgan', name: 'Morgan V.', color: '#0984e3', status: 'offline', gamesPlayed: 7, addedAt: '2025-01-15T12:00:00Z' },
+  { id: 'f_sam', name: 'Sammy Star', color: '#8e44c9', status: 'online', gamesPlayed: 3, addedAt: '2025-01-13T12:00:00Z' },
+  { id: 'f_casey', name: 'Casey Dice', color: '#d61f7a', status: 'online', gamesPlayed: 19, addedAt: '2025-01-14T12:00:00Z' },
+  { id: 'f_morgan', name: 'Morgan V.', color: '#0984e3', status: 'online', gamesPlayed: 7, addedAt: '2025-01-15T12:00:00Z' },
 ];
 
 export function getLocalFriends(userId: string): Friend[] {
@@ -61,10 +61,11 @@ export async function addFriend(
 
   const newFriend: Friend = {
     id: candidate.id || `friend_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    uid: candidate.id && !candidate.id.startsWith('friend_') ? candidate.id : undefined,
     name: candidate.name,
     color: candidate.color || '#e5352f',
     image: candidate.image,
-    status: Math.random() > 0.35 ? 'online' : 'in-game',
+    status: 'online',
     addedAt: new Date().toISOString(),
     gamesPlayed: 1,
   };

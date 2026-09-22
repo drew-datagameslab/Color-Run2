@@ -52,7 +52,7 @@ export interface GameRoom {
   roomCode?: string; // 4-digit code (e.g. "4821") for direct friend joining
   gameKey: string; // e.g. "standard_4", "double_2", "high_roller_6"
   tier: 'standard' | 'double' | 'high_roller';
-  playerCount: 2 | 4 | 6 | 8;
+  playerCount: 2 | 3 | 4 | 5 | 6 | 8;
   buyIn: number;
   createdAt: number; // ms timestamp when first user selected the game option
   expiresAt: number;
@@ -60,6 +60,7 @@ export interface GameRoom {
   players: RoomPlayer[];
   filledBots?: RoomPlayer[];
   finalSlots?: GameSettings['slots'];
+  finalPayouts?: number[];
   leftPlayers?: string[];
   gameState?: RoomGameState;
   updatedAt: number;
@@ -525,15 +526,24 @@ export function subscribeToRoom(
  */
 export async function finalizeAndStartRoom(
   roomId: string,
-  finalSlots: GameSettings['slots']
+  finalSlots: GameSettings['slots'],
+  finalPayouts?: number[],
+  actualPlayerCount?: number
 ): Promise<void> {
   try {
     const roomRef = doc(db, 'rooms', roomId);
-    await updateDoc(roomRef, sanitizeForFirestore({
+    const updateData: Record<string, any> = {
       status: 'in_progress',
       finalSlots,
       updatedAt: Date.now(),
-    }));
+    };
+    if (finalPayouts && finalPayouts.length > 0) {
+      updateData.finalPayouts = finalPayouts;
+    }
+    if (actualPlayerCount) {
+      updateData.playerCount = actualPlayerCount;
+    }
+    await updateDoc(roomRef, sanitizeForFirestore(updateData));
   } catch (err) {
     console.warn('Could not finalize room slots:', err);
   }
@@ -679,9 +689,8 @@ export async function createChallengeRoom(
     initialResponses[f.id] = 'pending';
   });
 
-  const totalCount = invitedFriends.length + 1;
-  const clampedPlayerCount: 2 | 4 | 6 | 8 =
-    totalCount <= 2 ? 2 : totalCount <= 4 ? 4 : totalCount <= 6 ? 6 : 8;
+  const totalCount = Math.min(6, Math.max(2, invitedFriends.length + 1));
+  const clampedPlayerCount: 2 | 3 | 4 | 5 | 6 = totalCount as 2 | 3 | 4 | 5 | 6;
 
   const room: GameRoom = {
     id: roomId,

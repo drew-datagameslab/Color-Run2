@@ -47,6 +47,11 @@ import {
   subscribeToMyInvites,
   GameInvite,
 } from './lib/invites';
+import {
+  startPresenceHeartbeat,
+  subscribeToOnlinePresence,
+  mergeFriendsWithPresence,
+} from './lib/presence';
 
 export default function App() {
   const [user, setUser] = useState<UserAccount>(() => getInitialUser());
@@ -64,7 +69,7 @@ export default function App() {
   const [challengeLobbyConfig, setChallengeLobbyConfig] = useState<{
     room: GameRoom;
     buyIn: number;
-    playerCount: 2 | 4 | 6 | 8;
+    playerCount: 2 | 3 | 4 | 5 | 6 | 8;
     isHost: boolean;
   } | null>(null);
   const [currentGameSettings, setCurrentGameSettings] = useState<GameSettings | null>(null);
@@ -212,6 +217,22 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Start live presence heartbeat so other devices and friends immediately see this player online
+  useEffect(() => {
+    if (user && user.uid) {
+      const stopHeartbeat = startPresenceHeartbeat(user);
+      return () => stopHeartbeat();
+    }
+  }, [user]);
+
+  // Subscribe to real-time online presence in Firestore to keep friends list updated
+  useEffect(() => {
+    const unsub = subscribeToOnlinePresence(presenceMap => {
+      setFriends(prev => mergeFriendsWithPresence(prev, presenceMap, user.uid));
+    });
+    return () => unsub();
+  }, [user.uid]);
 
   // Synchronize friends when entering mode select screen
   useEffect(() => {
@@ -390,12 +411,9 @@ export default function App() {
       {/* Landscape orientation lock overlay: prompts user to rotate to portrait */}
       <PortraitLockOverlay />
 
-      {/* Centered portrait framing with maximum screen width constrained by portrait screen ratio (9:16 = 0.5625) */}
+      {/* Responsive framing for Folded Outer Screens, Unfolded Inner Screens (Z-Fold 8, Z-Fold 8 Ultra, Apple Duo), and Tablets */}
       <div
-        className="w-full mx-auto h-full flex flex-col justify-between relative overflow-hidden"
-        style={{
-          maxWidth: 'min(100vw, calc(100dvh * 0.5625), 480px)',
-        }}
+        className="game-viewport-container flex flex-col justify-between"
       >
         {/* Top USER Bar anchored to the top of every page (except initial signin screen) */}
         {screen !== 'signin' && (

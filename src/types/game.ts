@@ -24,6 +24,7 @@ export interface ScoreResult {
 
 export interface Friend {
   id: string;
+  uid?: string;
   name: string;
   color: string;
   image?: string;

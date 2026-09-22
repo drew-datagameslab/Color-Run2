@@ -18,7 +18,7 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
   onOpenTournament,
 }) => {
   return (
-    <div className="w-full max-w-xs sm:max-w-sm mx-auto flex flex-col items-center justify-center p-2 sm:p-3 my-auto select-none">
+    <div className="w-full max-w-xs sm:max-w-sm md:max-w-md mx-auto flex flex-col items-center justify-center p-2 sm:p-3 my-auto select-none">
       <div className="w-full bg-[#faf4e6]/95 border-2 border-[#c9b877] rounded-2xl sm:rounded-3xl p-3 sm:p-4 shadow-2xl flex flex-col items-center">
         {/* Color Run Logo increased by 75% */}
         <ColorRunLogo size="xl" className="mb-2" />
@@ -79,7 +79,7 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
 
           {/* App Version */}
           <div id="app-version-display" className="text-center text-[8.5px] sm:text-[9.5px] font-medium text-[#7d654c] tracking-wider pt-0.5 select-text">
-            Version 4.2
+            Version 4.4
           </div>
         </div>
       </div>

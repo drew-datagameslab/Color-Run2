@@ -67,6 +67,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Live presence tracking for active online friends and challenge matchmaking
+    match /presence/{userId} {
+      allow read, write: if true;
+    }
+
     // Multiplayer active lobby pointers
     match /lobbies/{lobbyId} {
       allow read, write: if true;

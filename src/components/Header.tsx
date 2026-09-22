@@ -22,8 +22,8 @@ export const Header: React.FC<HeaderProps> = ({
   const showBackButton = !!onBack && currentScreen !== 'mainmenu';
 
   return (
-    <header className="sticky top-0 z-40 w-full px-2 sm:px-4 pt-2 pb-1 select-none pointer-events-auto">
-      <div className="w-full max-w-md sm:max-w-lg mx-auto bg-[#141414] text-white rounded-2xl p-2 px-3 sm:px-4 shadow-xl border border-white/10 flex items-center justify-between">
+    <header className="sticky top-0 z-40 w-full px-2 sm:px-3 pt-2 pb-1 select-none pointer-events-auto">
+      <div className="w-full mx-auto bg-[#141414] text-white rounded-2xl p-2 px-3 sm:px-4 shadow-xl border border-white/10 flex items-center justify-between">
         {/* Left: User Profile Icon & Details */}
         <button
           onClick={onOpenProfile}
