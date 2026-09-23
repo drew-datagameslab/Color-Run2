@@ -26,6 +26,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="w-full mx-auto bg-[#141414] text-white rounded-2xl p-2 px-3 sm:px-4 shadow-xl border border-white/10 flex items-center justify-between">
         {/* Left: User Profile Icon & Details */}
         <button
+          id="header-user-bar"
           onClick={onOpenProfile}
           className="flex items-center gap-3 group text-left cursor-pointer transition-transform active:scale-98"
           title="Profile & Customization: Volume, Dice, Backgrounds, Avatars"
@@ -44,7 +45,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* User Name + Coins Below */}
-          <div className="flex flex-col leading-tight">
+          <div id="header-user-coins" className="flex flex-col leading-tight">
             <span className="text-white font-black text-sm sm:text-base uppercase tracking-wide truncate max-w-[120px] sm:max-w-[180px] group-hover:text-[#f2c14e] transition-colors">
               {user.name}
             </span>

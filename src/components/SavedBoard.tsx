@@ -4,6 +4,7 @@ import { AlertTriangle } from 'lucide-react';
 import { Die, ScoreResult } from '../types/game';
 import { DieComponent } from './DieComponent';
 import { ColorRunCelebration } from './ColorRunCelebration';
+import { bonusFor } from '../lib/scoring';
 
 interface SavedBoardProps {
   savedDice: Die[];
@@ -144,6 +145,7 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
         {colorGroups.map((group, gIdx) => {
           const hasBonus = group.length >= 3;
           if (hasBonus) {
+            const bonusVal = bonusFor(group.length);
             return (
               <div
                 key={`${keyPrefix}-bonus-${gIdx}`}
@@ -151,6 +153,12 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
                 style={{ gridColumn: `span ${group.length}` }}
               >
                 <div className="bonus-frame pointer-events-none" />
+                {/* Centered Bonus Total Bubble over dice framed in the yellow outline */}
+                <div className="absolute -top-3 sm:-top-3.5 left-1/2 -translate-x-1/2 z-20 pointer-events-none whitespace-nowrap">
+                  <span className="inline-flex items-center justify-center px-1.5 sm:px-2 py-0.2 sm:py-0.5 rounded-full text-[9px] sm:text-[10px] md:text-[11px] font-black tracking-tight text-[#3a2205] bg-gradient-to-r from-[#ffe066] via-[#fcd34d] to-[#f59e0b] border border-[#fef08a] shadow-[0_2px_6px_rgba(245,158,11,0.55)] animate-scale-up">
+                    +{bonusVal} Bonus
+                  </span>
+                </div>
                 {group.map(d => (
                   <div
                     key={`${keyPrefix}-${d.id}`}
@@ -253,7 +261,7 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
       </AnimatePresence>
 
       {/* Rows Container: Each set pairs its dice and points total together */}
-      <div className={`flex-1 flex flex-col justify-center ${rowGapClass} min-h-0 w-full px-0.5`}>
+      <div className={`flex-1 flex flex-col justify-center ${rowGapClass} min-h-0 w-full px-0.5 pt-2 sm:pt-2.5 pb-0.5`}>
         {sets.length === 0 ? (
           // Empty placeholder row when no dice are saved yet
           <div className="flex items-stretch justify-between gap-1 sm:gap-1.5 md:gap-2.5 w-full max-w-[360px] sm:max-w-[420px] md:max-w-[520px] mx-auto min-h-0">

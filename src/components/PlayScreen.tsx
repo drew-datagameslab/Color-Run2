@@ -11,6 +11,7 @@ import { RollArea } from './RollArea';
 import { PlayerProfileModal } from './PlayerProfileModal';
 import { Loader2 } from 'lucide-react';
 import { subscribeToRoom, markPlayerLeft, updateRoomGameState, getClientSessionId } from '../lib/matchmaking';
+import { calculatePayouts } from './PickGameScreen';
 
 interface PlayScreenProps {
   settings: GameSettings;
@@ -18,7 +19,7 @@ interface PlayScreenProps {
   onGameOver: (winner: PlayerUnit, units: PlayerUnit[]) => void;
   onOpenMenu: () => void;
   onAwardPrize?: (amount: number, place: number) => void;
-  onExitGame: () => void;
+  onExitGame: (prizeWon?: number) => void;
 }
 
 function createInitialDice(colorA: DiceColor, colorB: DiceColor): Die[] {
@@ -72,9 +73,17 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 }) => {
   const userDiceColors: [DiceColor, DiceColor] = user.diceColors || [settings.colorA, settings.colorB];
 
+  // Friends challenge detection
+  const isFriendsChallenge =
+    settings.mode === 'challenge' ||
+    settings.mode === 'challenge_friend' ||
+    Boolean((settings as any).isChallenge);
+
   // Multiplayer room detection (no host concept: all players are peers in a shared room)
+  // In Friends Challenge, timing rules are identical to Multiplayer Online games.
   const isMultiplayer =
     settings.mode === 'online' ||
+    isFriendsChallenge ||
     !!settings.roomId ||
     settings.slots.some(s => s.isOnlinePlayer);
 
@@ -193,13 +202,13 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const fallbackAuthorityToken = otherHumanTokens.length > 0 ? otherHumanTokens[0] : turnAuthorityToken;
   const myToken = mySessionId || user.uid;
   const isTurnAuthority =
-    settings.mode !== 'online' ||
+    !isMultiplayer ||
     myToken === turnAuthorityToken ||
     (isRemoteHuman && myToken === fallbackAuthorityToken);
 
-  // Timers are added to keep the games moving when additional Users are in the room.
+  // Timers are added to keep games moving in online rooms and friends challenges.
   // When the user is only playing against computer players (Play vs Computer rooms), no timers are needed.
-  const isTimerEnabled = settings.mode === 'online' || settings.slots.some((s, idx) => idx > 0 && s.isOnlinePlayer);
+  const isTimerEnabled = settings.mode === 'online' || isFriendsChallenge || settings.slots.some((s, idx) => idx > 0 && s.isOnlinePlayer);
 
   // Saved dice and score calculation
   const savedDice = dice.filter(d => d.zone === 'saved');
@@ -1298,6 +1307,38 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const isHumanOut = humanPlayer ? !humanPlayer.active : false;
   const onlyComputersLeft = units.filter(u => u.active).every(u => u.isCPU);
 
+  // Elimination overlay state for multiplayer and Friends Challenge games
+  const [hasDismissedElimOverlay, setHasDismissedElimOverlay] = useState(false);
+  const wasEliminatedSoundPlayedRef = useRef(false);
+
+  // Determine user's finishing place if eliminated
+  const humanPlace = humanPlayer?.place && humanPlayer.place > 0
+    ? humanPlayer.place
+    : (units.filter(u => u.active).length + 1);
+
+  // Calculate prize payout eligibility
+  const effectivePayouts = settings.payouts && settings.payouts.length > 0
+    ? settings.payouts
+    : calculatePayouts(settings.playersCount || units.length, settings.tier || 'standard', settings.buyIn);
+
+  const eliminatedPrize = (effectivePayouts && humanPlace > 0 && effectivePayouts[humanPlace - 1])
+    ? effectivePayouts[humanPlace - 1]
+    : 0;
+
+  // Show overlay over Saved Dice area in multiplayer or Friends Challenge when eliminated
+  const showEliminatedOverlay =
+    (isMultiplayer || isFriendsChallenge) &&
+    isHumanOut &&
+    !hasDismissedElimOverlay &&
+    phase !== 'over';
+
+  useEffect(() => {
+    if (showEliminatedOverlay && !wasEliminatedSoundPlayedRef.current) {
+      wasEliminatedSoundPlayedRef.current = true;
+      playSfx('warning5s');
+    }
+  }, [showEliminatedOverlay]);
+
   // Target display logic: target is reached once elimination phase begins or someone hits threshold
   const targetReached = phase === 'elimination' || units.some(u => u.score >= settings.threshold);
 
@@ -1324,6 +1365,13 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     }
   };
 
+  const handleEliminationExit = () => {
+    if (settings.roomId && user?.uid) {
+      markPlayerLeft(settings.roomId, user.uid);
+    }
+    onExitGame(eliminatedPrize);
+  };
+
   const handleExitClick = () => {
     if (settings.roomId && user?.uid) {
       markPlayerLeft(settings.roomId, user.uid);
@@ -1333,13 +1381,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       onOpenMenu();
     } else {
       // User is eliminated — they can leave early and still receive any prize they earned!
-      if (humanPlayer && humanPlayer.place && settings.payouts && settings.payouts.length > 0) {
-        const prize = settings.payouts[humanPlayer.place - 1] || 0;
-        if (prize > 0) {
-          onAwardPrize?.(prize, humanPlayer.place);
-        }
-      }
-      onExitGame();
+      onExitGame(eliminatedPrize);
     }
   };
 
@@ -1513,7 +1555,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         className="flex-1 flex flex-col justify-between min-h-0 py-0.5 sm:py-1 gap-1 sm:gap-1.5 overflow-hidden"
       >
         {/* Saved Dice Board - MAIN FLEX POINT: grows and shrinks as needed */}
-        <div className="flex-1 min-h-0 flex flex-col justify-center transition-all duration-300">
+        <div className="flex-1 min-h-0 flex flex-col justify-center transition-all duration-300 relative">
           <SavedBoard
             savedDice={savedDice}
             scoreResult={scoreResult}
@@ -1524,6 +1566,49 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             warningSecondsLeft={show15sWarning ? turnSecondsLeft : null}
             onTouchScreen={handleScreenTouchAction}
           />
+
+          {/* Elimination Overlay over the Saved Dice Area */}
+          {showEliminatedOverlay && (
+            <div
+              id="eliminated-saved-dice-overlay"
+              className="absolute inset-0 z-30 flex flex-col items-center justify-center p-3 sm:p-4 rounded-2xl bg-[#140e0a]/95 border-2 border-[#e58a1f] shadow-2xl backdrop-blur-xs text-center animate-scale-up select-none"
+            >
+              <div className="text-3xl sm:text-4xl mb-1.5 drop-shadow-md">
+                🚫
+              </div>
+              <h2 className="text-base sm:text-lg md:text-xl font-black text-white tracking-wide mb-1 drop-shadow-md">
+                You have been eliminated!
+              </h2>
+
+              {eliminatedPrize > 0 ? (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-400/60 text-amber-300 font-bold text-xs sm:text-sm mb-3 shadow-xs">
+                  <span>🪙</span>
+                  <span>You won {eliminatedPrize} coins in this game!</span>
+                </div>
+              ) : (
+                <p className="text-[11px] sm:text-xs text-stone-300 mb-3 max-w-[260px] leading-snug">
+                  You can stay to watch the remaining players or exit to the main menu.
+                </p>
+              )}
+
+              <div className="flex flex-row items-center justify-center gap-2 sm:gap-3 w-full max-w-[280px]">
+                <button
+                  id="btn-stay-and-watch"
+                  onClick={() => setHasDismissedElimOverlay(true)}
+                  className="flex-1 py-2 sm:py-2.5 px-3 bg-[#28974a] hover:bg-[#22803e] text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-95 cursor-pointer border-b-2 border-[#185e2e]"
+                >
+                  Stay and Watch
+                </button>
+                <button
+                  id="btn-exit-room"
+                  onClick={handleEliminationExit}
+                  className="flex-1 py-2 sm:py-2.5 px-3 bg-[#8c745e] hover:bg-[#735d49] text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-95 cursor-pointer border-b-2 border-[#5c4a3a]"
+                >
+                  Exit Room
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Active Roll Area - Compact, fits dice compactly */}
@@ -1563,7 +1648,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           <button
             onClick={doRoll}
             disabled={!canRoll}
-            className={`flex-1 py-2 sm:py-2.5 px-2 bg-[#28974a] hover:bg-[#22803e] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-1 sm:gap-1.5 border-b-2 border-[#185e2e] ${
+            className={`flex-1 min-h-[42px] sm:min-h-[46px] py-1.5 sm:py-2 px-2 bg-[#28974a] hover:bg-[#22803e] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-1 sm:gap-1.5 border-b-2 border-[#185e2e] ${
               isTimeRunningOut
                 ? 'ring-4 ring-yellow-400 ring-offset-2 ring-offset-black/50 animate-pulse bg-red-700 hover:bg-red-800'
                 : rollsUsed === 0 && isHumanOwner && !isCPU && (joiningCountdown === null || joiningCountdown <= 0)
@@ -1603,14 +1688,14 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           <button
             onClick={bankTurn}
             disabled={!canScore}
-            className="flex-1 py-2 sm:py-2.5 px-2 bg-[#e58a1f] hover:bg-[#cb7512] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center justify-center gap-1 sm:gap-1.5 border-b-2 border-[#a65d0a]"
+            className="flex-1 min-h-[42px] sm:min-h-[46px] py-1 sm:py-1.5 px-2 bg-[#e58a1f] hover:bg-[#cb7512] disabled:opacity-40 disabled:pointer-events-none text-white rounded-xl shadow-md transition-transform active:scale-98 flex flex-col items-center justify-center leading-tight border-b-2 border-[#a65d0a]"
           >
-            <span>Score it!</span>
-            {rollsUsed > 0 && (
-              <span className="text-[11px] md:text-xs font-mono font-normal opacity-90">
-                - {scoreResult.total} pts
-              </span>
-            )}
+            <span className="font-black text-xs sm:text-sm tracking-wide">
+              SCORE IT -
+            </span>
+            <span className="font-normal text-[10px] sm:text-xs text-white/95 leading-none mt-0.5">
+              {scoreResult.total} Points
+            </span>
           </button>
 
           <button

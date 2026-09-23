@@ -170,7 +170,8 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
     playSfx('fanfare');
     onMatchReady({
       playersCount: actualPlayerCount,
-      mode: 'online',
+      mode: isChallengeMode ? 'challenge' : 'online',
+      isChallenge: isChallengeMode,
       threshold: 250,
       buyIn,
       tier,

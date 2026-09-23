@@ -62,6 +62,7 @@ export type GamePhase = 'regular' | 'elimination' | 'over';
 export interface GameSettings {
   playersCount: number;
   mode: 'cpu' | 'pass_and_play' | 'challenge' | 'online' | 'challenge_friend';
+  isChallenge?: boolean;
   threshold: number;
   colorA: DiceColor;
   colorB: DiceColor;

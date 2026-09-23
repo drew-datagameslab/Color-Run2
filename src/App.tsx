@@ -14,7 +14,7 @@ import {
   DEFAULT_AVATARS,
 } from './lib/storage';
 import { getLocalFriends, syncFriendsFromFirestore, removeFriend } from './lib/friends';
-import { initAudio, unlockAudio } from './lib/audio';
+import { initAudio, unlockAudio, playSfx } from './lib/audio';
 import { Header } from './components/Header';
 import { SignInScreen } from './components/SignInScreen';
 import { AvatarScreen } from './components/AvatarScreen';
@@ -80,6 +80,7 @@ export default function App() {
 
   const [gameWinner, setGameWinner] = useState<PlayerUnit | null>(null);
   const [finalUnits, setFinalUnits] = useState<PlayerUnit[]>([]);
+  const [pendingWonCoins, setPendingWonCoins] = useState<number>(0);
 
   // Modals
   const [isRulesOpen, setIsRulesOpen] = useState(false);
@@ -401,24 +402,35 @@ export default function App() {
     setGameWinner(winner);
     setFinalUnits(units);
 
-    // If game has payouts configured, award human player according to their final rank
+    // Calculate coins won by the human player
+    let wonCoins = 0;
     if (currentGameSettings?.payouts && currentGameSettings.payouts.length > 0) {
       const human = units.find(u => !u.isCPU);
       if (human && human.place) {
         const placeIdx = human.place - 1;
         const payout = currentGameSettings.payouts[placeIdx] || 0;
         if (payout > 0) {
-          handleUpdateCoins(payout);
-          triggerToast(`You won 🪙 ${payout} for ${human.place === 1 ? '1st' : human.place === 2 ? '2nd' : '3rd'} place!`);
+          wonCoins = payout;
         }
       }
     } else if (!winner.isCPU) {
-      handleUpdateCoins(150); // Winner bonus!
+      wonCoins = 150; // Winner bonus!
     }
+
+    setPendingWonCoins(wonCoins);
     setScreen('winner');
   };
 
+  const handleCoinsAwardedFromWinner = (amount: number) => {
+    if (amount <= 0) return;
+    handleUpdateCoins(amount);
+    setPendingWonCoins(0);
+  };
+
   const handlePlayAgain = () => {
+    if (pendingWonCoins > 0) {
+      handleCoinsAwardedFromWinner(pendingWonCoins);
+    }
     setScreen('pickgame');
   };
 
@@ -573,11 +585,19 @@ export default function App() {
             user={user}
             onGameOver={handleGameOver}
             onOpenMenu={() => setIsStandingsOpen(true)}
-            onAwardPrize={(amount, place) => {
+            onAwardPrize={(amount) => {
               handleUpdateCoins(amount);
-              triggerToast(`🪙 Awarded ${amount} coins for finishing in ${place === 1 ? '1st' : place === 2 ? '2nd' : place === 3 ? '3rd' : `${place}th`} place!`);
+              triggerToast(`You won ${amount} coins in the last game!`);
+              playSfx('add');
             }}
-            onExitGame={() => setScreen('mainmenu')}
+            onExitGame={(prizeWon?: number) => {
+              if (prizeWon && prizeWon > 0) {
+                handleUpdateCoins(prizeWon);
+                triggerToast(`You won ${prizeWon} coins in the last game!`);
+                playSfx('add');
+              }
+              setScreen('mainmenu');
+            }}
           />
         )}
 
@@ -586,8 +606,15 @@ export default function App() {
             winner={gameWinner}
             units={finalUnits}
             settings={currentGameSettings}
+            wonCoins={pendingWonCoins}
+            onCoinsAwarded={handleCoinsAwardedFromWinner}
             onPlayAgain={handlePlayAgain}
-            onHome={() => setScreen('mainmenu')}
+            onHome={() => {
+              if (pendingWonCoins > 0) {
+                handleCoinsAwardedFromWinner(pendingWonCoins);
+              }
+              setScreen('mainmenu');
+            }}
           />
         )}
 

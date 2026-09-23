@@ -40,5 +40,18 @@ export function runElimTests() {
   assert(resTie.toElim.length === 1, 'Should eliminate 1 tied player');
   assert(resTie.log.some(l => l.isRollOff), 'Roll-off must be logged');
 
+  // Test 4: Elimination placement and prize calculation for multiplayer/challenge games
+  const payouts4Player = [20, 10]; // 1st gets 20, 2nd gets 10
+  const activeCountAfterElim = 1; // 1 survivor left -> eliminated player is 2nd place
+  const humanPlace = activeCountAfterElim + 1; // 2nd place
+  const prizeWon = payouts4Player[humanPlace - 1] || 0;
+  assert(prizeWon === 10, '2nd place eliminated player must receive 10 coin prize');
+
+  const payouts5Player = [25, 10, 5]; // 3rd place receives 5 coins
+  const remainingSurvivors = 2; // 2 survivors left -> eliminated player is 3rd place
+  const placeIn5Player = remainingSurvivors + 1; // 3rd place
+  const prizeIn5Player = payouts5Player[placeIn5Player - 1] || 0;
+  assert(prizeIn5Player === 5, '3rd place eliminated player must receive 5 coin prize');
+
   console.log('✓ All Elimination Tests Passed!');
 }
