@@ -119,6 +119,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const [rollSlotsCount, setRollSlotsCount] = useState(12);
   const [isRolling, setIsRolling] = useState(false);
   const [announcedChimes, setAnnouncedChimes] = useState<Record<string, number>>({});
+  const announcedChimesRef = useRef<Record<string, number>>({});
   const [dice, setDice] = useState<Die[]>(() => {
     const firstSlot = settings.slots[0];
     const [c1, c2] = getUnitDiceColors(firstSlot, userDiceColors);
@@ -233,12 +234,16 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     };
   }, []);
 
+  const handleDismissSixCelebration = useCallback(() => {
+    setShowSixCelebration(false);
+  }, []);
+
   // Auto-dismiss 6-of-a-kind Color Run celebration after animation plays
   useEffect(() => {
     if (!showSixCelebration) return;
     const timer = setTimeout(() => {
       setShowSixCelebration(false);
-    }, 3200);
+    }, 3500);
     return () => clearTimeout(timer);
   }, [showSixCelebration]);
 
@@ -423,6 +428,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             playSfx('add');
             setIsRolling(false);
             setRollsUsed(0);
+            announcedChimesRef.current = {};
             setAnnouncedChimes({});
             setShowSixCelebration(false);
             if (gs.dice) {
@@ -461,6 +467,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       setTurnSecondsLeft(ROLL_1_TIME);
       setRollSlotsCount(12);
       setIsAutoPilotTurn(false);
+      announcedChimesRef.current = {};
       setAnnouncedChimes({});
       setShowSixCelebration(false);
 
@@ -563,13 +570,12 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     });
 
     let triggeredSix = false;
-    const newAnnounced = { ...announcedChimes };
     for (const k in byVC) {
       const count = byVC[k];
       if (count < 3) continue;
       const tier = Math.min(6, count);
-      if (tier > (newAnnounced[k] || 0)) {
-        newAnnounced[k] = tier;
+      if (tier > (announcedChimesRef.current[k] || 0)) {
+        announcedChimesRef.current[k] = tier;
         if (tier === 3) playSfx('s3');
         else if (tier === 4) playSfx('s4');
         else if (tier === 5) playSfx('s5');
@@ -580,9 +586,9 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         }
       }
     }
-    setAnnouncedChimes(newAnnounced);
+    setAnnouncedChimes({ ...announcedChimesRef.current });
     return triggeredSix;
-  }, [announcedChimes]);
+  }, []);
 
   // Roll dice action: re-slots active dice and locks final values when animation completes
   const doRoll = () => {
@@ -728,53 +734,51 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       setTurnSecondsLeft(rollsUsed === 0 ? ROLL_1_TIME : ROLL_2_3_TIME);
     }
 
-    setDice(prev => {
-      const targetDie = prev.find(d => d.id === id);
-      if (!targetDie) return prev;
+    const targetDie = dice.find(d => d.id === id);
+    if (!targetDie) return;
 
-      const willSelect = !targetDie.selected;
-      const val = targetDie.value;
+    const willSelect = !targetDie.selected;
+    const val = targetDie.value;
 
-      const updated = prev.map(d => {
-        if (d.zone === 'active' && d.value === val) {
-          return { ...d, selected: willSelect };
+    const updated = dice.map(d => {
+      if (d.zone === 'active' && d.value === val) {
+        return { ...d, selected: willSelect };
+      }
+      return d;
+    });
+
+    // Auto-commit if selected + saved of that face >= 3
+    const savedCount = updated.filter(d => d.zone === 'saved' && d.value === val).length;
+    const selectedActive = updated.filter(
+      d => d.zone === 'active' && d.selected && d.value === val
+    );
+
+    if (savedCount + selectedActive.length >= 3) {
+      const finalized = updated.map(d => {
+        if (d.zone === 'active' && d.selected && d.value === val) {
+          // Keep its slotIndex so the spot remains blank in RollArea!
+          return { ...d, zone: 'saved' as const, selected: false };
         }
         return d;
       });
-
-      // Auto-commit if selected + saved of that face >= 3
-      const savedCount = updated.filter(d => d.zone === 'saved' && d.value === val).length;
-      const selectedActive = updated.filter(
-        d => d.zone === 'active' && d.selected && d.value === val
-      );
-
-      if (savedCount + selectedActive.length >= 3) {
-        const finalized = updated.map(d => {
-          if (d.zone === 'active' && d.selected && d.value === val) {
-            // Keep its slotIndex so the spot remains blank in RollArea!
-            return { ...d, zone: 'saved' as const, selected: false };
-          }
-          return d;
+      setDice(finalized);
+      checkBonusChimes(finalized);
+      if (settings.roomId && isHumanOwner) {
+        updateRoomGameState(settings.roomId, {
+          round,
+          phase,
+          activeUnitIndex: qIdx,
+          activeUnitId: curUnit.id,
+          rollsUsed,
+          dice: finalized,
+          lastAction: 'save_dice',
+          lastActionBy: user.uid,
+          actionTimestamp: Date.now(),
         });
-        checkBonusChimes(finalized);
-        if (settings.roomId && isHumanOwner) {
-          updateRoomGameState(settings.roomId, {
-            round,
-            phase,
-            activeUnitIndex: qIdx,
-            activeUnitId: curUnit.id,
-            rollsUsed,
-            dice: finalized,
-            lastAction: 'save_dice',
-            lastActionBy: user.uid,
-            actionTimestamp: Date.now(),
-          });
-        }
-        return finalized;
       }
-
-      return updated;
-    });
+    } else {
+      setDice(updated);
+    }
   };
 
   // Tapping saved die sends it back to active area into a vacant slot. Resets timer & stops warning sound!
@@ -788,62 +792,60 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       setTurnSecondsLeft(rollsUsed === 0 ? ROLL_1_TIME : ROLL_2_3_TIME);
     }
 
-    setDice(prev => {
-      const target = prev.find(d => d.id === id);
-      if (!target) return prev;
-      const v = target.value;
+    const target = dice.find(d => d.id === id);
+    if (!target) return;
+    const v = target.value;
 
-      // Find occupied slots among active dice
-      const activeSlots = new Set(
-        prev.filter(d => d.zone === 'active').map(d => d.slotIndex)
-      );
+    // Find occupied slots among active dice
+    const activeSlots = new Set(
+      dice.filter(d => d.zone === 'active').map(d => d.slotIndex)
+    );
 
-      const assignSlot = (originalSlot?: number) => {
-        if (originalSlot !== undefined && !activeSlots.has(originalSlot)) {
-          activeSlots.add(originalSlot);
-          return originalSlot;
-        }
-        for (let i = 0; i < 12; i++) {
-          if (!activeSlots.has(i)) {
-            activeSlots.add(i);
-            return i;
-          }
-        }
-        return 0;
-      };
-
-      // If pulling back leaves < 3 in that set, pull all matching back
-      const remainingSaved = prev.filter(
-        d => d.zone === 'saved' && d.value === v && d.id !== id
-      );
-      const result = remainingSaved.length < 3
-        ? prev.map(d =>
-            d.value === v
-              ? { ...d, zone: 'active' as const, selected: false, slotIndex: assignSlot(d.slotIndex) }
-              : d
-          )
-        : prev.map(d =>
-            d.id === id
-              ? { ...d, zone: 'active' as const, selected: false, slotIndex: assignSlot(d.slotIndex) }
-              : d
-          );
-
-      if (settings.roomId && isHumanOwner) {
-        updateRoomGameState(settings.roomId, {
-          round,
-          phase,
-          activeUnitIndex: qIdx,
-          activeUnitId: curUnit.id,
-          rollsUsed,
-          dice: result,
-          lastAction: 'save_dice',
-          lastActionBy: user.uid,
-          actionTimestamp: Date.now(),
-        });
+    const assignSlot = (originalSlot?: number) => {
+      if (originalSlot !== undefined && !activeSlots.has(originalSlot)) {
+        activeSlots.add(originalSlot);
+        return originalSlot;
       }
+      for (let i = 0; i < 12; i++) {
+        if (!activeSlots.has(i)) {
+          activeSlots.add(i);
+          return i;
+        }
+      }
+      return 0;
+    };
 
-      return result;
-    });
+    // If pulling back leaves < 3 in that set, pull all matching back
+    const remainingSaved = dice.filter(
+      d => d.zone === 'saved' && d.value === v && d.id !== id
+    );
+    const result = remainingSaved.length < 3
+      ? dice.map(d =>
+          d.value === v
+            ? { ...d, zone: 'active' as const, selected: false, slotIndex: assignSlot(d.slotIndex) }
+            : d
+        )
+      : dice.map(d =>
+          d.id === id
+            ? { ...d, zone: 'active' as const, selected: false, slotIndex: assignSlot(d.slotIndex) }
+            : d
+        );
+
+    setDice(result);
+
+    if (settings.roomId && isHumanOwner) {
+      updateRoomGameState(settings.roomId, {
+        round,
+        phase,
+        activeUnitIndex: qIdx,
+        activeUnitId: curUnit.id,
+        rollsUsed,
+        dice: result,
+        lastAction: 'save_dice',
+        lastActionBy: user.uid,
+        actionTimestamp: Date.now(),
+      });
+    }
   };
 
   // Helper to build unit status record with no undefined fields for Firestore serialization
@@ -1508,7 +1510,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       <div
         onTouchStart={handleScreenTouchAction}
         onMouseDown={handleScreenTouchAction}
-        className="flex-1 flex flex-col justify-between min-h-0 py-0.5 md:py-2 gap-1 md:gap-3 overflow-hidden"
+        className="flex-1 flex flex-col justify-between min-h-0 py-0.5 sm:py-1 gap-1 sm:gap-1.5 overflow-hidden"
       >
         {/* Saved Dice Board - MAIN FLEX POINT: grows and shrinks as needed */}
         <div className="flex-1 min-h-0 flex flex-col justify-center transition-all duration-300">
@@ -1518,7 +1520,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             onTapSavedDie={handleTapSaved}
             isCPU={isCPU}
             showSixCelebration={showSixCelebration}
-            onDismissSixCelebration={() => setShowSixCelebration(false)}
+            onDismissSixCelebration={handleDismissSixCelebration}
             warningSecondsLeft={show15sWarning ? turnSecondsLeft : null}
             onTouchScreen={handleScreenTouchAction}
           />
@@ -1554,14 +1556,14 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         </div>
       </div>
 
-      {/* Bottom Controls Area (Fixed at bottom - with extra padding on tablet to reveal more background) */}
-      <div className="shrink-0 flex flex-col gap-0.5 md:gap-2 md:pt-4 md:pb-2">
+      {/* Bottom Controls Area (Fixed at bottom) */}
+      <div className="shrink-0 flex flex-col gap-0.5 sm:gap-1 pt-0.5 pb-1">
         {/* Action Buttons: ROLL, SCORE IT!, and INFO */}
-        <div className="flex gap-1.5 md:gap-3 md:py-1">
+        <div className="flex gap-1.5 sm:gap-2 py-0.5">
           <button
             onClick={doRoll}
             disabled={!canRoll}
-            className={`flex-1 py-1.5 sm:py-2 md:py-3.5 px-2 md:px-4 bg-[#28974a] hover:bg-[#22803e] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm md:text-base rounded-xl md:rounded-2xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-1 md:gap-2 border-b-2 md:border-b-3 border-[#185e2e] ${
+            className={`flex-1 py-2 sm:py-2.5 px-2 bg-[#28974a] hover:bg-[#22803e] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-1 sm:gap-1.5 border-b-2 border-[#185e2e] ${
               isTimeRunningOut
                 ? 'ring-4 ring-yellow-400 ring-offset-2 ring-offset-black/50 animate-pulse bg-red-700 hover:bg-red-800'
                 : rollsUsed === 0 && isHumanOwner && !isCPU && (joiningCountdown === null || joiningCountdown <= 0)
@@ -1601,7 +1603,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           <button
             onClick={bankTurn}
             disabled={!canScore}
-            className="flex-1 py-1.5 sm:py-2 md:py-3.5 px-2 md:px-4 bg-[#e58a1f] hover:bg-[#cb7512] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm md:text-base rounded-xl md:rounded-2xl shadow-md transition-transform active:scale-98 flex items-center justify-center gap-1 md:gap-2 border-b-2 md:border-b-3 border-[#a65d0a]"
+            className="flex-1 py-2 sm:py-2.5 px-2 bg-[#e58a1f] hover:bg-[#cb7512] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center justify-center gap-1 sm:gap-1.5 border-b-2 border-[#a65d0a]"
           >
             <span>Score it!</span>
             {rollsUsed > 0 && (
@@ -1613,7 +1615,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
           <button
             onClick={() => setShowInfoModal(true)}
-            className="py-1.5 sm:py-2 md:py-3.5 px-3 md:px-5 bg-[#e8dec0] hover:bg-[#ded1af] text-[#3e2e1e] font-black text-xs sm:text-sm md:text-base rounded-xl md:rounded-2xl shadow-md transition-transform active:scale-98 flex items-center justify-center border-b-2 md:border-b-3 border-[#c8bc9a]"
+            className="py-2 sm:py-2.5 px-3 sm:px-4 bg-[#e8dec0] hover:bg-[#ded1af] text-[#3e2e1e] font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center justify-center border-b-2 border-[#c8bc9a]"
             title="Game Rules & Scoring Info"
           >
             INFO

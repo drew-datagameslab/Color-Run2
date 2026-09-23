@@ -101,7 +101,7 @@ export function mapFirebaseUserToAccount(
     displayName.charAt(0).toUpperCase() + displayName.slice(1);
 
   const colors = ['#1f7fd6', '#e5352f', '#2a8b41', '#8338ec', '#e76f51', '#3a86ff'];
-  const color =
+  let color =
     provider === 'google'
       ? '#e5352f'
       : provider === 'apple'
@@ -110,19 +110,45 @@ export function mapFirebaseUserToAccount(
       ? '#3b82f6'
       : colors[Math.floor(Math.random() * colors.length)];
 
+  let preservedImage = fbUser.photoURL || undefined;
+  let preservedName = formattedName;
+  let preservedDiceColors: [DiceColor, DiceColor] = ['blue', 'red'];
+
+  // Check if the user already configured an avatar or name in localStorage
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem('cr_user') : null;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed.avatar?.color) {
+        color = parsed.avatar.color;
+      }
+      if (parsed.avatar?.image !== undefined) {
+        preservedImage = parsed.avatar.image;
+      }
+      if (parsed.name && parsed.name !== 'Player' && parsed.name !== 'Color Roller' && parsed.name !== 'Guest Roller') {
+        preservedName = parsed.name;
+      }
+      if (Array.isArray(parsed.diceColors) && parsed.diceColors.length === 2) {
+        preservedDiceColors = parsed.diceColors as [DiceColor, DiceColor];
+      }
+    }
+  } catch {
+    // Ignore
+  }
+
   return {
     uid: fbUser.uid,
-    name: formattedName,
+    name: preservedName,
     email: email,
     provider: provider,
     isGuest: isAnonymous,
     avatar: {
       color: color,
-      name: formattedName.slice(0, 2).toUpperCase(),
-      image: fbUser.photoURL || undefined,
+      name: preservedName.slice(0, 2).toUpperCase(),
+      image: preservedImage,
     },
     scoreboardUnlocked: true,
-    diceColors: ['blue', 'red'],
+    diceColors: preservedDiceColors,
     createdAt: new Date().toISOString(),
   };
 }
@@ -316,7 +342,21 @@ export function subscribeToAuth(
       try {
         const existing = await loadUserProfileFromFirestore(fbUser.uid);
         if (existing) {
-          callback(existing);
+          const merged: UserAccount = {
+            ...account,
+            ...existing,
+            name: (existing.name && existing.name !== 'Color Roller' && existing.name !== 'Guest Roller')
+              ? existing.name
+              : account.name,
+            avatar: {
+              ...account.avatar,
+              ...(existing.avatar || {}),
+              color: existing.avatar?.color || account.avatar?.color || '#1f7fd6',
+              image: existing.avatar?.image !== undefined ? existing.avatar.image : account.avatar?.image,
+            },
+            diceColors: existing.diceColors || account.diceColors || ['blue', 'red'],
+          };
+          callback(merged);
           return;
         }
       } catch (e) {

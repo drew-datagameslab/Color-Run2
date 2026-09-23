@@ -40,25 +40,24 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
 
   // Default dice size: slightly smaller than rolling area to account for points total boxes
   // Scales down progressively as more rows are added so dice never overlap
-  // On tablets (md:), dice are significantly larger to eliminate wasted space while keeping room for 4 rows
   const defaultDieSizeClass =
     visualRowCount >= 4
-      ? 'max-w-[25px] max-h-[25px] sm:max-w-[28px] sm:max-h-[28px] md:max-w-[48px] md:max-h-[48px]'
+      ? 'max-w-[26px] max-h-[26px] sm:max-w-[28px] sm:max-h-[28px]'
       : visualRowCount === 3
-      ? 'max-w-[31px] max-h-[31px] sm:max-w-[35px] sm:max-h-[35px] md:max-w-[54px] md:max-h-[54px]'
+      ? 'max-w-[30px] max-h-[30px] sm:max-w-[34px] sm:max-h-[34px]'
       : visualRowCount === 2
-      ? 'max-w-[38px] max-h-[38px] sm:max-w-[42px] sm:max-h-[42px] md:max-w-[60px] md:max-h-[60px]'
-      : 'max-w-[45px] max-h-[45px] sm:max-w-[49px] sm:max-h-[49px] md:max-w-[64px] md:max-h-[64px]';
+      ? 'max-w-[36px] max-h-[36px] sm:max-w-[42px] sm:max-h-[42px]'
+      : 'max-w-[42px] max-h-[42px] sm:max-w-[48px] sm:max-h-[48px]';
 
   // If 7 dice of the same shape are collected, shrink as needed to fit the 7 dice and points total
   const shrunkSevenDieSizeClass =
     visualRowCount >= 4
-      ? 'max-w-[21px] max-h-[21px] sm:max-w-[24px] sm:max-h-[24px] md:max-w-[42px] md:max-h-[42px]'
+      ? 'max-w-[22px] max-h-[22px] sm:max-w-[24px] sm:max-h-[24px]'
       : visualRowCount === 3
-      ? 'max-w-[26px] max-h-[26px] sm:max-w-[30px] sm:max-h-[30px] md:max-w-[46px] md:max-h-[46px]'
+      ? 'max-w-[26px] max-h-[26px] sm:max-w-[30px] sm:max-h-[30px]'
       : visualRowCount === 2
-      ? 'max-w-[32px] max-h-[32px] sm:max-w-[36px] sm:max-h-[36px] md:max-w-[52px] md:max-h-[52px]'
-      : 'max-w-[38px] max-h-[38px] sm:max-w-[42px] sm:max-h-[42px] md:max-w-[56px] md:max-h-[56px]';
+      ? 'max-w-[32px] max-h-[32px] sm:max-w-[36px] sm:max-h-[36px]'
+      : 'max-w-[38px] max-h-[38px] sm:max-w-[42px] sm:max-h-[42px]';
 
   const rowGapClass =
     visualRowCount >= 4
@@ -269,8 +268,8 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
               </div>
             </div>
             {/* Points box matches dice row height, centered */}
-            <div className="w-8 sm:w-9 md:w-12 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
-              <div className="w-full h-full min-h-[32px] md:min-h-[44px] flex items-center justify-center font-mono font-black text-xs sm:text-sm md:text-base text-white/30 border border-white/10 rounded-lg md:rounded-xl text-center">
+            <div className="w-8 sm:w-10 md:w-14 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
+              <div className="w-full h-full min-h-[34px] sm:min-h-[42px] md:min-h-[52px] flex items-center justify-center font-mono font-black text-xs sm:text-base md:text-xl text-white/30 border border-white/10 rounded-lg md:rounded-xl text-center">
                 0
               </div>
             </div>
@@ -305,8 +304,8 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
                   </div>
 
                   {/* Points box spanning the height of the two rows with points total centered */}
-                  <div className="w-8 sm:w-9 md:w-12 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
-                    <div className="w-full h-full min-h-[64px] md:min-h-[92px] flex items-center justify-center font-mono font-black text-xs sm:text-sm md:text-base rounded-xl md:rounded-2xl bg-[#28974a] text-white border-2 border-[#34c759] shadow-md text-center">
+                  <div className="w-8 sm:w-10 md:w-14 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
+                    <div className="w-full h-full min-h-[64px] sm:min-h-[82px] md:min-h-[104px] flex items-center justify-center font-mono font-black text-xs sm:text-base md:text-xl rounded-xl md:rounded-2xl bg-[#28974a] text-white border-2 border-[#34c759] shadow-md text-center">
                       {pts}
                     </div>
                   </div>
@@ -331,8 +330,8 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
                 </div>
 
                 {/* Points box matching the height of the single dice row with points total centered */}
-                <div className="w-8 sm:w-9 md:w-12 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
-                  <div className="w-full h-full min-h-[32px] md:min-h-[44px] flex items-center justify-center font-mono font-black text-xs sm:text-sm md:text-base rounded-lg md:rounded-xl bg-[#28974a] text-white border border-[#34c759] shadow-xs text-center">
+                <div className="w-8 sm:w-10 md:w-14 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
+                  <div className="w-full h-full min-h-[34px] sm:min-h-[42px] md:min-h-[52px] flex items-center justify-center font-mono font-black text-xs sm:text-base md:text-xl rounded-lg md:rounded-xl bg-[#28974a] text-white border border-[#34c759] shadow-xs text-center">
                     {pts}
                   </div>
                 </div>

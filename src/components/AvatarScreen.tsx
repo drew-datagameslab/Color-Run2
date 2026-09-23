@@ -27,10 +27,10 @@ export const AvatarScreen: React.FC<AvatarScreenProps> = ({
   onBack,
 }) => {
   const [name, setName] = useState(user.name);
-  const [selectedColor, setSelectedColor] = useState(user.avatar.color);
+  const [selectedColor, setSelectedColor] = useState(user.avatar.color || DEFAULT_AVATARS[0]);
   const [selectedImage, setSelectedImage] = useState<string | undefined>(user.avatar.image);
   const [tab, setTab] = useState<'presets' | 'upload' | 'initials' | 'dice'>(
-    user.avatar.image?.startsWith('data:') ? 'upload' : 'presets'
+    user.avatar.image ? (user.avatar.image.startsWith('data:') ? 'upload' : 'presets') : 'initials'
   );
   const [diceColorA, setDiceColorA] = useState<DiceColor>(user.diceColors?.[0] || 'blue');
   const [diceColorB, setDiceColorB] = useState<DiceColor>(user.diceColors?.[1] || 'red');
@@ -257,7 +257,10 @@ export const AvatarScreen: React.FC<AvatarScreenProps> = ({
             {DEFAULT_AVATARS.map(color => (
               <button
                 key={color}
-                onClick={() => setSelectedColor(color)}
+                onClick={() => {
+                  setSelectedColor(color);
+                  setSelectedImage(undefined);
+                }}
                 className={`h-12 rounded-xl flex items-center justify-center text-white font-black text-sm shadow-sm transition-transform active:scale-95 ${selectedColor === color ? 'ring-3 ring-[#2f9a4f] scale-105' : ''}`}
                 style={{ backgroundColor: color }}
               >

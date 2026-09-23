@@ -11,6 +11,7 @@ import {
   setAdFree,
   hasClaimedDailyBonus,
   markDailyBonusClaimed,
+  DEFAULT_AVATARS,
 } from './lib/storage';
 import { getLocalFriends, syncFriendsFromFirestore, removeFriend } from './lib/friends';
 import { initAudio, unlockAudio } from './lib/audio';
@@ -207,8 +208,29 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = subscribeToAuth(authedUser => {
       if (authedUser) {
-        setUser(authedUser);
-        saveUser(authedUser);
+        setUser(prevUser => {
+          const localUser = getInitialUser();
+          const effective = prevUser || localUser;
+          const merged: UserAccount = {
+            ...effective,
+            ...authedUser,
+            name:
+              authedUser.name &&
+              authedUser.name !== 'Color Roller' &&
+              authedUser.name !== 'Guest Roller' &&
+              authedUser.name !== 'Player'
+                ? authedUser.name
+                : effective?.name || authedUser.name,
+            avatar: {
+              ...authedUser.avatar,
+              color: effective?.avatar?.color || authedUser.avatar?.color || DEFAULT_AVATARS[0],
+              image: effective?.avatar?.image !== undefined ? effective.avatar.image : authedUser.avatar?.image,
+            },
+            diceColors: effective?.diceColors || authedUser.diceColors || ['blue', 'red'],
+          };
+          saveUser(merged);
+          return merged;
+        });
         const storedCoins = getUserCoins(authedUser.uid);
         setCoins(storedCoins);
         setScreen(prev => (prev === 'signin' ? 'mainmenu' : prev));
@@ -260,7 +282,7 @@ export default function App() {
   const handleUpdateCoins = (delta: number) => {
     const updated = addCoins(user.uid, delta);
     setCoins(updated);
-    if (!user.isGuest) {
+    if (user.uid) {
       syncUserProfileToFirestore(user, updated).catch(() => {});
     }
   };
@@ -268,7 +290,7 @@ export default function App() {
   const handleSaveUser = (updatedUser: UserAccount) => {
     setUser(updatedUser);
     saveUser(updatedUser);
-    if (!updatedUser.isGuest) {
+    if (updatedUser.uid) {
       syncUserProfileToFirestore(updatedUser, coins).catch(() => {});
     }
     if (updatedUser.diceColors) {

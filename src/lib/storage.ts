@@ -80,6 +80,15 @@ export function saveUser(user: UserAccount): void {
     if (user.isAdFree) {
       localStorage.setItem(AD_FREE_KEY, '1');
     }
+    // Also keep registered accounts in sync if user registered with email
+    if (user.email) {
+      const cleanEmail = user.email.toLowerCase().trim();
+      const accounts = getRegisteredAccounts();
+      if (accounts[cleanEmail]) {
+        accounts[cleanEmail].user = { ...accounts[cleanEmail].user, ...user };
+        localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
+      }
+    }
   } catch {
     // Ignore
   }

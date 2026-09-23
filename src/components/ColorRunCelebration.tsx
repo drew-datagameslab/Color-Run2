@@ -11,6 +11,11 @@ interface ColorRunCelebrationProps {
  */
 export const ColorRunCelebration: React.FC<ColorRunCelebrationProps> = ({ onEnded }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const onEndedRef = useRef(onEnded);
+
+  useEffect(() => {
+    onEndedRef.current = onEnded;
+  });
 
   useEffect(() => {
     let animId: number;
@@ -22,12 +27,18 @@ export const ColorRunCelebration: React.FC<ColorRunCelebrationProps> = ({ onEnde
     video.playsInline = true;
     video.autoplay = true;
 
-    const handleEnded = () => {
-      if (!isCancelled) {
-        onEnded?.();
-      }
+    let hasEnded = false;
+    const notifyEnded = () => {
+      if (hasEnded || isCancelled) return;
+      hasEnded = true;
+      onEndedRef.current?.();
     };
-    video.addEventListener('ended', handleEnded);
+
+    video.addEventListener('ended', notifyEnded);
+    video.addEventListener('error', notifyEnded);
+
+    // Fallback safety timer so celebration cleanly dismisses even if video stalls
+    const fallbackTimer = setTimeout(notifyEnded, 3300);
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -96,12 +107,14 @@ export const ColorRunCelebration: React.FC<ColorRunCelebrationProps> = ({ onEnde
 
     return () => {
       isCancelled = true;
+      clearTimeout(fallbackTimer);
       cancelAnimationFrame(animId);
-      video.removeEventListener('ended', handleEnded);
+      video.removeEventListener('ended', notifyEnded);
+      video.removeEventListener('error', notifyEnded);
       video.pause();
       video.src = '';
     };
-  }, [onEnded]);
+  }, []);
 
   return (
     <div className="w-full h-full flex items-center justify-center pointer-events-none">

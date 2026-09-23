@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   X,
   Volume2,
@@ -71,19 +71,36 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   onLogOut,
   onToast,
 }) => {
-  if (!isOpen) return null;
-
   const [activeTab, setActiveTab] = useState<'volume' | 'dice' | 'backgrounds' | 'avatar' | 'account'>('avatar');
 
   // User state
   const [name, setName] = useState(user.name);
   const [phoneNumber, setPhoneNumber] = useState(user.phoneNumber || '');
-  const [selectedColor, setSelectedColor] = useState(user.avatar.color);
+  const [selectedColor, setSelectedColor] = useState(user.avatar.color || DEFAULT_AVATARS[0]);
   const [selectedImage, setSelectedImage] = useState<string | undefined>(user.avatar.image);
   const [avatarSubTab, setAvatarSubTab] = useState<'presets' | 'upload' | 'initials'>(
-    user.avatar.image ? (user.avatar.image.startsWith('data:') ? 'upload' : 'presets') : 'presets'
+    user.avatar.image ? (user.avatar.image.startsWith('data:') ? 'upload' : 'presets') : 'initials'
   );
   const photoInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync state whenever modal is opened or user/shopSettings change
+  useEffect(() => {
+    if (isOpen) {
+      setName(user.name);
+      setPhoneNumber(user.phoneNumber || '');
+      setSelectedColor(user.avatar.color || DEFAULT_AVATARS[0]);
+      setSelectedImage(user.avatar.image);
+      setDiceColorA(user.diceColors?.[0] || shopSettings.equippedColors[0] || 'blue');
+      setDiceColorB(user.diceColors?.[1] || shopSettings.equippedColors[1] || 'red');
+      setAvatarSubTab(
+        user.avatar.image
+          ? (user.avatar.image.startsWith('data:') ? 'upload' : 'presets')
+          : 'initials'
+      );
+      setEquippedBg(shopSettings.equippedBg || 'bg-wood');
+      setVolPct(Math.round((getSoundVolume() / 0.7) * 100));
+    }
+  }, [isOpen, user, shopSettings]);
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -203,6 +220,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const handleSaveAndClose = () => {
     const trimmed = name.trim() || 'Player';
     const cleanPhone = phoneNumber.trim();
+    const finalImage = avatarSubTab === 'initials' ? undefined : selectedImage;
     const updatedUser: UserAccount = {
       ...user,
       name: trimmed,
@@ -210,7 +228,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       avatar: {
         color: selectedColor,
         name: trimmed.slice(0, 2).toUpperCase(),
-        image: avatarSubTab !== 'initials' ? selectedImage : undefined,
+        image: finalImage,
       },
       diceColors: [diceColorA, diceColorB],
     };
@@ -230,6 +248,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     onClose();
     onToast('Profile updated!');
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs select-none">
@@ -497,7 +517,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   {DEFAULT_AVATARS.map(color => (
                     <button
                       key={color}
-                      onClick={() => setSelectedColor(color)}
+                      onClick={() => {
+                        setSelectedColor(color);
+                        setSelectedImage(undefined);
+                      }}
                       className={`h-11 rounded-xl flex items-center justify-center text-white font-black text-xs shadow-xs transition-transform active:scale-95 cursor-pointer ${
                         selectedColor === color ? 'ring-3 ring-[#1c6a35] scale-105' : ''
                       }`}
