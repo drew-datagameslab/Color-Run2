@@ -1326,18 +1326,26 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     : 0;
 
   // Show overlay over Saved Dice area in multiplayer or Friends Challenge when eliminated
-  const showEliminatedOverlay =
+  const showMultiplayerElimOverlay =
     (isMultiplayer || isFriendsChallenge) &&
     isHumanOut &&
     !hasDismissedElimOverlay &&
     phase !== 'over';
 
+  // Show overlay over Saved Dice area in Play vs Computer when eliminated
+  const showVsCpuElimOverlay =
+    !isMultiplayer &&
+    !isFriendsChallenge &&
+    isHumanOut &&
+    !spectatorChoiceMade &&
+    phase !== 'over';
+
   useEffect(() => {
-    if (showEliminatedOverlay && !wasEliminatedSoundPlayedRef.current) {
+    if ((showMultiplayerElimOverlay || showVsCpuElimOverlay) && !wasEliminatedSoundPlayedRef.current) {
       wasEliminatedSoundPlayedRef.current = true;
       playSfx('warning5s');
     }
-  }, [showEliminatedOverlay]);
+  }, [showMultiplayerElimOverlay, showVsCpuElimOverlay]);
 
   // Target display logic: target is reached once elimination phase begins or someone hits threshold
   const targetReached = phase === 'elimination' || units.some(u => u.score >= settings.threshold);
@@ -1464,32 +1472,6 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           )}
         </div>
 
-        {/* If user is eliminated and only computers left, give options */}
-        {(isHumanOut || onlyComputersLeft) && (
-          <div className="flex items-center justify-between px-2.5 py-1 mb-1 bg-[#131d2e]/90 border border-white/15 rounded-xl shadow-xs">
-            <span className="text-[10px] text-white/80 font-bold">
-              {isHumanOut ? "You're out of the game" : "All opponents finished"}
-            </span>
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => {
-                  setSpectatorChoiceMade(true);
-                  setSpectatorFastForward(true);
-                }}
-                className="text-[10px] font-black bg-[#28974a] hover:bg-[#22803e] text-white px-2 py-0.5 rounded-lg shadow-xs cursor-pointer active:scale-95"
-              >
-                ⏩ Speed to Final Score
-              </button>
-              <button
-                onClick={handleExitClick}
-                className="text-[10px] font-bold bg-[#8c745e] hover:bg-[#735d49] text-white px-2 py-0.5 rounded-lg shadow-xs cursor-pointer"
-              >
-                Leave Room
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Players Scoreboards Strip */}
         <div className="mb-1">
           <CardsStrip
@@ -1567,8 +1549,8 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             onTouchScreen={handleScreenTouchAction}
           />
 
-          {/* Elimination Overlay over the Saved Dice Area */}
-          {showEliminatedOverlay && (
+          {/* Elimination Overlay over the Saved Dice Area for Multiplayer Online & Friends Challenge */}
+          {showMultiplayerElimOverlay && (
             <div
               id="eliminated-saved-dice-overlay"
               className="absolute inset-0 z-30 flex flex-col items-center justify-center p-3 sm:p-4 rounded-2xl bg-[#140e0a]/95 border-2 border-[#e58a1f] shadow-2xl backdrop-blur-xs text-center animate-scale-up select-none"
@@ -1605,6 +1587,43 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
                   className="flex-1 py-2 sm:py-2.5 px-3 bg-[#8c745e] hover:bg-[#735d49] text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-95 cursor-pointer border-b-2 border-[#5c4a3a]"
                 >
                   Exit Room
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Elimination Overlay over the Saved Dice Area for Play vs Computer */}
+          {showVsCpuElimOverlay && (
+            <div
+              id="eliminated-saved-dice-overlay-cpu"
+              className="absolute inset-0 z-30 flex flex-col items-center justify-center p-3 sm:p-4 rounded-2xl bg-[#140e0a]/95 border-2 border-[#e58a1f] shadow-2xl backdrop-blur-xs text-center animate-scale-up select-none"
+            >
+              <div className="text-3xl sm:text-4xl mb-1.5 drop-shadow-md">
+                🤖
+              </div>
+              <h2 className="text-base sm:text-lg md:text-xl font-black text-white tracking-wide mb-3 drop-shadow-md">
+                You're out — the CPUs are still playing!
+              </h2>
+
+              <div className="flex flex-row items-center justify-center gap-2 sm:gap-3 w-full max-w-[290px]">
+                <button
+                  id="btn-speed-to-final-score"
+                  onClick={() => {
+                    setSpectatorChoiceMade(true);
+                    setSpectatorFastForward(true);
+                  }}
+                  className="flex-1 py-2 sm:py-2.5 px-2.5 bg-[#28974a] hover:bg-[#22803e] text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-95 cursor-pointer border-b-2 border-[#185e2e] whitespace-nowrap"
+                >
+                  Speed to Final Score
+                </button>
+                <button
+                  id="btn-watch-game"
+                  onClick={() => {
+                    setSpectatorChoiceMade(true);
+                  }}
+                  className="flex-1 py-2 sm:py-2.5 px-2.5 bg-[#efe3ad] hover:bg-[#e4d69b] text-[#2e2316] font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-95 cursor-pointer border-b-2 border-[#cfc38a] whitespace-nowrap"
+                >
+                  Watch Game
                 </button>
               </div>
             </div>

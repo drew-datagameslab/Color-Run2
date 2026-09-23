@@ -160,29 +160,6 @@ export const RollArea: React.FC<RollAreaProps> = ({
         </div>
       )}
 
-      {/* Spectator Choice Overlay if player is out */}
-      {spectatorState?.isUserOut && !spectatorState.choiceMade && (
-        <div className="absolute inset-0 rounded-2xl bg-black/85 flex flex-col items-center justify-center p-4 text-center z-20 gap-3">
-          <div className="text-white font-bold text-sm sm:text-base">
-            You're out — the CPUs are still playing!
-          </div>
-          <div className="flex gap-2 w-full max-w-xs justify-center">
-            <button
-              onClick={spectatorState.onShowFinalScore}
-              className="flex-1 py-2 px-3 bg-[#2f9a4f] hover:bg-[#268a48] text-white text-xs sm:text-sm font-bold rounded-lg shadow-md transition-transform active:scale-95 cursor-pointer"
-            >
-              Speed to Final Score
-            </button>
-            <button
-              onClick={spectatorState.onLetPlayersFinish}
-              className="flex-1 py-2 px-3 bg-[#efe3ad] hover:bg-[#e4d69b] text-[#2e2316] text-xs sm:text-sm font-bold rounded-lg shadow-md transition-transform active:scale-95 cursor-pointer"
-            >
-              Watch Game
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Spectator Fast Forward Indicator */}
       {spectatorState?.isUserOut && spectatorState.fastForwarding && (
         <div className="absolute inset-0 rounded-2xl bg-black/80 flex flex-col items-center justify-center p-4 text-center z-20">
