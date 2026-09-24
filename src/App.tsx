@@ -478,7 +478,7 @@ export default function App() {
         />
 
         {/* Screen Router */}
-        <main className={`flex-1 flex flex-col min-h-0 overflow-hidden ${screen === 'play' ? 'justify-between' : screen === 'shop' ? 'justify-start' : 'justify-center'}`}>
+        <main className={`flex-1 flex flex-col min-h-0 overflow-hidden ${screen === 'play' || screen === 'scoreboard' ? 'justify-between' : screen === 'shop' ? 'justify-start' : 'justify-center'}`}>
         {screen === 'signin' && (
           <SignInScreen
             onSignedIn={u => {

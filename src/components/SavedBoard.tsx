@@ -15,6 +15,7 @@ interface SavedBoardProps {
   onDismissSixCelebration?: () => void;
   warningSecondsLeft?: number | null;
   onTouchScreen?: () => void;
+  forcePips?: boolean;
 }
 
 export const SavedBoard: React.FC<SavedBoardProps> = ({
@@ -26,6 +27,7 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
   onDismissSixCelebration,
   warningSecondsLeft,
   onTouchScreen,
+  forcePips = false,
 }) => {
   const sets = scoreResult.sets;
 
@@ -167,6 +169,7 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
                     <DieComponent
                       color={d.color}
                       value={d.value}
+                      forcePips={forcePips}
                       onClick={isCPU ? undefined : () => onTapSavedDie(d.id)}
                     />
                   </div>
@@ -183,6 +186,7 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
               <DieComponent
                 color={d.color}
                 value={d.value}
+                forcePips={forcePips}
                 onClick={isCPU ? undefined : () => onTapSavedDie(d.id)}
               />
             </div>
