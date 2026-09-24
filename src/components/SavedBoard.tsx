@@ -29,22 +29,90 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
   onTouchScreen,
   forcePips = false,
 }) => {
-  const sets = scoreResult.sets;
+  // Group all saved dice by their face value (1..6).
+  // This ensures that as dice are tapped in (especially in the companion app),
+  // they appear immediately in the saved dice area without confusion.
+  // Ineligible dice (< 3 of a number) appear with 0 pts and a clear "Need 3" badge,
+  // while eligible sets (>= 3 of a number) score base points + color bonuses.
+  const groups = React.useMemo(() => {
+    const byVal: Record<number, Die[]> = {};
+    for (const d of savedDice) {
+      if (!byVal[d.value]) byVal[d.value] = [];
+      byVal[d.value].push(d);
+    }
+
+    const result: Array<{
+      value: number;
+      dice: Die[];
+      isEligible: boolean;
+      pts: number;
+      count: number;
+    }> = [];
+
+    for (const vStr in byVal) {
+      const v = Number(vStr);
+      const diceForVal = [...byVal[v]].sort((a, b) => {
+        if (a.color !== b.color) {
+          return a.color.localeCompare(b.color);
+        }
+        return Number(a.id) - Number(b.id);
+      });
+
+      const isEligible = diceForVal.length >= 3;
+      const setInfo = scoreResult.sets.find(s => s.value === v);
+      let pts = 0;
+      if (isEligible) {
+        if (setInfo) {
+          pts = setInfo.base + setInfo.cb;
+        } else {
+          const base = diceForVal.length * 5;
+          const byColor: Record<string, number> = {};
+          diceForVal.forEach(d => {
+            byColor[d.color] = (byColor[d.color] || 0) + 1;
+          });
+          let cb = 0;
+          for (const c in byColor) {
+            cb += bonusFor(byColor[c]);
+          }
+          pts = base + cb;
+        }
+      }
+
+      result.push({
+        value: v,
+        dice: diceForVal,
+        isEligible,
+        pts,
+        count: diceForVal.length,
+      });
+    }
+
+    // Sort: eligible sets first (sorted by face value), followed by ineligible groups (sorted by face value)
+    result.sort((a, b) => {
+      if (a.isEligible !== b.isEligible) {
+        return a.isEligible ? -1 : 1;
+      }
+      return a.value - b.value;
+    });
+
+    return result;
+  }, [savedDice, scoreResult.sets]);
 
   // Calculate total visual rows across all sets to determine adaptive sizing
   // If 8+ dice of a symbol exist, that set breaks into 2 rows
   const visualRowCount =
-    sets.length === 0
+    groups.length === 0
       ? 1
-      : sets.reduce((acc, s) => {
-          const count = savedDice.filter(d => d.value === s.value).length;
-          return acc + (count >= 8 ? 2 : 1);
+      : groups.reduce((acc, g) => {
+          return acc + (g.count >= 8 ? 2 : 1);
         }, 0);
 
   // Default dice size: slightly smaller than rolling area to account for points total boxes
   // Scales down progressively as more rows are added so dice never overlap
   const defaultDieSizeClass =
-    visualRowCount >= 4
+    visualRowCount >= 5
+      ? 'max-w-[22px] max-h-[22px] sm:max-w-[26px] sm:max-h-[26px]'
+      : visualRowCount === 4
       ? 'max-w-[26px] max-h-[26px] sm:max-w-[28px] sm:max-h-[28px]'
       : visualRowCount === 3
       ? 'max-w-[30px] max-h-[30px] sm:max-w-[34px] sm:max-h-[34px]'
@@ -54,7 +122,9 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
 
   // If 7 dice of the same shape are collected, shrink as needed to fit the 7 dice and points total
   const shrunkSevenDieSizeClass =
-    visualRowCount >= 4
+    visualRowCount >= 5
+      ? 'max-w-[19px] max-h-[19px] sm:max-w-[22px] sm:max-h-[22px]'
+      : visualRowCount === 4
       ? 'max-w-[22px] max-h-[22px] sm:max-w-[24px] sm:max-h-[24px]'
       : visualRowCount === 3
       ? 'max-w-[26px] max-h-[26px] sm:max-w-[30px] sm:max-h-[30px]'
@@ -63,7 +133,9 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
       : 'max-w-[38px] max-h-[38px] sm:max-w-[42px] sm:max-h-[42px]';
 
   const rowGapClass =
-    visualRowCount >= 4
+    visualRowCount >= 5
+      ? 'gap-0.5 md:gap-1'
+      : visualRowCount === 4
       ? 'gap-0.5 md:gap-1.5'
       : visualRowCount === 3
       ? 'gap-1 md:gap-2'
@@ -265,8 +337,8 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
       </AnimatePresence>
 
       {/* Rows Container: Each set pairs its dice and points total together */}
-      <div className={`flex-1 flex flex-col justify-center ${rowGapClass} min-h-0 w-full px-0.5 pt-2 sm:pt-2.5 pb-0.5`}>
-        {sets.length === 0 ? (
+      <div className={`flex-1 flex flex-col justify-center ${rowGapClass} min-h-0 w-full px-0.5 pt-1.5 sm:pt-2 pb-0.5 overflow-y-auto`}>
+        {groups.length === 0 ? (
           // Empty placeholder row when no dice are saved yet
           <div className="flex items-stretch justify-between gap-1 sm:gap-1.5 md:gap-2.5 w-full max-w-[360px] sm:max-w-[420px] md:max-w-[520px] mx-auto min-h-0">
             <div className="flex-1 min-w-0 flex items-center justify-center">
@@ -281,23 +353,17 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
             </div>
             {/* Points box matches dice row height, centered */}
             <div className="w-8 sm:w-10 md:w-14 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
-              <div className="w-full h-full min-h-[34px] sm:min-h-[42px] md:min-h-[52px] flex items-center justify-center font-mono font-black text-xs sm:text-base md:text-xl text-white/30 border border-white/10 rounded-lg md:rounded-xl text-center">
+              <div className="w-full h-full min-h-[30px] sm:min-h-[38px] md:min-h-[48px] flex items-center justify-center font-mono font-black text-xs sm:text-base md:text-xl text-white/30 border border-white/10 rounded-lg md:rounded-xl text-center">
                 0
               </div>
             </div>
           </div>
         ) : (
-          sets.map(set => {
-            const matchingDice = savedDice
-              .filter(d => d.value === set.value)
-              .sort((a, b) => {
-                if (a.color !== b.color) {
-                  return a.color.localeCompare(b.color);
-                }
-                return a.id - b.id;
-              });
-            const pts = set.base + set.cb;
-            const count = matchingDice.length;
+          groups.map(group => {
+            const matchingDice = group.dice;
+            const pts = group.pts;
+            const count = group.count;
+            const isEligible = group.isEligible;
 
             if (count >= 8) {
               // 8 or more dice of same symbol: broken into 2 rows, keeping same-colored dice on the same line.
@@ -306,20 +372,34 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
 
               return (
                 <div
-                  key={`set-${set.value}`}
+                  key={`group-${group.value}`}
                   className="flex items-stretch justify-between gap-1 sm:gap-1.5 md:gap-2.5 w-full max-w-[360px] sm:max-w-[420px] md:max-w-[520px] mx-auto min-h-0"
                 >
                   {/* Two rows of dice */}
                   <div className="flex-1 min-w-0 flex flex-col gap-1 md:gap-1.5 justify-center">
-                    {renderDiceRow(row1Dice, 6, defaultDieSizeClass, `set-${set.value}-r1`)}
-                    {renderDiceRow(row2Dice, 6, defaultDieSizeClass, `set-${set.value}-r2`)}
+                    {renderDiceRow(row1Dice, 6, defaultDieSizeClass, `group-${group.value}-r1`)}
+                    {renderDiceRow(row2Dice, 6, defaultDieSizeClass, `group-${group.value}-r2`)}
                   </div>
 
                   {/* Points box spanning the height of the two rows with points total centered */}
                   <div className="w-8 sm:w-10 md:w-14 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
-                    <div className="w-full h-full min-h-[64px] sm:min-h-[82px] md:min-h-[104px] flex items-center justify-center font-mono font-black text-xs sm:text-base md:text-xl rounded-xl md:rounded-2xl bg-[#28974a] text-white border-2 border-[#34c759] shadow-md text-center">
-                      {pts}
-                    </div>
+                    {isEligible ? (
+                      <div className="w-full h-full min-h-[60px] sm:min-h-[76px] md:min-h-[96px] flex items-center justify-center font-mono font-black text-xs sm:text-base md:text-xl rounded-xl md:rounded-2xl bg-[#28974a] text-white border-2 border-[#34c759] shadow-md text-center">
+                        {pts}
+                      </div>
+                    ) : (
+                      <div
+                        className="w-full h-full min-h-[60px] sm:min-h-[76px] md:min-h-[96px] flex flex-col items-center justify-center font-mono rounded-xl md:rounded-2xl bg-white/5 border border-dashed border-white/20 text-center shadow-xs px-0.5"
+                        title="Ineligible: Needs 3 or more of this number to score"
+                      >
+                        <span className="font-black text-xs sm:text-base text-white/40">
+                          0
+                        </span>
+                        <span className="text-[7px] sm:text-[8px] font-sans font-extrabold text-[#f2c14e]/85 uppercase tracking-tight -mt-0.5 leading-none">
+                          Need 3
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -333,19 +413,33 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
 
             return (
               <div
-                key={`set-${set.value}`}
+                key={`group-${group.value}`}
                 className="flex items-stretch justify-between gap-1 sm:gap-1.5 md:gap-2.5 w-full max-w-[360px] sm:max-w-[420px] md:max-w-[520px] mx-auto min-h-0"
               >
                 {/* Dice container for 1 row */}
                 <div className="flex-1 min-w-0 flex items-center justify-center">
-                  {renderDiceRow(matchingDice, cols, dieClass, `set-${set.value}`)}
+                  {renderDiceRow(matchingDice, cols, dieClass, `group-${group.value}`)}
                 </div>
 
                 {/* Points box matching the height of the single dice row with points total centered */}
                 <div className="w-8 sm:w-10 md:w-14 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
-                  <div className="w-full h-full min-h-[34px] sm:min-h-[42px] md:min-h-[52px] flex items-center justify-center font-mono font-black text-xs sm:text-base md:text-xl rounded-lg md:rounded-xl bg-[#28974a] text-white border border-[#34c759] shadow-xs text-center">
-                    {pts}
-                  </div>
+                  {isEligible ? (
+                    <div className="w-full h-full min-h-[30px] sm:min-h-[38px] md:min-h-[48px] flex items-center justify-center font-mono font-black text-xs sm:text-base md:text-xl rounded-lg md:rounded-xl bg-[#28974a] text-white border border-[#34c759] shadow-xs text-center transition-colors">
+                      {pts}
+                    </div>
+                  ) : (
+                    <div
+                      className="w-full h-full min-h-[30px] sm:min-h-[38px] md:min-h-[48px] flex flex-col items-center justify-center font-mono rounded-lg md:rounded-xl bg-white/5 border border-dashed border-white/20 text-center shadow-xs transition-colors px-0.5"
+                      title="Ineligible: Needs 3 or more of this number to score"
+                    >
+                      <span className="font-black text-xs sm:text-sm md:text-base text-white/40">
+                        0
+                      </span>
+                      <span className="text-[7px] sm:text-[8px] font-sans font-extrabold text-[#f2c14e]/85 uppercase tracking-tight -mt-0.5 leading-none">
+                        Need 3
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             );

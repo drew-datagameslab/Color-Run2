@@ -6,6 +6,7 @@ import { SavedBoard } from './SavedBoard';
 import { DieComponent } from './DieComponent';
 import { scoreDice } from '../lib/scoring';
 import { playSfx } from '../lib/audio';
+import { triggerDieTapHaptic, triggerDieRemoveHaptic, triggerCelebrationHaptic } from '../lib/haptics';
 
 interface ScoreboardScreenProps {
   isUnlocked: boolean;
@@ -57,6 +58,7 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
   const [savedDice, setSavedDice] = useState<Die[]>([]);
   const [historyLog, setHistoryLog] = useState<RollTurnRecord[]>([]);
   const [showInfoModal, setShowInfoModal] = useState<boolean>(false);
+  const [showSixCelebration, setShowSixCelebration] = useState<boolean>(false);
   const [winner, setWinner] = useState<PlayerUnit | null>(null);
 
   const nextDieIdRef = useRef(1);
@@ -313,6 +315,9 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
 
   // Add die on pip button tap
   const handleTapPipDie = (color: 'red' | 'blue', value: number) => {
+    // Provide tactile haptic feedback on die tap
+    triggerDieTapHaptic();
+
     const newDie: Die = {
       id: nextDieIdRef.current++,
       color,
@@ -322,23 +327,42 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
     };
     const nextSaved = [...savedDice, newDie];
     setSavedDice(nextSaved);
-    playSfx('add');
+
+    // Audio chime feedback for color tiers & 6-of-a-kind Color Run celebration
+    const sameColorCount = nextSaved.filter(d => d.value === value && d.color === color).length;
+    if (sameColorCount === 6) {
+      setShowSixCelebration(true);
+      playSfx('s6');
+      triggerCelebrationHaptic();
+    } else if (sameColorCount === 5) {
+      playSfx('s5');
+    } else if (sameColorCount === 4) {
+      playSfx('s4');
+    } else if (sameColorCount === 3) {
+      playSfx('s3');
+    } else {
+      playSfx('add');
+    }
   };
 
   // Remove individual die if tapped from saved board
   const handleRemoveSavedDie = (dieId: any) => {
+    triggerDieRemoveHaptic();
+    setShowSixCelebration(false);
     setSavedDice(prev => prev.filter(d => String(d.id) !== String(dieId)));
   };
 
   // Allow scorer to tap any player board at the top to activate their turn
   const handleSelectPlayerBoard = (unit: PlayerUnit) => {
     if (!unit.active) return;
+    setShowSixCelebration(false);
     setActiveUnitId(unit.id);
     setSavedDice([]);
   };
 
   // Undo last scored turn
   const handleUndo = () => {
+    setShowSixCelebration(false);
     if (historyLog.length === 0) {
       // If dice are currently staged, clear them
       if (savedDice.length > 0) {
@@ -374,6 +398,7 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
 
   // Score It: commit the turn
   const handleScoreIt = () => {
+    setShowSixCelebration(false);
     if (!activeUnit) return;
     const playerIdx = units.findIndex(u => u.id === activeUnit.id);
     if (playerIdx === -1) return;
@@ -520,6 +545,8 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
           savedDice={savedDice}
           scoreResult={currentScoreResult}
           onTapSavedDie={handleRemoveSavedDie}
+          showSixCelebration={showSixCelebration}
+          onDismissSixCelebration={() => setShowSixCelebration(false)}
           forcePips={true}
         />
 
@@ -550,7 +577,7 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
             INPUT FINAL DICE — <span className="text-white underline">{activeUnit?.name}</span>'S TURN
           </span>
           <span className="text-[9px] text-white/70">
-            Tap die to add to Saved Area
+            Tap dice to save • Under 3 score 0 pts
           </span>
         </div>
 
