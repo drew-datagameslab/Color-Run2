@@ -82,91 +82,97 @@
 /* ----------------------------------------------------
    DICE STYLING & 3D TUMBLE ANIMATIONS (Dynamic Tabletop Physics)
    ---------------------------------------------------- */
-/* Red / Warm dice tumble trajectory */
-@keyframes diceTumbleRed {
+/* 3D Multi-Axis Cube Tumbling Rotations (Shows all 6 faces tumbling past camera) */
+@keyframes cubeTumbleRed {
   0% {
-    transform: perspective(350px) translateY(0px) rotateX(0deg) rotateY(0deg) rotateZ(0deg) scale(1);
+    transform: rotateX(0deg) rotateY(0deg) rotateZ(0deg);
   }
-  16% {
-    transform: perspective(350px) translateY(-18px) rotateX(24deg) rotateY(-18deg) rotateZ(-9deg) scale(1.08);
-  }
-  32% {
-    transform: perspective(350px) translateY(-24px) rotateX(-20deg) rotateY(22deg) rotateZ(11deg) scale(1.12);
+  25% {
+    transform: rotateX(180deg) rotateY(90deg) rotateZ(-16deg);
   }
   50% {
-    transform: perspective(350px) translateY(2px) rotateX(16deg) rotateY(-14deg) rotateZ(-5deg) scale(1.06, 0.94);
+    transform: rotateX(360deg) rotateY(180deg) rotateZ(14deg);
   }
-  68% {
-    transform: perspective(350px) translateY(-10px) rotateX(-16deg) rotateY(14deg) rotateZ(7deg) scale(1.04);
-  }
-  82% {
-    transform: perspective(350px) translateY(1px) rotateX(10deg) rotateY(-8deg) rotateZ(-3deg) scale(1.02, 0.98);
-  }
-  92% {
-    transform: perspective(350px) translateY(-3px) rotateX(-6deg) rotateY(5deg) rotateZ(2deg) scale(1.01);
+  75% {
+    transform: rotateX(540deg) rotateY(270deg) rotateZ(-12deg);
   }
   100% {
-    transform: perspective(350px) translateY(0px) rotateX(0deg) rotateY(0deg) rotateZ(0deg) scale(1);
+    transform: rotateX(720deg) rotateY(360deg) rotateZ(0deg);
   }
 }
 
-/* Blue / Cool dice tumble trajectory */
-@keyframes diceTumbleBlue {
+@keyframes cubeTumbleBlue {
   0% {
-    transform: perspective(350px) translateY(0px) rotateX(0deg) rotateY(0deg) rotateZ(0deg) scale(1);
+    transform: rotateX(0deg) rotateY(0deg) rotateZ(0deg);
   }
-  18% {
-    transform: perspective(350px) translateY(-20px) rotateX(-22deg) rotateY(20deg) rotateZ(10deg) scale(1.09);
+  25% {
+    transform: rotateX(-180deg) rotateY(-90deg) rotateZ(16deg);
   }
-  35% {
-    transform: perspective(350px) translateY(-25px) rotateX(22deg) rotateY(-20deg) rotateZ(-12deg) scale(1.14);
+  50% {
+    transform: rotateX(-360deg) rotateY(-180deg) rotateZ(-14deg);
   }
-  52% {
-    transform: perspective(350px) translateY(2px) rotateX(-14deg) rotateY(12deg) rotateZ(4deg) scale(1.07, 0.93);
-  }
-  70% {
-    transform: perspective(350px) translateY(-11px) rotateX(14deg) rotateY(-12deg) rotateZ(-6deg) scale(1.05);
-  }
-  84% {
-    transform: perspective(350px) translateY(1px) rotateX(-8deg) rotateY(7deg) rotateZ(3deg) scale(1.02, 0.98);
-  }
-  94% {
-    transform: perspective(350px) translateY(-4px) rotateX(5deg) rotateY(-4deg) rotateZ(-2deg) scale(1.01);
+  75% {
+    transform: rotateX(-540deg) rotateY(-270deg) rotateZ(12deg);
   }
   100% {
-    transform: perspective(350px) translateY(0px) rotateX(0deg) rotateY(0deg) rotateZ(0deg) scale(1);
+    transform: rotateX(-720deg) rotateY(-360deg) rotateZ(0deg);
   }
+}
+
+/* Vertical Bounce Physics (inspired by bonus roll dice bounce) */
+@keyframes diceTumbleBounceRed {
+  0% { transform: translateY(0px) scale(1); }
+  22% { transform: translateY(-24px) scale(1.08); }
+  48% { transform: translateY(2px) scale(0.95); }
+  68% { transform: translateY(-10px) scale(1.03); }
+  84% { transform: translateY(1px) scale(0.98); }
+  94% { transform: translateY(-3px) scale(1.01); }
+  100% { transform: translateY(0px) scale(1); }
+}
+
+@keyframes diceTumbleBounceBlue {
+  0% { transform: translateY(0px) scale(1); }
+  24% { transform: translateY(-26px) scale(1.1); }
+  50% { transform: translateY(2px) scale(0.94); }
+  70% { transform: translateY(-11px) scale(1.04); }
+  86% { transform: translateY(1px) scale(0.98); }
+  95% { transform: translateY(-3px) scale(1.01); }
+  100% { transform: translateY(0px) scale(1); }
 }
 
 /* Dynamic tabletop contact shadow beneath tumbling dice */
 @keyframes diceTumbleShadow {
   0% { transform: scale(1); opacity: 0.55; }
-  18% { transform: scale(0.6); opacity: 0.2; }
-  34% { transform: scale(0.48); opacity: 0.15; }
-  51% { transform: scale(1.22); opacity: 0.85; }
-  69% { transform: scale(0.72); opacity: 0.35; }
-  83% { transform: scale(1.1); opacity: 0.75; }
-  93% { transform: scale(0.92); opacity: 0.45; }
+  22% { transform: scale(0.55); opacity: 0.2; }
+  48% { transform: scale(1.2); opacity: 0.85; }
+  68% { transform: scale(0.7); opacity: 0.35; }
+  84% { transform: scale(1.1); opacity: 0.75; }
+  94% { transform: scale(0.92); opacity: 0.5; }
   100% { transform: scale(1); opacity: 0.55; }
 }
 
-.animate-tumble-red {
-  animation: diceTumbleRed 0.48s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite;
-  transform-origin: center bottom;
+.animate-cube-tumble-red {
+  animation: cubeTumbleRed 0.62s linear infinite;
+  transform-style: preserve-3d;
 }
 
-.animate-tumble-blue {
-  animation: diceTumbleBlue 0.51s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite;
-  transform-origin: center bottom;
+.animate-cube-tumble-blue {
+  animation: cubeTumbleBlue 0.66s linear infinite;
+  transform-style: preserve-3d;
 }
 
-.animate-tumble {
-  animation: diceTumbleRed 0.48s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite;
-  transform-origin: center bottom;
+.animate-tumble-bounce-red {
+  animation: diceTumbleBounceRed 0.62s cubic-bezier(0.2, 0.8, 0.3, 1) infinite;
+  transform-style: preserve-3d;
+}
+
+.animate-tumble-bounce-blue {
+  animation: diceTumbleBounceBlue 0.66s cubic-bezier(0.2, 0.8, 0.3, 1) infinite;
+  transform-style: preserve-3d;
 }
 
 .animate-tumble-shadow {
-  animation: diceTumbleShadow 0.50s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite;
+  animation: diceTumbleShadow 0.64s cubic-bezier(0.2, 0.8, 0.3, 1) infinite;
 }
 
 /* ----------------------------------------------------

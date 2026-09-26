@@ -740,27 +740,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
     setIsRolling(true);
 
-    // Rapid random shuffle during roll tumble animation
-    const shuffleTimer = setInterval(() => {
-      setDice(prev =>
-        prev.map(d => {
-          if (d.zone === 'active' && activeIds.has(d.id)) {
-            return {
-              ...d,
-              value: Math.floor(Math.random() * 6) + 1,
-            };
-          }
-          return d;
-        })
-      );
-    }, 60);
-
     const rollDuration = spectatorFastForward ? 120 : 1100;
     const lockPreTime = spectatorFastForward ? 60 : 800;
 
     // Phase 1: Pre-lock true final values while the dice are still actively tumbling.
     setTimeout(() => {
-      clearInterval(shuffleTimer);
       setDice(prev =>
         prev.map(d => {
           if (d.zone === 'active' && activeIds.has(d.id)) {
@@ -777,7 +761,6 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
     // Phase 2: Complete roll tumble animation cleanly
     setTimeout(() => {
-      clearInterval(shuffleTimer);
       setDice(finalDice);
       setRollsUsed(nextRoll);
 
@@ -1310,11 +1293,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     setDice(finalDice);
     setRollSlotsCount(12);
     setIsRolling(true);
-    const shuffleTimer = setInterval(() => {
-      setDice(prev => prev.map(d => ({ ...d, value: Math.floor(Math.random() * 6) + 1 })));
-    }, 60);
     const doneTimer = setTimeout(() => {
-      clearInterval(shuffleTimer);
       setDice(finalDice);
       setIsRolling(false);
       onDone();

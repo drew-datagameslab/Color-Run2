@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { DiceColor } from '../types/game';
 
 export interface DieProps {
@@ -107,59 +107,122 @@ export const DieComponent: React.FC<DieProps> = ({
   className = '',
   delayMs = 0,
 }) => {
-  const [imgError, setImgError] = useState(false);
-  const imgSrc = `/assets/dice/${color}/${value}.png`;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [cubeSize, setCubeSize] = useState(44);
+  const [imgErrors, setImgErrors] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    const updateSize = () => {
+      if (containerRef.current) {
+        const w = containerRef.current.clientWidth;
+        if (w > 0) setCubeSize(w);
+      }
+    };
+    updateSize();
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, []);
 
   const isWarm = color === 'red' || color === 'orange' || color === 'pink';
-  const tumbleClass = isWarm ? 'animate-tumble-red' : 'animate-tumble-blue';
+  const bounceClass = isWarm ? 'animate-tumble-bounce-red' : 'animate-tumble-bounce-blue';
+  const cubeTumbleClass = isWarm ? 'animate-cube-tumble-red' : 'animate-cube-tumble-blue';
 
-  const renderFace = () => {
-    if (forcePips) {
-      return <PippedDieFace color={color} value={value} />;
+  const renderFaceGraphic = (faceVal: number) => {
+    if (forcePips || imgErrors[faceVal]) {
+      return <PippedDieFace color={color} value={faceVal} />;
     }
-    if (!imgError) {
-      return (
-        <img
-          src={imgSrc}
-          alt={`${color} ${value}`}
-          onError={() => setImgError(true)}
-          draggable={false}
-          className="w-full h-full object-contain block pointer-events-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.32)]"
-        />
-      );
-    }
-    return <PippedDieFace color={color} value={value} />;
+    return (
+      <img
+        src={`/assets/dice/${color}/${faceVal}.png`}
+        alt={`${color} ${faceVal}`}
+        onError={() => setImgErrors(prev => ({ ...prev, [faceVal]: true }))}
+        draggable={false}
+        className="w-full h-full object-contain block pointer-events-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.32)]"
+      />
+    );
   };
 
+  // 3D Tumbling Cube State (shows all 6 faces turning through 3D space during roll)
+  if (rolling) {
+    const half = Math.round(cubeSize / 2);
+    // Standard Western opposing face configuration (1 opposite 6, 2 opposite 5, 3 opposite 4)
+    const faces = [
+      { val: 1, transform: `translateZ(${half}px)` },
+      { val: 6, transform: `rotateY(180deg) translateZ(${half}px)` },
+      { val: 2, transform: `rotateY(90deg) translateZ(${half}px)` },
+      { val: 5, transform: `rotateY(-90deg) translateZ(${half}px)` },
+      { val: 3, transform: `rotateX(-90deg) translateZ(${half}px)` },
+      { val: 4, transform: `rotateX(90deg) translateZ(${half}px)` },
+    ];
+
+    return (
+      <div
+        ref={containerRef}
+        className={`relative w-full h-full aspect-square flex items-center justify-center select-none ${className}`}
+        style={{ perspective: '500px' }}
+        title={`${color} die rolling...`}
+      >
+        {/* Dynamic Tabletop Contact Shadow */}
+        <div
+          style={{ animationDelay: delayMs > 0 ? `${delayMs}ms` : undefined }}
+          className="absolute -bottom-1 w-[78%] h-2 rounded-full bg-black/45 blur-[1.5px] animate-tumble-shadow pointer-events-none"
+        />
+
+        {/* Vertical Bounce Wrapper for Tabletop Physics */}
+        <div
+          style={{
+            animationDelay: delayMs > 0 ? `${delayMs}ms` : undefined,
+            transformStyle: 'preserve-3d',
+          }}
+          className={`relative w-full h-full flex items-center justify-center ${bounceClass}`}
+        >
+          {/* 3D Tumbling Cube displaying all 6 sides turning through 3D space */}
+          <div
+            style={{
+              width: `${cubeSize}px`,
+              height: `${cubeSize}px`,
+              animationDelay: delayMs > 0 ? `${delayMs}ms` : undefined,
+              transformStyle: 'preserve-3d',
+            }}
+            className={`relative rounded-[16%] ${cubeTumbleClass}`}
+          >
+            {faces.map(({ val, transform }) => (
+              <div
+                key={val}
+                className="absolute inset-0 rounded-[16%] flex items-center justify-center overflow-hidden"
+                style={{
+                  width: `${cubeSize}px`,
+                  height: `${cubeSize}px`,
+                  transform,
+                  WebkitBackfaceVisibility: 'hidden',
+                  backfaceVisibility: 'hidden',
+                }}
+              >
+                {renderFaceGraphic(val)}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Resting / Saved / Selectable Die Face
   return (
     <div
+      ref={containerRef}
       onClick={onClick}
       className={`relative w-full h-full aspect-square flex items-center justify-center select-none ${
         onClick ? 'cursor-pointer' : ''
       } ${className}`}
       title={`${color} die: ${value}`}
     >
-      {/* Dynamic Tabletop Contact Shadow during roll */}
-      {rolling && (
-        <div
-          style={{
-            animationDelay: delayMs > 0 ? `${delayMs}ms` : undefined,
-          }}
-          className="absolute -bottom-1 w-[78%] h-2 rounded-full bg-black/45 blur-[1.5px] animate-tumble-shadow pointer-events-none"
-        />
-      )}
-
-      {/* Die Body: tumbles end-over-end when rolling, rests flat when stationary */}
       <div
-        style={{
-          animationDelay: rolling && delayMs > 0 ? `${delayMs}ms` : undefined,
-        }}
         className={`relative w-full h-full rounded-[16%] flex items-center justify-center transition-transform duration-100
-          ${rolling ? tumbleClass : ''}
           ${selected ? '-translate-y-1.5 shadow-[0_0_0_3px_#f2c14e,0_8px_14px_rgba(0,0,0,0.45)]' : ''}
           ${pending ? 'shadow-[0_0_0_2px_rgba(255,255,255,0.7),inset_0_-4px_0_rgba(0,0,0,0.22)]' : ''}`}
       >
-        {renderFace()}
+        {renderFaceGraphic(value)}
       </div>
     </div>
   );
