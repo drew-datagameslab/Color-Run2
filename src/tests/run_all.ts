@@ -1,5 +1,6 @@
 import { runScoreTests } from './score_test';
 import { runElimTests } from './elim_test';
+import { runTiebreakerScenarioTests } from './tiebreaker_scenario_test';
 import { runAdAndCodeTests } from './ad_code_test';
 import { runCompanionScoreboardTests } from './companion_scoreboard_test';
 
@@ -10,6 +11,7 @@ console.log('==========================================');
 try {
   runScoreTests();
   runElimTests();
+  runTiebreakerScenarioTests();
   runAdAndCodeTests();
   runCompanionScoreboardTests();
   console.log('==========================================');

@@ -1,99 +1,88 @@
 import React from 'react';
+import { Swords, Flame } from 'lucide-react';
 
 interface BattleToSurviveGraphicProps {
+  size?: 'sm' | 'md' | 'lg';
   className?: string;
-  size?: 'sm' | 'md' | 'lg' | 'hero';
+  subtitle?: string;
 }
 
 export const BattleToSurviveGraphic: React.FC<BattleToSurviveGraphicProps> = ({
-  className = '',
   size = 'md',
+  className = '',
+  subtitle,
 }) => {
-  const sizeClasses = {
-    sm: 'max-w-[200px] h-auto',
-    md: 'max-w-[320px] h-auto',
-    lg: 'max-w-[460px] h-auto',
-    hero: 'max-w-[560px] w-full h-auto',
+  const sizeConfig = {
+    sm: {
+      container: 'py-1 px-3',
+      title: 'text-sm sm:text-base tracking-widest',
+      subtext: 'text-[9px] sm:text-[10px]',
+      swordIcon: 'w-4 h-4',
+      flameIcon: 'w-3 h-3',
+    },
+    md: {
+      container: 'py-1.5 px-4',
+      title: 'text-base sm:text-lg tracking-widest',
+      subtext: 'text-[10px] sm:text-xs',
+      swordIcon: 'w-5 h-5',
+      flameIcon: 'w-3.5 h-3.5',
+    },
+    lg: {
+      container: 'py-2.5 px-6',
+      title: 'text-xl sm:text-2xl tracking-widest',
+      subtext: 'text-xs sm:text-sm',
+      swordIcon: 'w-6 h-6',
+      flameIcon: 'w-4 h-4',
+    },
   }[size];
 
   return (
-    <div className={`relative flex items-center justify-center select-none ${sizeClasses} ${className}`}>
-      <svg
-        viewBox="0 0 500 250"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        className="w-full h-auto filter drop-shadow-[0_8px_16px_rgba(0,0,0,0.6)]"
+    <div
+      className={`inline-flex flex-col items-center justify-center select-none relative ${className}`}
+      role="banner"
+      aria-label="Battle to Survive"
+    >
+      {/* Outer Glow & Background Plaque */}
+      <div
+        className={`relative flex items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-[#400505] via-[#240303] to-[#120101] border-2 border-[#ff3b30]/80 shadow-[0_0_15px_rgba(255,59,48,0.5),inset_0_1px_1px_rgba(255,215,0,0.4)] ${sizeConfig.container}`}
       >
-        <defs>
-          <filter id="bts-glow" x="-20%" y="-20%" width="140%" height="140%">
-            <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor="#000000" floodOpacity="0.7" />
-          </filter>
-          <linearGradient id="red-gradient" x1="0" y1="0" x2="0" y2="100%">
-            <stop offset="0%" stopColor="#ff4040" />
-            <stop offset="100%" stopColor="#d11a1a" />
-          </linearGradient>
-          <linearGradient id="blue-gradient" x1="0" y1="0" x2="0" y2="100%">
-            <stop offset="0%" stopColor="#2575fc" />
-            <stop offset="100%" stopColor="#104fb5" />
-          </linearGradient>
-        </defs>
+        {/* Subtle decorative inner corner spikes / notches */}
+        <div className="absolute -top-1 left-2 w-2 h-1 bg-[#ffd700] rounded-xs shadow-xs" />
+        <div className="absolute -top-1 right-2 w-2 h-1 bg-[#ffd700] rounded-xs shadow-xs" />
+        <div className="absolute -bottom-1 left-2 w-2 h-1 bg-[#ffd700] rounded-xs shadow-xs" />
+        <div className="absolute -bottom-1 right-2 w-2 h-1 bg-[#ffd700] rounded-xs shadow-xs" />
 
-        {/* Outer White Card/Backing Glow */}
-        <ellipse cx="250" cy="125" rx="220" ry="110" fill="white" opacity="0.96" />
+        {/* Left Icon */}
+        <div className="flex items-center text-amber-400 drop-shadow-[0_0_6px_rgba(245,158,11,0.8)]">
+          <Swords className={`${sizeConfig.swordIcon} animate-pulse`} />
+        </div>
 
-        {/* "Battle" - Styled Brush Calligraphy in Red */}
-        <g filter="url(#bts-glow)">
-          <text
-            x="250"
-            y="95"
-            textAnchor="middle"
-            fontFamily="'Brush Script MT', 'Dancing Script', 'Caveat', 'Segoe Script', cursive, sans-serif"
-            fontSize="98"
-            fontWeight="900"
-            fontStyle="italic"
-            fill="url(#red-gradient)"
-            stroke="#b31212"
-            strokeWidth="2.5"
-            letterSpacing="-1px"
+        {/* Center Title with gradient styling */}
+        <div className="flex flex-col items-center leading-tight">
+          <span
+            className={`font-black uppercase text-transparent bg-clip-text bg-gradient-to-b from-[#fff2a8] via-[#f59e0b] to-[#dc2626] drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] ${sizeConfig.title}`}
+            style={{
+              textShadow: '0 0 10px rgba(239,68,68,0.5)',
+              fontFamily: 'system-ui, -apple-system, sans-serif',
+            }}
           >
-            Battle
-          </text>
-        </g>
+            Battle to Survive
+          </span>
 
-        {/* "to" - Compact Slanted Black */}
-        <text
-          x="250"
-          y="132"
-          textAnchor="middle"
-          fontFamily="'Brush Script MT', 'Dancing Script', 'Caveat', cursive, sans-serif"
-          fontSize="36"
-          fontWeight="900"
-          fontStyle="italic"
-          fill="#1c1917"
-          letterSpacing="1px"
-        >
-          to
-        </text>
+          {subtitle && (
+            <span
+              className={`font-bold uppercase tracking-wider text-amber-200/90 ${sizeConfig.subtext}`}
+            >
+              {subtitle}
+            </span>
+          )}
+        </div>
 
-        {/* "Survive" - Styled Brush Calligraphy in Royal Blue */}
-        <g filter="url(#bts-glow)">
-          <text
-            x="250"
-            y="215"
-            textAnchor="middle"
-            fontFamily="'Brush Script MT', 'Dancing Script', 'Caveat', 'Segoe Script', cursive, sans-serif"
-            fontSize="106"
-            fontWeight="900"
-            fontStyle="italic"
-            fill="url(#blue-gradient)"
-            stroke="#0d3e8a"
-            strokeWidth="2.5"
-            letterSpacing="-1px"
-          >
-            Survive
-          </text>
-        </g>
-      </svg>
+        {/* Right Icon */}
+        <div className="flex items-center text-amber-400 drop-shadow-[0_0_6px_rgba(245,158,11,0.8)]">
+          <Flame className={`${sizeConfig.flameIcon} text-orange-500 animate-bounce`} />
+        </div>
+      </div>
     </div>
   );
 };

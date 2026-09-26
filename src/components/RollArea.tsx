@@ -1,6 +1,7 @@
 import React from 'react';
 import { Die } from '../types/game';
 import { DieComponent } from './DieComponent';
+import { triggerDieTapHaptic } from '../lib/haptics';
 
 interface RollAreaProps {
   dice: Die[];
@@ -74,9 +75,14 @@ export const RollArea: React.FC<RollAreaProps> = ({
                 value={die.value}
                 rolling={isRolling}
                 selected={die.selected}
-                delayMs={0}
+                delayMs={(die.id * 35) % 150}
                 onClick={
-                  isHumanOwner && rollsUsed > 0 && !isRolling ? () => onTapActiveDie(die.id) : undefined
+                  isHumanOwner && rollsUsed > 0 && !isRolling
+                    ? () => {
+                        triggerDieTapHaptic();
+                        onTapActiveDie(die.id);
+                      }
+                    : undefined
                 }
               />
             </div>
@@ -100,9 +106,14 @@ export const RollArea: React.FC<RollAreaProps> = ({
                     value={die.value}
                     rolling={isRolling}
                     selected={die.selected}
-                    delayMs={0}
+                    delayMs={(slotIdx * 45) % 180}
                     onClick={
-                      isHumanOwner && rollsUsed > 0 && !isRolling ? () => onTapActiveDie(die.id) : undefined
+                      isHumanOwner && rollsUsed > 0 && !isRolling
+                        ? () => {
+                            triggerDieTapHaptic();
+                            onTapActiveDie(die.id);
+                          }
+                        : undefined
                     }
                   />
                 </div>

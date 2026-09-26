@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { PlayerUnit } from '../types/game';
+import { triggerButtonHaptic } from '../lib/haptics';
 
 interface CardsStripProps {
   units: PlayerUnit[];
@@ -64,7 +65,10 @@ export const CardsStrip: React.FC<CardsStripProps> = ({
           return (
             <div
               key={unit.id}
-              onClick={() => onSelectUnit?.(unit)}
+              onClick={() => {
+                triggerButtonHaptic();
+                onSelectUnit?.(unit);
+              }}
               className={`rounded-xl py-1 px-1 sm:py-1.5 sm:px-1.5 flex flex-col items-center transition-all duration-200 select-none cursor-pointer relative shadow-md
                 ${
                   displayUnits.length > 4

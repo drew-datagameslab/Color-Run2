@@ -408,7 +408,17 @@
     const sel={}; T.dice.forEach(d=>{ if(d.zone==='active'&&d.selected)(sel[d.value]=sel[d.value]||[]).push(d); });
     for(const v in sel){ if((sc[v]||0)+sel[v].length>=3){ sel[v].forEach(d=>{d.zone='saved'; d.selected=false;}); } }
   }
-  function tapActive(id){ if(T.cpu||T.rollsUsed===0) return; const d=T.dice.find(x=>x.id===id); d.selected=!d.selected; autoCommit(); checkBonusChimes(); renderPlay(); }
+  // Tapping any one active die selects every other active die showing the same symbol
+  // too, so one tap gathers the whole matching group instead of tapping each die of a
+  // kind individually — autoCommit() then saves them together the moment there are 3+
+  // (counting anything already saved of that value).
+  function tapActive(id){
+    if(T.cpu||T.rollsUsed===0) return;
+    const d=T.dice.find(x=>x.id===id);
+    const willSelect=!d.selected;
+    T.dice.forEach(x=>{ if(x.zone==='active'&&x.value===d.value) x.selected=willSelect; });
+    autoCommit(); checkBonusChimes(); renderPlay();
+  }
   function tapSaved(id){
     if(T.cpu) return;
     const d=T.dice.find(x=>x.id===id); const v=d.value; d.zone='active'; d.selected=false;
@@ -505,37 +515,51 @@
     const grid=$('savedGrid'); grid.innerHTML='';
     const pbox=$('pointsBox'); pbox.innerHTML='';
     const sets=sc.sets;
-    // Starts at a single placeholder row when nothing's saved yet; a 2nd/3rd row only
-    // appears once dice actually land there (after the first roll), rather than
-    // reserving space for rounds that haven't happened yet. Each row is still 6
-    // columns wide (grown only if one set collects more than 6 dice).
-    const nRows=Math.max(1, sets.length);
-    for(let r=0;r<nRows;r++){
-      const s=sets[r];
+    // Renders one .srow (+ one .pp-line) per set, except a set of 8+ dice — which can
+    // only happen with both equipped colors present, since one color half-set caps at
+    // 6 — splits across 2 lines exactly at the color-group boundary, so same-colored
+    // dice always stay together and neither line ever needs more than 6 columns. The
+    // combined score is shown once, on the first line; the second line's points slot is
+    // left blank rather than repeating the number.
+    function buildLine(groups){
+      const dice=groups.flat();
+      const cols=Math.max(6, dice.length);
       const row=el('div','srow');
-      let cols=6;
-      if(s){
-        const dice=saved().filter(d=>d.value===s.value); // blue ids before red -> color groups contiguous
-        cols=Math.max(6, dice.length);
-        let i=0;
-        while(i<dice.length){
-          let j=i; while(j<dice.length && dice[j].color===dice[i].color) j++;
-          const group=dice.slice(i,j);
-          if(group.length>=3){
-            const box=el('div','bonus-box'); box.style.gridColumn='span '+group.length;
-            box.appendChild(el('div','bonus-frame'));
-            group.forEach(d=>{ const de=dieEl(d.color,d.value); de.onclick=()=>tapSaved(d.id); box.appendChild(de); });
-            row.appendChild(box);
-          } else {
-            group.forEach(d=>{ const de=dieEl(d.color,d.value); de.onclick=()=>tapSaved(d.id); row.appendChild(de); });
-          }
-          i=j;
+      groups.forEach(group=>{
+        if(group.length>=3){
+          const box=el('div','bonus-box'); box.style.gridColumn='span '+group.length;
+          box.appendChild(el('div','bonus-frame'));
+          group.forEach(d=>{ const de=dieEl(d.color,d.value); de.onclick=()=>tapSaved(d.id); box.appendChild(de); });
+          row.appendChild(box);
+        } else {
+          group.forEach(d=>{ const de=dieEl(d.color,d.value); de.onclick=()=>tapSaved(d.id); row.appendChild(de); });
         }
-        for(let k=0;k<Math.max(0,cols-dice.length);k++) row.appendChild(el('div','slot'));
-      } else { for(let k=0;k<cols;k++) row.appendChild(el('div','slot')); }
+      });
+      for(let k=0;k<Math.max(0,cols-dice.length);k++) row.appendChild(el('div','slot'));
       row.style.setProperty('--cols', cols);
-      grid.appendChild(row);
-      const pl=el('div','pp-line'+(s?'':' empty')); pl.textContent=s?(s.base+s.cb):'0'; pbox.appendChild(pl);
+      return row;
+    }
+    if(sets.length===0){
+      // Starts at a single placeholder row when nothing's saved yet, rather than
+      // reserving space for rounds that haven't happened yet.
+      const row=el('div','srow'); for(let k=0;k<6;k++) row.appendChild(el('div','slot'));
+      row.style.setProperty('--cols', 6); grid.appendChild(row);
+      const pl=el('div','pp-line empty'); pl.textContent='0'; pbox.appendChild(pl);
+    } else {
+      sets.forEach(s=>{
+        const dice=saved().filter(d=>d.value===s.value); // blue ids before red -> color groups contiguous
+        const groups=[]; let i=0;
+        while(i<dice.length){ let j=i; while(j<dice.length && dice[j].color===dice[i].color) j++; groups.push(dice.slice(i,j)); i=j; }
+        // dice.length>=8 is only reachable with 2 color groups present (one color alone
+        // tops out at 6), so this always splits cleanly into exactly 2 lines.
+        const lines = dice.length>=8 ? groups.map(g=>[g]) : [groups];
+        lines.forEach((groupsInLine, li)=>{
+          grid.appendChild(buildLine(groupsInLine));
+          const pl=el('div','pp-line'+(li===0?'':' empty'));
+          pl.textContent = li===0 ? (s.base+s.cb) : '';
+          pbox.appendChild(pl);
+        });
+      });
     }
     // Set on the root (not just pbox) so the roll area's dice — a sibling branch of
     // the DOM, not a descendant of the saved-dice board — can match this same size.

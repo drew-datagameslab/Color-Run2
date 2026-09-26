@@ -1,6 +1,7 @@
 import React from 'react';
 import { Menu, ArrowLeft } from 'lucide-react';
 import { UserAccount } from '../types/game';
+import { triggerButtonHaptic } from '../lib/haptics';
 
 interface HeaderProps {
   user: UserAccount;
@@ -27,7 +28,10 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Left: User Profile Icon & Details */}
         <button
           id="header-user-bar"
-          onClick={onOpenProfile}
+          onClick={() => {
+            triggerButtonHaptic();
+            onOpenProfile();
+          }}
           className="flex items-center gap-3 group text-left cursor-pointer transition-transform active:scale-98"
           title="Profile & Customization: Volume, Dice, Backgrounds, Avatars"
         >
@@ -60,7 +64,10 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-1.5 sm:gap-2">
           {showBackButton && (
             <button
-              onClick={onBack}
+              onClick={() => {
+                triggerButtonHaptic();
+                onBack();
+              }}
               className="w-8 h-8 rounded-xl bg-[#262626] hover:bg-[#333333] active:scale-95 text-white flex items-center justify-center transition-all border border-white/10 shadow-xs cursor-pointer"
               title="Go Back"
               aria-label="Back"
@@ -71,7 +78,10 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Cheeseburger Menu Button */}
           <button
-            onClick={onOpenMenu}
+            onClick={() => {
+              triggerButtonHaptic();
+              onOpenMenu();
+            }}
             className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-[#262626] hover:bg-[#333333] active:scale-95 text-white flex items-center justify-center transition-all border border-white/10 shadow-xs cursor-pointer"
             title="Menu: Leave game, Shop, Settings"
             aria-label="Open cheeseburger menu"
