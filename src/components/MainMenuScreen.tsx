@@ -79,7 +79,7 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
 
           {/* App Version */}
           <div id="app-version-display" className="text-center text-[8.5px] sm:text-[9.5px] font-medium text-[#7d654c] tracking-wider pt-0.5 select-text">
-            Version 5.5.2
+            Version 5.5.3
           </div>
         </div>
       </div>

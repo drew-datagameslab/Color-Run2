@@ -108,102 +108,59 @@ export const DieComponent: React.FC<DieProps> = ({
   delayMs = 0,
 }) => {
   const [imgError, setImgError] = useState(false);
-
   const imgSrc = `/assets/dice/${color}/${value}.png`;
-  // Real dice geometry: opposite faces sum to 7 (1 opposite 6, 2 opposite 5, 3 opposite 4)
-  const oppositeValue = Math.max(1, Math.min(6, 7 - value));
-  const oppositeImgSrc = `/assets/dice/${color}/${oppositeValue}.png`;
 
   const isWarm = color === 'red' || color === 'orange' || color === 'pink';
-  const bounceClass = isWarm ? 'animate-tumble-bounce-red' : 'animate-tumble-bounce-blue';
-  const rotateClass = isWarm ? 'animate-tumble-rotate-red' : 'animate-tumble-rotate-blue';
+  const tumbleClass = isWarm ? 'animate-tumble-red' : 'animate-tumble-blue';
 
-  const renderFace = (faceVal: number, src: string) => {
+  const renderFace = () => {
     if (forcePips) {
-      return <PippedDieFace color={color} value={faceVal} />;
+      return <PippedDieFace color={color} value={value} />;
     }
     if (!imgError) {
       return (
         <img
-          src={src}
-          alt={`${color} ${faceVal}`}
+          src={imgSrc}
+          alt={`${color} ${value}`}
           onError={() => setImgError(true)}
           draggable={false}
-          className="w-full h-full object-contain block pointer-events-none drop-shadow-[0_2px_3px_rgba(0,0,0,0.35)]"
+          className="w-full h-full object-contain block pointer-events-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.32)]"
         />
       );
     }
-    return <PippedDieFace color={color} value={faceVal} />;
+    return <PippedDieFace color={color} value={value} />;
   };
 
-  if (rolling) {
-    return (
-      <div
-        className={`relative aspect-square flex items-center justify-center select-none ${className}`}
-        style={{ perspective: '450px' }}
-        title={`${color} die rolling...`}
-      >
-        {/* Dynamic Tabletop Contact Shadow */}
-        <div
-          style={{ animationDelay: delayMs > 0 ? `${delayMs}ms` : undefined }}
-          className="absolute -bottom-1 w-[82%] h-2 rounded-full bg-black/45 blur-[1.5px] animate-tumble-shadow pointer-events-none"
-        />
-
-        {/* Vertical Bounce Wrapper (jump & gravity decay) */}
-        <div
-          style={{
-            animationDelay: delayMs > 0 ? `${delayMs}ms` : undefined,
-            transformStyle: 'preserve-3d',
-          }}
-          className={`relative w-full h-full ${bounceClass}`}
-        >
-          {/* 3D Multi-Axis Tumbling Cube */}
-          <div
-            style={{
-              animationDelay: delayMs > 0 ? `${delayMs}ms` : undefined,
-              transformStyle: 'preserve-3d',
-            }}
-            className={`relative w-full h-full rounded-[16%] ${rotateClass}`}
-          >
-            {/* Front Face */}
-            <div
-              className="absolute inset-0 w-full h-full rounded-[16%] overflow-hidden"
-              style={{
-                backfaceVisibility: 'hidden',
-                WebkitBackfaceVisibility: 'hidden',
-              }}
-            >
-              {renderFace(value, imgSrc)}
-            </div>
-
-            {/* Back Opposite Face (Authentic dice flip across X and Y) */}
-            <div
-              className="absolute inset-0 w-full h-full rounded-[16%] overflow-hidden"
-              style={{
-                transform: 'rotateY(180deg) rotateX(180deg)',
-                backfaceVisibility: 'hidden',
-                WebkitBackfaceVisibility: 'hidden',
-              }}
-            >
-              {renderFace(oppositeValue, oppositeImgSrc)}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Resting / Saved / Selectable Die Face
   return (
     <div
       onClick={onClick}
-      className={`relative aspect-square rounded-[16%] cursor-pointer select-none transition-transform duration-100 
-        ${selected ? '-translate-y-1.5 shadow-[0_0_0_3px_#f2c14e,0_8px_14px_rgba(0,0,0,0.45)]' : ''}
-        ${pending ? 'shadow-[0_0_0_2px_rgba(255,255,255,0.7),inset_0_-4px_0_rgba(0,0,0,0.22)]' : ''}
-        ${className}`}
+      className={`relative w-full h-full aspect-square flex items-center justify-center select-none ${
+        onClick ? 'cursor-pointer' : ''
+      } ${className}`}
       title={`${color} die: ${value}`}
     >
-      {renderFace(value, imgSrc)}
+      {/* Dynamic Tabletop Contact Shadow during roll */}
+      {rolling && (
+        <div
+          style={{
+            animationDelay: delayMs > 0 ? `${delayMs}ms` : undefined,
+          }}
+          className="absolute -bottom-1 w-[78%] h-2 rounded-full bg-black/45 blur-[1.5px] animate-tumble-shadow pointer-events-none"
+        />
+      )}
+
+      {/* Die Body: tumbles end-over-end when rolling, rests flat when stationary */}
+      <div
+        style={{
+          animationDelay: rolling && delayMs > 0 ? `${delayMs}ms` : undefined,
+        }}
+        className={`relative w-full h-full rounded-[16%] flex items-center justify-center transition-transform duration-100
+          ${rolling ? tumbleClass : ''}
+          ${selected ? '-translate-y-1.5 shadow-[0_0_0_3px_#f2c14e,0_8px_14px_rgba(0,0,0,0.45)]' : ''}
+          ${pending ? 'shadow-[0_0_0_2px_rgba(255,255,255,0.7),inset_0_-4px_0_rgba(0,0,0,0.22)]' : ''}`}
+      >
+        {renderFace()}
+      </div>
     </div>
   );
 };
