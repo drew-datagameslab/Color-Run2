@@ -1,3 +1,6 @@
+import { findLowestTie, startTiebreaker, currentTiedUnitId, recordTiebreakerRoll, advanceTiebreaker, tiebreakerRollTotal } from '../lib/tiebreaker';
+import { scoreDice } from '../lib/scoring';
+import { Die } from '../types/game';
 import { resolveElimination } from '../lib/elimination';
 import { PlayerUnit } from '../types/game';
 
@@ -53,23 +56,52 @@ export function runElimTests() {
   const prizeIn5Player = payouts5Player[placeIn5Player - 1] || 0;
   assert(prizeIn5Player === 5, '3rd place eliminated player must receive 5 coin prize');
 
-  // Test 5: Battle to Survive 3-player Tiebreaker System Rules
-  // Rule: If three are tied, each rolls one time. If one user gets highest while other two tied, highest advances, other two roll again.
-  const scoresRound1: Record<string, number> = { 'p1': 50, 'p2': 30, 'p3': 30 };
-  const tiedUnitsRound1 = ['p1', 'p2', 'p3'];
-  const minRollRound1 = Math.min(...tiedUnitsRound1.map(id => scoresRound1[id]));
-  const lowestUnitsRound1 = tiedUnitsRound1.filter(id => scoresRound1[id] === minRollRound1);
-  assert(lowestUnitsRound1.length === 2, 'P2 and P3 are tied for lowest (30 pts)');
-  assert(lowestUnitsRound1.length < tiedUnitsRound1.length, 'P1 scored higher and advances');
-  const advancingRound1 = tiedUnitsRound1.filter(id => scoresRound1[id] > minRollRound1);
-  assert(advancingRound1.includes('p1') && advancingRound1.length === 1, 'P1 with 50 pts advances');
+  // Test 5: Battle to Survive roll-off rules (src/lib/tiebreaker.ts)
+  const nameOf = (id: string) => id.toUpperCase();
 
-  // Next round: P2 and P3 roll again
-  const scoresRound2: Record<string, number> = { 'p2': 40, 'p3': 25 };
-  const tiedUnitsRound2 = lowestUnitsRound1;
-  const minRollRound2 = Math.min(...tiedUnitsRound2.map(id => scoresRound2[id]));
-  const lowestUnitsRound2 = tiedUnitsRound2.filter(id => scoresRound2[id] === minRollRound2);
-  assert(lowestUnitsRound2.length === 1 && lowestUnitsRound2[0] === 'p3', 'P3 with 25 pts is the single lowest player and eliminated');
+  // Only players tied for the lowest total battle, in seating order
+  const tiedLow = findLowestTie([
+    { id: 'p1', score: 300 },
+    { id: 'p2', score: 280 },
+    { id: 'p3', score: 280 },
+    { id: 'p4', score: 280 },
+  ]);
+  assert(tiedLow.map(u => u.id).join() === 'p2,p3,p4', 'Tied lowest players battle in seating order');
+  assert(findLowestTie([{ id: 'a', score: 10 }, { id: 'b', score: 20 }]).length === 0, 'No battle without a tie');
+  assert(findLowestTie([{ id: 'a', score: 20 }, { id: 'b', score: 20 }]).length === 2, 'Two-player tie battles');
+
+  // Three tied: each rolls one time, in order
+  let tb = startTiebreaker(['p1', 'p2', 'p3']);
+  assert(tb.phase === 'intro' && currentTiedUnitId(tb) === 'p1', 'Roll-off starts with the first seated player');
+  tb = { ...tb, phase: 'rolling' };
+  tb = advanceTiebreaker(recordTiebreakerRoll(tb, 50), nameOf);
+  assert(currentTiedUnitId(tb) === 'p2' && tb.lastRollTotal === null, 'Second player rolls next');
+  tb = advanceTiebreaker(recordTiebreakerRoll(tb, 30), nameOf);
+  assert(currentTiedUnitId(tb) === 'p3', 'Third player rolls next');
+  tb = advanceTiebreaker(recordTiebreakerRoll(tb, 30), nameOf);
+
+  // Highest advances; the two still tied roll again
+  assert(tb.phase === 'rolling', 'Roll-off continues');
+  assert(tb.tiedUnitIds.join() === 'p2,p3', 'P1 advances, P2 and P3 roll again');
+  assert(tb.roundNumber === 2 && currentTiedUnitId(tb) === 'p2', 'Round 2 starts with P2');
+  assert(!!tb.noticeMsg && tb.noticeMsg.includes('P1 advance'), 'Notice names the advancing player');
+
+  // Still tied: roll again
+  tb = advanceTiebreaker(recordTiebreakerRoll(tb, 22), nameOf);
+  tb = advanceTiebreaker(recordTiebreakerRoll(tb, 22), nameOf);
+  assert(tb.phase === 'rolling' && tb.roundNumber === 3 && tb.tiedUnitIds.length === 2, 'Exact tie rolls again');
+
+  // Single lowest roll is eliminated
+  tb = advanceTiebreaker(recordTiebreakerRoll(tb, 40), nameOf);
+  tb = advanceTiebreaker(recordTiebreakerRoll(tb, 25), nameOf);
+  assert(tb.phase === 'outro' && tb.eliminatedUnitId === 'p3', 'P3 with the lowest roll is eliminated');
+
+  // Roll value: scored points, or the pip sum when nothing scores
+  const mkDice = (values: number[]): Die[] =>
+    values.map((value, i) => ({ id: i + 1, color: i < 6 ? 'red' : 'blue', value, zone: 'active', selected: false }));
+  assert(tiebreakerRollTotal(mkDice([1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6])) === 42, 'No scoring sets: pip sum is used');
+  const scoringDice = mkDice([3, 3, 3, 1, 2, 4, 5, 6, 1, 2, 4, 5]);
+  assert(tiebreakerRollTotal(scoringDice) === scoreDice(scoringDice).total, 'Scoring sets: points scored are used');
 
   console.log('✓ All Elimination Tests Passed!');
 }
