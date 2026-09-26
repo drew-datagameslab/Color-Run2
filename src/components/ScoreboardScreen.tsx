@@ -5,9 +5,10 @@ import { CardsStrip } from './CardsStrip';
 import { SavedBoard } from './SavedBoard';
 import { DieComponent } from './DieComponent';
 import { scoreDice } from '../lib/scoring';
-import { playSfx, playSwordSlashSound, startBattleMusic, stopBattleMusic } from '../lib/audio';
+import { playSfx, playEliminatedSound, startBattleMusic, stopBattleMusic } from '../lib/audio';
 import { triggerDieTapHaptic, triggerDieRemoveHaptic, triggerCelebrationHaptic } from '../lib/haptics';
-import { BattleToSurviveCurtain } from './BattleToSurviveCurtain';
+import { BattleVideoOverlay } from './BattleVideoOverlay';
+import { findLowestTie, startTiebreaker, resolveTiebreakerRound } from '../lib/tiebreaker';
 import { BattleToSurviveGraphic } from './BattleToSurviveGraphic';
 
 interface ScoreboardScreenProps {
@@ -90,6 +91,24 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
   });
 
   const nextDieIdRef = useRef(1);
+  // Stop the roll-off music if the scoreboard closes mid-tiebreaker
+  useEffect(() => stopBattleMusic, []);
+
+  const eliminationBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Red "[User] has been eliminated!" banner under the Saved Dice labels row, with eliminated.mp3
+  const triggerEliminatedBanner = (playerName: string) => {
+    setEliminationBannerUnderLabels(`${playerName} has been eliminated!`);
+    playEliminatedSound();
+    if (eliminationBannerTimerRef.current) clearTimeout(eliminationBannerTimerRef.current);
+    eliminationBannerTimerRef.current = setTimeout(() => setEliminationBannerUnderLabels(null), 6000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (eliminationBannerTimerRef.current) clearTimeout(eliminationBannerTimerRef.current);
+    };
+  }, []);
 
   // Calculate current score for whatever dice are currently saved
   const currentScoreResult: ScoreResult = scoreDice(savedDice);
@@ -520,15 +539,12 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
     // =========================================================================
 
     if (isEliminationPhase) {
-      // Find lowest score among active players
+      // Players tied for the lowest total (in seating order) battle to survive
+      const participating = findLowestTie(activeUnits);
       const minScore = Math.min(...activeUnits.map(u => u.score));
       const tiedForLowest = activeUnits.filter(u => u.score === minScore);
-      const isTwoPlayerTie = activeUnits.length === 2 && activeUnits[0].score === activeUnits[1].score;
 
-      // Check for tie during elimination round
-      if (isTwoPlayerTie || tiedForLowest.length > 1) {
-        // Trigger BATTLE TO SURVIVE TIEBREAKER
-        const participating = isTwoPlayerTie ? activeUnits : tiedForLowest;
+      if (participating.length > 0) {
         setUnits(updatedUnits);
         setTiebreaker({
           isActive: true,
@@ -552,9 +568,7 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
         );
         setUnits(finalizedUnits);
         setCurrentRound(r => r + 1);
-        setEliminationBannerUnderLabels(`${lowestUnit.name} has been eliminated!`);
-        playSwordSlashSound();
-        setTimeout(() => setEliminationBannerUnderLabels(null), 6000);
+        triggerEliminatedBanner(lowestUnit.name);
 
         const remaining = finalizedUnits.filter(u => u.active);
         setActiveUnitId(remaining[0]?.id || '');
@@ -570,9 +584,7 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
         });
         setUnits(finalizedUnits);
         setWinner(champ);
-        setEliminationBannerUnderLabels(`${runnerUp.name} has been eliminated!`);
-        playSwordSlashSound();
-        setTimeout(() => setEliminationBannerUnderLabels(null), 6000);
+        triggerEliminatedBanner(runnerUp.name);
         playSfx('fanfare');
         return;
       }
@@ -619,9 +631,7 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
     );
 
     setUnits(finalizedUnits);
-    setEliminationBannerUnderLabels(`${eliminated.name} has been eliminated!`);
-    playSwordSlashSound();
-    setTimeout(() => setEliminationBannerUnderLabels(null), 6000);
+    triggerEliminatedBanner(eliminated.name);
 
     if (remainingActive.length <= 1) {
       const winnerUnit = remainingActive[0] || finalizedUnits[0];
@@ -644,50 +654,37 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
   };
 
   const handleResolveTiebreakerRolls = () => {
-    const tiedUnits = units.filter(u => tiebreaker.tiedUnitIds.includes(u.id));
     const scores = tiebreaker.currentRollScores;
-    const allEntered = tiedUnits.every(u => scores[u.id] !== undefined && !isNaN(scores[u.id]));
+    const allEntered = tiebreaker.tiedUnitIds.every(id => scores[id] !== undefined && !isNaN(scores[id]));
     if (!allEntered) return;
 
-    const minRoll = Math.min(...tiedUnits.map(u => scores[u.id]));
-    const lowestRollUnits = tiedUnits.filter(u => scores[u.id] === minRoll);
+    // Same roll-off rules as the app game (src/lib/tiebreaker.ts)
+    const next = resolveTiebreakerRound(
+      { ...startTiebreaker(tiebreaker.tiedUnitIds), roundNumber: tiebreaker.roundNumber },
+      scores,
+      id => units.find(u => u.id === id)?.name || 'Player'
+    );
 
-    if (lowestRollUnits.length === 1) {
+    if (next.phase === 'outro') {
       // Single lowest player is eliminated!
-      const eliminated = lowestRollUnits[0];
       setTiebreaker(prev => ({
         ...prev,
         phase: 'outro',
-        eliminatedUnit: eliminated,
+        eliminatedUnit: units.find(u => u.id === next.eliminatedUnitId) || null,
       }));
+      stopBattleMusic();
       return;
     }
 
-    // Tie-breaker rule:
-    // If three are tied, and 1 user gets highest while other two tied, highest advances, other two roll again.
-    // In general: if some players scored higher than minRoll, those higher advance, and the tied lowest roll again!
-    if (lowestRollUnits.length < tiedUnits.length) {
-      const advancingUnits = tiedUnits.filter(u => scores[u.id] > minRoll);
-      const advancingNames = advancingUnits.map(u => u.name).join(', ');
-      setTiebreaker(prev => ({
-        ...prev,
-        tiedUnitIds: lowestRollUnits.map(u => u.id),
-        currentRollScores: {},
-        roundNumber: prev.roundNumber + 1,
-        noticeMsg: `${advancingNames} advance! ${lowestRollUnits.map(u => u.name).join(' & ')} remain tied and roll again!`,
-      }));
-      playSfx('s3');
-      return;
-    }
-
-    // Otherwise, all players tied again
+    // Higher rolls advance; players still tied for lowest roll again
     setTiebreaker(prev => ({
       ...prev,
+      tiedUnitIds: next.tiedUnitIds,
       currentRollScores: {},
-      roundNumber: prev.roundNumber + 1,
-      noticeMsg: `Still tied (${minRoll} pts)! Roll again!`,
+      roundNumber: next.roundNumber,
+      noticeMsg: next.noticeMsg,
     }));
-    playSfx('add');
+    playSfx('s3');
   };
 
   const handleResetGamePrompt = () => {
@@ -1035,7 +1032,7 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
       )}
 
       {/* Battle to Survive Theatrical Curtain */}
-      <BattleToSurviveCurtain
+      <BattleVideoOverlay
         isVisible={tiebreaker.isActive && (tiebreaker.phase === 'intro' || tiebreaker.phase === 'outro')}
         phase={tiebreaker.phase}
         eliminatedPlayerName={tiebreaker.eliminatedUnit?.name}

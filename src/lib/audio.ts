@@ -101,50 +101,45 @@ let activeWarningCtx: AudioContext | null = null;
 let activeBattleAudio: HTMLAudioElement | null = null;
 let activeBattleInterval: any = null;
 let activeBattleCtx: AudioContext | null = null;
+// Bumped on every start/stop so a late load error from an old session can't restart music
+let battleMusicSession = 0;
+
+const BATTLE_MUSIC_PATH = '/assets/audio/battle-to-survive.mp3';
+const ELIMINATED_SOUND_PATH = '/assets/audio/eliminated.mp3';
+const ELIMINATED_SOUND_VOLUME = 0.5;
 
 /**
- * Plays the "Battle to Survive.mp3" dramatic war drum & tension music in a continuous loop
- * until stopBattleMusic() is called.
+ * Plays "Battle-to-Survive.mp3" in a continuous loop until stopBattleMusic() is called.
+ * Falls back to synthesized drums only if the file fails to load.
  */
 export function startBattleMusic(): void {
   if (soundVolume <= 0) return;
   stopBattleMusic();
+  const session = battleMusicSession;
 
-  const candidates = [
-    '/assets/audio/Battle to Survive.mp3',
-    '/assets/audio/battle-to-survive.mp3',
-    '/Battle to Survive.mp3',
-    '/battle-to-survive.mp3',
-  ];
-
-  let currentIdx = 0;
-  const tryNext = () => {
-    if (currentIdx >= candidates.length) {
+  try {
+    const audio = new Audio(BATTLE_MUSIC_PATH);
+    audio.loop = true;
+    audio.volume = soundVolume;
+    audio.onerror = () => {
+      if (session !== battleMusicSession) return;
+      activeBattleAudio = null;
       startSynthesizedBattleMusic();
-      return;
-    }
-    const path = candidates[currentIdx++];
-    try {
-      const audio = new Audio(path);
-      audio.loop = true;
-      audio.volume = soundVolume;
-      activeBattleAudio = audio;
-      const p = audio.play();
-      if (p && p.catch) {
-        p.catch(() => tryNext());
-      }
-    } catch {
-      tryNext();
-    }
-  };
-
-  tryNext();
+    };
+    activeBattleAudio = audio;
+    const p = audio.play();
+    // Autoplay rejections are ignored: a synthesized fallback would be blocked too
+    if (p && p.catch) p.catch(() => {});
+  } catch {
+    startSynthesizedBattleMusic();
+  }
 }
 
 /**
  * Stops the "Battle to Survive" looped audio.
  */
 export function stopBattleMusic(): void {
+  battleMusicSession++;
   if (activeBattleAudio) {
     try {
       activeBattleAudio.pause();
@@ -261,39 +256,21 @@ function startSynthesizedBattleMusic(): void {
 }
 
 /**
- * Plays the MAGMisc-A_powerful_sword_sla-Elevenlabs.com audio when a user is eliminated.
+ * Plays eliminated.mp3 when a user is eliminated.
+ * Falls back to a synthesized sword slash only if the file fails to load.
  */
-export function playSwordSlashSound(): void {
+export function playEliminatedSound(): void {
   if (soundVolume <= 0) return;
-
-  const candidates = [
-    '/assets/audio/MAGMisc-A_powerful_sword_sla-Elevenlabs.com.mp3',
-    '/assets/audio/MAGMisc-A_powerful_sword_sla-Elevenlabs.com',
-    '/assets/audio/sword-slash.mp3',
-    '/MAGMisc-A_powerful_sword_sla-Elevenlabs.com.mp3',
-    '/MAGMisc-A_powerful_sword_sla-Elevenlabs.com',
-  ];
-
-  let currentIdx = 0;
-  const tryNext = () => {
-    if (currentIdx >= candidates.length) {
-      playSynthesizedSwordSlash();
-      return;
-    }
-    const path = candidates[currentIdx++];
-    try {
-      const a = new Audio(path);
-      a.volume = soundVolume;
-      const p = a.play();
-      if (p && p.catch) {
-        p.catch(() => tryNext());
-      }
-    } catch {
-      tryNext();
-    }
-  };
-
-  tryNext();
+  try {
+    const a = new Audio(ELIMINATED_SOUND_PATH);
+    // Plays at half volume at full sound, and scales with the in-app volume setting
+    a.volume = ELIMINATED_SOUND_VOLUME * (soundVolume / SOUND_VOLUME_MAX);
+    a.onerror = () => playSynthesizedSwordSlash();
+    const p = a.play();
+    if (p && p.catch) p.catch(() => {});
+  } catch {
+    playSynthesizedSwordSlash();
+  }
 }
 
 /**

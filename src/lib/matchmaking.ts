@@ -1,3 +1,4 @@
+import { TiebreakerState } from './tiebreaker';
 import {
   collection,
   doc,
@@ -38,13 +39,25 @@ export interface RoomGameState {
   unitHistory: Record<string, Record<number, number>>;
   activeUnitIds: string[];
   unitStatus?: Record<string, { active: boolean; place?: number; score: number; history: Record<number, number> }>;
-  lastAction: 'roll' | 'save_dice' | 'bank' | 'sync' | 'step_away' | 'elimination' | 'phase_change';
+  lastAction:
+    | 'roll'
+    | 'save_dice'
+    | 'bank'
+    | 'sync'
+    | 'step_away'
+    | 'elimination'
+    | 'phase_change'
+    | 'tiebreaker_start'
+    | 'tiebreaker_roll'
+    | 'tiebreaker_next';
   lastActionBy: string; // unitId or uid
   lastActionSessionId?: string; // unique persistent device/browser session ID
   lastActionId?: string;
   actionTimestamp: number;
   turnAuthorityUid?: string;
   elimModalMsg?: string | null;
+  /** Battle to Survive roll-off shared by all devices; null when none is running */
+  tiebreaker?: TiebreakerState | null;
 }
 
 export interface GameRoom {

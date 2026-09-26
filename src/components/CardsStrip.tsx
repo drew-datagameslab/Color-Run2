@@ -58,7 +58,8 @@ export const CardsStrip: React.FC<CardsStripProps> = ({
         {displayUnits.map((unit) => {
           const isActive = unit.id === activeUnitId && unit.active;
           const isOut = !unit.active;
-          const showTurnOverlay = isUserTurnToRoll && unit.isOwner && !isOut;
+          // isUserTurnToRoll is only true when the active player rolls on this device (includes Pass & Play)
+          const showTurnOverlay = isUserTurnToRoll && isActive && !isOut;
 
           return (
             <div

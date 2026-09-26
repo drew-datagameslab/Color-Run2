@@ -111,30 +111,30 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
           return acc + (g.count >= 8 ? 2 : 1);
         }, 0);
 
-  // Default dice size: slightly smaller than rolling area to account for points total boxes
+  // Die size per row, as the --die CSS variable. Dice shrink below it only when the row is too narrow.
   // Scales down progressively as more rows are added so dice never overlap
   const defaultDieSizeClass =
     visualRowCount >= 5
-      ? 'max-w-[22px] max-h-[22px] sm:max-w-[26px] sm:max-h-[26px]'
+      ? '[--die:22px] sm:[--die:26px]'
       : visualRowCount === 4
-      ? 'max-w-[26px] max-h-[26px] sm:max-w-[28px] sm:max-h-[28px]'
+      ? '[--die:26px] sm:[--die:28px]'
       : visualRowCount === 3
-      ? 'max-w-[30px] max-h-[30px] sm:max-w-[34px] sm:max-h-[34px]'
+      ? '[--die:30px] sm:[--die:34px]'
       : visualRowCount === 2
-      ? 'max-w-[36px] max-h-[36px] sm:max-w-[42px] sm:max-h-[42px]'
-      : 'max-w-[42px] max-h-[42px] sm:max-w-[48px] sm:max-h-[48px]';
+      ? '[--die:36px] sm:[--die:42px]'
+      : '[--die:42px] sm:[--die:48px]';
 
   // If 7 dice of the same shape are collected, shrink as needed to fit the 7 dice and points total
   const shrunkSevenDieSizeClass =
     visualRowCount >= 5
-      ? 'max-w-[19px] max-h-[19px] sm:max-w-[22px] sm:max-h-[22px]'
+      ? '[--die:19px] sm:[--die:22px]'
       : visualRowCount === 4
-      ? 'max-w-[22px] max-h-[22px] sm:max-w-[24px] sm:max-h-[24px]'
+      ? '[--die:22px] sm:[--die:24px]'
       : visualRowCount === 3
-      ? 'max-w-[26px] max-h-[26px] sm:max-w-[30px] sm:max-h-[30px]'
+      ? '[--die:26px] sm:[--die:30px]'
       : visualRowCount === 2
-      ? 'max-w-[32px] max-h-[32px] sm:max-w-[36px] sm:max-h-[36px]'
-      : 'max-w-[38px] max-h-[38px] sm:max-w-[42px] sm:max-h-[42px]';
+      ? '[--die:32px] sm:[--die:36px]'
+      : '[--die:38px] sm:[--die:42px]';
 
   const rowGapClass =
     visualRowCount >= 5
@@ -192,11 +192,15 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
     return [row1, row2];
   };
 
-  // Helper to render a row of dice with bonus groups (gold frame for 3+ consecutive same color)
+  // Renders one row of dice flush left in fixed-size columns (`cols` slots, each up to --die wide),
+  // filling left to right, with dashed placeholders for the remaining slots.
+  // Runs of 3+ same-color dice get a gold bonus frame spanning exactly their columns,
+  // so framed and unframed dice stay aligned on the same grid.
+  const DIE_GAP = 'gap-1 sm:gap-1.5';
   const renderDiceRow = (
     diceList: Die[],
     cols: number,
-    dieClass: string,
+    dieSizeClass: string,
     keyPrefix: string
   ) => {
     // Group consecutive same-color dice
@@ -213,22 +217,33 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
 
     const emptySlots = Math.max(0, cols - diceList.length);
 
+    const renderDie = (d: Die) => (
+      <div key={`${keyPrefix}-${d.id}`} className="relative z-1 w-full aspect-square flex items-center justify-center">
+        <DieComponent
+          color={d.color}
+          value={d.value}
+          forcePips={forcePips}
+          onClick={isCPU ? undefined : () => onTapSavedDie(d.id)}
+        />
+      </div>
+    );
+
     return (
       <div
-        className="grid gap-0.5 sm:gap-1 md:gap-1.5 items-center justify-items-center w-full"
-        style={{
-          gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-        }}
+        className={`grid ${DIE_GAP} items-center justify-start w-full ${dieSizeClass}`}
+        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, var(--die)))` }}
       >
         {colorGroups.map((group, gIdx) => {
-          const hasBonus = group.length >= 3;
-          if (hasBonus) {
+          if (group.length >= 3) {
             const bonusVal = bonusFor(group.length);
             return (
               <div
                 key={`${keyPrefix}-bonus-${gIdx}`}
-                className="bonus-box relative flex gap-0.5 p-0.5 items-center justify-center"
-                style={{ gridColumn: `span ${group.length}` }}
+                className={`relative grid ${DIE_GAP} items-center`}
+                style={{
+                  gridColumn: `span ${group.length}`,
+                  gridTemplateColumns: `repeat(${group.length}, minmax(0, 1fr))`,
+                }}
               >
                 <div className="bonus-frame pointer-events-none" />
                 {/* Centered Bonus Total Bubble over dice framed in the yellow outline */}
@@ -237,42 +252,17 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
                     +{bonusVal} Bonus
                   </span>
                 </div>
-                {group.map(d => (
-                  <div
-                    key={`${keyPrefix}-${d.id}`}
-                    className={`relative z-1 w-full ${dieClass} flex items-center justify-center`}
-                  >
-                    <DieComponent
-                      color={d.color}
-                      value={d.value}
-                      forcePips={forcePips}
-                      onClick={isCPU ? undefined : () => onTapSavedDie(d.id)}
-                    />
-                  </div>
-                ))}
+                {group.map(renderDie)}
               </div>
             );
           }
-
-          return group.map(d => (
-            <div
-              key={`${keyPrefix}-${d.id}`}
-              className={`w-full ${dieClass} flex items-center justify-center`}
-            >
-              <DieComponent
-                color={d.color}
-                value={d.value}
-                forcePips={forcePips}
-                onClick={isCPU ? undefined : () => onTapSavedDie(d.id)}
-              />
-            </div>
-          ));
+          return group.map(renderDie);
         })}
 
         {Array.from({ length: emptySlots }).map((_, sIdx) => (
           <div
             key={`${keyPrefix}-empty-${sIdx}`}
-            className={`aspect-square ${dieClass} w-full rounded-lg md:rounded-xl border border-dashed border-white/15 bg-white/5`}
+            className="aspect-square w-full rounded-lg md:rounded-xl border border-dashed border-white/15 bg-white/5"
           />
         ))}
       </div>
@@ -397,15 +387,8 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
         {groups.length === 0 ? (
           // Empty placeholder row when no dice are saved yet
           <div className="flex items-stretch justify-between gap-1 sm:gap-1.5 md:gap-2.5 w-full max-w-[360px] sm:max-w-[420px] md:max-w-[520px] mx-auto min-h-0">
-            <div className="flex-1 min-w-0 flex items-center justify-center">
-              <div className="grid grid-cols-6 gap-1 sm:gap-1.5 md:gap-2 items-center justify-items-center w-full">
-                {Array.from({ length: 6 }).map((_, sIdx) => (
-                  <div
-                    key={`empty-init-${sIdx}`}
-                    className={`aspect-square ${defaultDieSizeClass} w-full rounded-lg md:rounded-xl border border-dashed border-white/15 bg-white/5 flex items-center justify-center`}
-                  />
-                ))}
-              </div>
+            <div className="flex-1 min-w-0 flex items-center justify-start">
+              {renderDiceRow([], 6, defaultDieSizeClass, 'empty-init')}
             </div>
             {/* Points box matches dice row height, centered */}
             <div className="w-8 sm:w-10 md:w-14 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
@@ -473,7 +456,7 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
                 className="flex items-stretch justify-between gap-1 sm:gap-1.5 md:gap-2.5 w-full max-w-[360px] sm:max-w-[420px] md:max-w-[520px] mx-auto min-h-0"
               >
                 {/* Dice container for 1 row */}
-                <div className="flex-1 min-w-0 flex items-center justify-center">
+                <div className="flex-1 min-w-0 flex items-center justify-start">
                   {renderDiceRow(matchingDice, cols, dieClass, `group-${group.value}`)}
                 </div>
 

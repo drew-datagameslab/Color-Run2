@@ -5,5 +5,7 @@
 	"server": {
 		"androidScheme": "https"
 	},
-	"packageClassList": []
+	"packageClassList": [
+		"HapticsPlugin"
+	]
 }
