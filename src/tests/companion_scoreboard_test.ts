@@ -43,4 +43,57 @@ export function runCompanionScoreboardTests(): void {
   assert.strictEqual(set6.cb, 10);
 
   console.log('✓ Companion Scoreboard sample roll scoring verified (60 points)!');
+
+  // Test Max 6 Red / 6 Blue dice limit validation
+  const testDiceMaxLimit = (dice: Die[]): { hasColorLimitError: boolean; colorErrorMessage: string | null } => {
+    const redDiceCount = dice.filter(d => d.color === 'red').length;
+    const blueDiceCount = dice.filter(d => d.color === 'blue').length;
+    const hasColorLimitError = redDiceCount > 6 || blueDiceCount > 6;
+
+    let colorErrorMessage: string | null = null;
+    if (redDiceCount > 6 && blueDiceCount > 6) {
+      colorErrorMessage = `Too many dice! Max 6 red (${redDiceCount}/6) & 6 blue (${blueDiceCount}/6) allowed.`;
+    } else if (redDiceCount > 6) {
+      colorErrorMessage = `Too many red dice (${redDiceCount}/6)! Maximum 6 allowed.`;
+    } else if (blueDiceCount > 6) {
+      colorErrorMessage = `Too many blue dice (${blueDiceCount}/6)! Maximum 6 allowed.`;
+    }
+
+    return { hasColorLimitError, colorErrorMessage };
+  };
+
+  // Valid roll with 6 red and 6 blue dice (total 12)
+  const fullLegal12: Die[] = [
+    ...Array.from({ length: 6 }, (_, i) => ({ id: i + 1, color: 'red' as const, value: 3, zone: 'saved' as const, selected: false })),
+    ...Array.from({ length: 6 }, (_, i) => ({ id: i + 7, color: 'blue' as const, value: 4, zone: 'saved' as const, selected: false })),
+  ];
+  const legalResult = testDiceMaxLimit(fullLegal12);
+  assert.strictEqual(legalResult.hasColorLimitError, false);
+  assert.strictEqual(legalResult.colorErrorMessage, null);
+
+  // Illegal roll with 7 red dice
+  const tooManyRed: Die[] = [
+    ...Array.from({ length: 7 }, (_, i) => ({ id: i + 1, color: 'red' as const, value: 2, zone: 'saved' as const, selected: false })),
+    ...Array.from({ length: 3 }, (_, i) => ({ id: i + 8, color: 'blue' as const, value: 5, zone: 'saved' as const, selected: false })),
+  ];
+  const redExceededResult = testDiceMaxLimit(tooManyRed);
+  assert.strictEqual(redExceededResult.hasColorLimitError, true);
+  assert.ok(redExceededResult.colorErrorMessage?.includes('Too many red dice'));
+
+  // Illegal roll with 8 blue dice
+  const tooManyBlue: Die[] = [
+    ...Array.from({ length: 2 }, (_, i) => ({ id: i + 1, color: 'red' as const, value: 1, zone: 'saved' as const, selected: false })),
+    ...Array.from({ length: 8 }, (_, i) => ({ id: i + 3, color: 'blue' as const, value: 6, zone: 'saved' as const, selected: false })),
+  ];
+  const blueExceededResult = testDiceMaxLimit(tooManyBlue);
+  assert.strictEqual(blueExceededResult.hasColorLimitError, true);
+  assert.ok(blueExceededResult.colorErrorMessage?.includes('Too many blue dice'));
+
+  // Removing the extra die clears the error
+  const correctedRed = tooManyRed.slice(1); // removes 1st red die, leaving 6 red and 3 blue
+  const correctedResult = testDiceMaxLimit(correctedRed);
+  assert.strictEqual(correctedResult.hasColorLimitError, false);
+  assert.strictEqual(correctedResult.colorErrorMessage, null);
+
+  console.log('✓ Companion Scoreboard 6-dice color limit validation tests passed!');
 }

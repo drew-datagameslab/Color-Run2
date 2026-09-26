@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, UserPlus, Trash2, RotateCcw, Lock, CheckCircle2, AlertCircle, ShieldCheck, Undo2, Award, Info, X } from 'lucide-react';
+import { ArrowLeft, UserPlus, Trash2, RotateCcw, Lock, CheckCircle2, AlertCircle, ShieldCheck, Undo2, Award, Info, X, History, Swords } from 'lucide-react';
 import { Die, PlayerUnit, ScoreResult } from '../types/game';
 import { CardsStrip } from './CardsStrip';
 import { SavedBoard } from './SavedBoard';
 import { DieComponent } from './DieComponent';
 import { scoreDice } from '../lib/scoring';
-import { playSfx } from '../lib/audio';
+import { playSfx, playSwordSlashSound, startBattleMusic, stopBattleMusic } from '../lib/audio';
 import { triggerDieTapHaptic, triggerDieRemoveHaptic, triggerCelebrationHaptic } from '../lib/haptics';
+import { BattleToSurviveCurtain } from './BattleToSurviveCurtain';
+import { BattleToSurviveGraphic } from './BattleToSurviveGraphic';
 
 interface ScoreboardScreenProps {
   isUnlocked: boolean;
@@ -21,6 +23,10 @@ interface RollTurnRecord {
   addedScore: number;
   savedDice: Die[];
   scoreResult: ScoreResult;
+  prevUnits: PlayerUnit[];
+  prevEliminationPhase: boolean;
+  prevActiveUnitId: string;
+  prevRound: number;
 }
 
 const PLAYER_PALETTE = [
@@ -55,16 +61,52 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
   const [activeUnitId, setActiveUnitId] = useState<string>('');
   const [currentRound, setCurrentRound] = useState<number>(1);
   const [isEliminationPhase, setIsEliminationPhase] = useState<boolean>(false);
+  const [eliminationBanner, setEliminationBanner] = useState<string | null>(null);
   const [savedDice, setSavedDice] = useState<Die[]>([]);
   const [historyLog, setHistoryLog] = useState<RollTurnRecord[]>([]);
   const [showInfoModal, setShowInfoModal] = useState<boolean>(false);
   const [showSixCelebration, setShowSixCelebration] = useState<boolean>(false);
   const [winner, setWinner] = useState<PlayerUnit | null>(null);
+  const [showHistory, setShowHistory] = useState<boolean>(false);
+  const [eliminationBannerUnderLabels, setEliminationBannerUnderLabels] = useState<string | null>(null);
+
+  // Tiebreaker State for Companion Scoreboard
+  const [tiebreaker, setTiebreaker] = useState<{
+    isActive: boolean;
+    phase: 'intro' | 'rolling' | 'outro' | null;
+    tiedUnitIds: string[];
+    currentRollScores: Record<string, number>;
+    eliminatedUnit: PlayerUnit | null;
+    roundNumber: number;
+    noticeMsg: string | null;
+  }>({
+    isActive: false,
+    phase: null,
+    tiedUnitIds: [],
+    currentRollScores: {},
+    eliminatedUnit: null,
+    roundNumber: 1,
+    noticeMsg: null,
+  });
 
   const nextDieIdRef = useRef(1);
 
   // Calculate current score for whatever dice are currently saved
   const currentScoreResult: ScoreResult = scoreDice(savedDice);
+
+  // Validate dice counts per color: max 6 red and 6 blue allowed
+  const redDiceCount = savedDice.filter(d => d.color === 'red').length;
+  const blueDiceCount = savedDice.filter(d => d.color === 'blue').length;
+  const hasColorLimitError = redDiceCount > 6 || blueDiceCount > 6;
+
+  let colorErrorMessage: string | null = null;
+  if (redDiceCount > 6 && blueDiceCount > 6) {
+    colorErrorMessage = `Too many dice! Max 6 red (${redDiceCount}/6) & 6 blue (${blueDiceCount}/6) allowed.`;
+  } else if (redDiceCount > 6) {
+    colorErrorMessage = `Too many red dice (${redDiceCount}/6)! Maximum 6 allowed.`;
+  } else if (blueDiceCount > 6) {
+    colorErrorMessage = `Too many blue dice (${blueDiceCount}/6)! Maximum 6 allowed.`;
+  }
 
   const handleRedeemCode = (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,6 +118,7 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
     if (ok) {
       setCodeSuccess('🎉 Code verified! Companion Scoreboard unlocked!');
       setCodeError('');
+      playSfx('fanfare');
     } else {
       setCodeError('Code not recognized. Check your user guide or try CR-TEST-TEST');
     }
@@ -328,18 +371,22 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
     const nextSaved = [...savedDice, newDie];
     setSavedDice(nextSaved);
 
-    // Audio chime feedback for color tiers & 6-of-a-kind Color Run celebration
+    // Audio chime feedback for set formation, color bonus tiers & 6-of-a-kind Color Run celebration
     const sameColorCount = nextSaved.filter(d => d.value === value && d.color === color).length;
+    const totalValCount = nextSaved.filter(d => d.value === value).length;
+
     if (sameColorCount === 6) {
       setShowSixCelebration(true);
       playSfx('s6');
       triggerCelebrationHaptic();
-    } else if (sameColorCount === 5) {
+    } else if (sameColorCount === 5 || totalValCount === 5) {
       playSfx('s5');
-    } else if (sameColorCount === 4) {
+    } else if (sameColorCount === 4 || totalValCount === 4) {
       playSfx('s4');
-    } else if (sameColorCount === 3) {
+    } else if (sameColorCount === 3 || totalValCount === 3) {
       playSfx('s3');
+    } else if (totalValCount >= 6) {
+      playSfx('s6');
     } else {
       playSfx('add');
     }
@@ -350,6 +397,7 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
     triggerDieRemoveHaptic();
     setShowSixCelebration(false);
     setSavedDice(prev => prev.filter(d => String(d.id) !== String(dieId)));
+    playSfx('add');
   };
 
   // Allow scorer to tap any player board at the top to activate their turn
@@ -374,38 +422,27 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
     const lastEntry = historyLog[historyLog.length - 1];
     const newLog = historyLog.slice(0, -1);
 
-    setUnits(prev =>
-      prev.map((u, i) => {
-        if (i === lastEntry.playerIndex) {
-          const newHist = { ...u.history };
-          delete newHist[lastEntry.round];
-          return {
-            ...u,
-            score: Math.max(0, u.score - lastEntry.addedScore),
-            history: newHist,
-          };
-        }
-        return u;
-      })
-    );
-
-    setHistoryLog(newLog);
-    setActiveUnitId(units[lastEntry.playerIndex].id);
-    setCurrentRound(lastEntry.round);
+    setWinner(null);
+    setUnits(lastEntry.prevUnits);
+    setIsEliminationPhase(lastEntry.prevEliminationPhase);
+    setCurrentRound(lastEntry.prevRound);
+    setActiveUnitId(lastEntry.prevActiveUnitId);
     setSavedDice(lastEntry.savedDice);
+    setHistoryLog(newLog);
+    setEliminationBanner(null);
     playSfx('add');
   };
 
   // Score It: commit the turn
   const handleScoreIt = () => {
     setShowSixCelebration(false);
-    if (!activeUnit) return;
+    if (!activeUnit || hasColorLimitError) return;
     const playerIdx = units.findIndex(u => u.id === activeUnit.id);
     if (playerIdx === -1) return;
 
     const addedScore = currentScoreResult.total;
 
-    // Record history for undo capability
+    // Record history snapshot for undo capability
     const turnRecord: RollTurnRecord = {
       playerIndex: playerIdx,
       playerName: activeUnit.name,
@@ -413,6 +450,10 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
       addedScore,
       savedDice: [...savedDice],
       scoreResult: { ...currentScoreResult },
+      prevUnits: units.map(u => ({ ...u, history: { ...u.history } })),
+      prevEliminationPhase: isEliminationPhase,
+      prevActiveUnitId: activeUnitId,
+      prevRound: currentRound,
     };
 
     const updatedUnits = units.map(u => {
@@ -430,63 +471,223 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
 
     setHistoryLog(prev => [...prev, turnRecord]);
     setSavedDice([]);
-    playSfx('add');
 
-    // Check if threshold reached
-    let enteringElim = isEliminationPhase;
-    if (!enteringElim && updatedUnits.some(u => u.score >= threshold)) {
-      enteringElim = true;
-      setIsEliminationPhase(true);
+    // Usual scoring sounds based on banked turn points
+    if (addedScore >= 100) {
       playSfx('fanfare');
+    } else if (addedScore >= 40) {
+      playSfx('s5');
+    } else if (addedScore >= 25) {
+      playSfx('s4');
+    } else if (addedScore > 0) {
+      playSfx('s3');
+    } else {
+      playSfx('add');
     }
 
-    // Determine next active player
     const activeUnits = updatedUnits.filter(u => u.active);
     const curActiveIndex = activeUnits.findIndex(u => u.id === activeUnit.id);
-    const isRoundEnd = curActiveIndex === activeUnits.length - 1;
 
-    if (isRoundEnd) {
-      if (enteringElim) {
-        // Knock out lowest active player
-        if (activeUnits.length > 2) {
-          const minScore = Math.min(...activeUnits.map(u => u.score));
-          const lowestUnit = activeUnits.find(u => u.score === minScore);
-          if (lowestUnit) {
-            const place = activeUnits.length;
-            const finalizedUnits = updatedUnits.map(u =>
-              u.id === lowestUnit.id ? { ...u, active: false, place } : u
-            );
-            setUnits(finalizedUnits);
-            setCurrentRound(r => r + 1);
+    // CRITICAL: Ensure ALL active players finish the round before checking
+    // if a player achieved the 250 threshold and starting an elimination round.
+    const allFinishedRound = activeUnits.every(u => u.history[currentRound] !== undefined);
 
-            const remaining = finalizedUnits.filter(u => u.active);
-            setActiveUnitId(remaining[0]?.id || '');
-            return;
-          }
-        } else if (activeUnits.length === 2) {
-          // Game Over - 2 players left in elimination, the one with highest score wins!
-          const sorted = [...activeUnits].sort((a, b) => b.score - a.score);
-          const champ = sorted[0];
-          const runnerUp = sorted[1];
-          const finalizedUnits = updatedUnits.map(u => {
-            if (u.id === champ.id) return { ...u, place: 1 };
-            if (u.id === runnerUp.id) return { ...u, active: false, place: 2 };
-            return u;
-          });
-          setUnits(finalizedUnits);
-          setWinner(champ);
-          playSfx('fanfare');
-          return;
+    if (!allFinishedRound) {
+      // The round is NOT finished yet. Other players still need to take their turn this round.
+      // Do NOT check threshold, do NOT enter elimination mode, do NOT eliminate anyone.
+      // Advance to the next active player who hasn't played this round yet.
+      let nextUnit: PlayerUnit | undefined;
+      for (let offset = 1; offset < activeUnits.length; offset++) {
+        const candidate = activeUnits[(curActiveIndex + offset) % activeUnits.length];
+        if (candidate && candidate.history[currentRound] === undefined) {
+          nextUnit = candidate;
+          break;
         }
+      }
+      if (!nextUnit) {
+        nextUnit = activeUnits.find(u => u.history[currentRound] === undefined);
       }
 
       setUnits(updatedUnits);
-      setCurrentRound(r => r + 1);
-      setActiveUnitId(activeUnits[0].id);
-    } else {
-      setUnits(updatedUnits);
-      setActiveUnitId(activeUnits[curActiveIndex + 1].id);
+      if (nextUnit) {
+        setActiveUnitId(nextUnit.id);
+      }
+      return;
     }
+
+    // =========================================================================
+    // ALL ACTIVE PLAYERS HAVE COMPLETED THE ROUND!
+    // =========================================================================
+
+    if (isEliminationPhase) {
+      // Find lowest score among active players
+      const minScore = Math.min(...activeUnits.map(u => u.score));
+      const tiedForLowest = activeUnits.filter(u => u.score === minScore);
+      const isTwoPlayerTie = activeUnits.length === 2 && activeUnits[0].score === activeUnits[1].score;
+
+      // Check for tie during elimination round
+      if (isTwoPlayerTie || tiedForLowest.length > 1) {
+        // Trigger BATTLE TO SURVIVE TIEBREAKER
+        const participating = isTwoPlayerTie ? activeUnits : tiedForLowest;
+        setUnits(updatedUnits);
+        setTiebreaker({
+          isActive: true,
+          phase: 'intro',
+          tiedUnitIds: participating.map(u => u.id),
+          currentRollScores: {},
+          eliminatedUnit: null,
+          roundNumber: 1,
+          noticeMsg: null,
+        });
+        startBattleMusic();
+        return;
+      }
+
+      // No tie: single lowest player is eliminated
+      if (activeUnits.length > 2) {
+        const lowestUnit = tiedForLowest[0];
+        const place = activeUnits.length;
+        const finalizedUnits = updatedUnits.map(u =>
+          u.id === lowestUnit.id ? { ...u, active: false, place } : u
+        );
+        setUnits(finalizedUnits);
+        setCurrentRound(r => r + 1);
+        setEliminationBannerUnderLabels(`${lowestUnit.name} has been eliminated!`);
+        playSwordSlashSound();
+        setTimeout(() => setEliminationBannerUnderLabels(null), 6000);
+
+        const remaining = finalizedUnits.filter(u => u.active);
+        setActiveUnitId(remaining[0]?.id || '');
+        return;
+      } else if (activeUnits.length === 2) {
+        const sorted = [...activeUnits].sort((a, b) => b.score - a.score);
+        const champ = sorted[0];
+        const runnerUp = sorted[1];
+        const finalizedUnits = updatedUnits.map(u => {
+          if (u.id === champ.id) return { ...u, place: 1 };
+          if (u.id === runnerUp.id) return { ...u, active: false, place: 2 };
+          return u;
+        });
+        setUnits(finalizedUnits);
+        setWinner(champ);
+        setEliminationBannerUnderLabels(`${runnerUp.name} has been eliminated!`);
+        playSwordSlashSound();
+        setTimeout(() => setEliminationBannerUnderLabels(null), 6000);
+        playSfx('fanfare');
+        return;
+      }
+    } else {
+      // Regular Phase: now that ALL players finished the round, check if any reached threshold!
+      const thresholdReached = updatedUnits.some(u => u.score >= threshold);
+      if (thresholdReached) {
+        setIsEliminationPhase(true);
+        playSfx('fanfare');
+        setEliminationBanner(`Threshold of ${threshold} pts reached! Elimination Round begins!`);
+        setTimeout(() => setEliminationBanner(null), 5000);
+      }
+    }
+
+    // Advance to the next round with all remaining active players starting with player 0
+    setUnits(updatedUnits);
+    setCurrentRound(r => r + 1);
+    setActiveUnitId(activeUnits[0].id);
+  };
+
+  const handleTiebreakerIntroComplete = () => {
+    setTiebreaker(prev => ({ ...prev, phase: 'rolling' }));
+  };
+
+  const handleTiebreakerOutroComplete = () => {
+    stopBattleMusic();
+    const eliminated = tiebreaker.eliminatedUnit;
+    setTiebreaker({
+      isActive: false,
+      phase: null,
+      tiedUnitIds: [],
+      currentRollScores: {},
+      eliminatedUnit: null,
+      roundNumber: 1,
+      noticeMsg: null,
+    });
+
+    if (!eliminated) return;
+
+    const remainingActive = units.filter(u => u.active && u.id !== eliminated.id);
+    const place = remainingActive.length + 1;
+    const finalizedUnits = units.map(u =>
+      u.id === eliminated.id ? { ...u, active: false, place } : u
+    );
+
+    setUnits(finalizedUnits);
+    setEliminationBannerUnderLabels(`${eliminated.name} has been eliminated!`);
+    playSwordSlashSound();
+    setTimeout(() => setEliminationBannerUnderLabels(null), 6000);
+
+    if (remainingActive.length <= 1) {
+      const winnerUnit = remainingActive[0] || finalizedUnits[0];
+      setWinner(winnerUnit);
+      playSfx('fanfare');
+    } else {
+      setCurrentRound(r => r + 1);
+      setActiveUnitId(remainingActive[0]?.id || '');
+    }
+  };
+
+  const handleSetTiebreakerScore = (unitId: string, val: number) => {
+    setTiebreaker(prev => ({
+      ...prev,
+      currentRollScores: {
+        ...prev.currentRollScores,
+        [unitId]: Math.max(0, val),
+      },
+    }));
+  };
+
+  const handleResolveTiebreakerRolls = () => {
+    const tiedUnits = units.filter(u => tiebreaker.tiedUnitIds.includes(u.id));
+    const scores = tiebreaker.currentRollScores;
+    const allEntered = tiedUnits.every(u => scores[u.id] !== undefined && !isNaN(scores[u.id]));
+    if (!allEntered) return;
+
+    const minRoll = Math.min(...tiedUnits.map(u => scores[u.id]));
+    const lowestRollUnits = tiedUnits.filter(u => scores[u.id] === minRoll);
+
+    if (lowestRollUnits.length === 1) {
+      // Single lowest player is eliminated!
+      const eliminated = lowestRollUnits[0];
+      setTiebreaker(prev => ({
+        ...prev,
+        phase: 'outro',
+        eliminatedUnit: eliminated,
+      }));
+      return;
+    }
+
+    // Tie-breaker rule:
+    // If three are tied, and 1 user gets highest while other two tied, highest advances, other two roll again.
+    // In general: if some players scored higher than minRoll, those higher advance, and the tied lowest roll again!
+    if (lowestRollUnits.length < tiedUnits.length) {
+      const advancingUnits = tiedUnits.filter(u => scores[u.id] > minRoll);
+      const advancingNames = advancingUnits.map(u => u.name).join(', ');
+      setTiebreaker(prev => ({
+        ...prev,
+        tiedUnitIds: lowestRollUnits.map(u => u.id),
+        currentRollScores: {},
+        roundNumber: prev.roundNumber + 1,
+        noticeMsg: `${advancingNames} advance! ${lowestRollUnits.map(u => u.name).join(' & ')} remain tied and roll again!`,
+      }));
+      playSfx('s3');
+      return;
+    }
+
+    // Otherwise, all players tied again
+    setTiebreaker(prev => ({
+      ...prev,
+      currentRollScores: {},
+      roundNumber: prev.roundNumber + 1,
+      noticeMsg: `Still tied (${minRoll} pts)! Roll again!`,
+    }));
+    playSfx('add');
   };
 
   const handleResetGamePrompt = () => {
@@ -517,6 +718,18 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5">
+          {/* History Toggle Button */}
+          <button
+            onClick={() => setShowHistory(h => !h)}
+            className={`px-2 py-1 rounded-lg ${
+              showHistory ? 'bg-[#28974a] text-white' : 'bg-[#ebdcb9] hover:bg-[#ded1af] text-[#4a3622]'
+            } text-[10px] sm:text-xs font-black flex items-center gap-1 cursor-pointer transition-transform active:scale-95 shadow-xs`}
+            title="Toggle Roll History (Last 5)"
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>History</span>
+          </button>
+
           <button
             onClick={handleResetGamePrompt}
             className="px-2 py-1 rounded-lg bg-[#ebdcb9] hover:bg-[#ded1af] text-[#4a3622] text-[10px] sm:text-xs font-black flex items-center gap-1 cursor-pointer transition-transform active:scale-95 shadow-xs"
@@ -528,132 +741,307 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
         </div>
       </div>
 
-      {/* Boards Strip at the Top */}
-      <div className="w-full mb-1 shrink-0">
-        <CardsStrip
-          units={units}
-          activeUnitId={activeUnitId}
-          currentRound={currentRound}
-          isEliminationPhase={isEliminationPhase}
-          onSelectUnit={handleSelectPlayerBoard}
-        />
-      </div>
+      {/* Elimination Announcement Banner */}
+      {eliminationBanner && (
+        <div className="w-full bg-gradient-to-r from-red-600 via-amber-600 to-red-600 text-white font-black text-[11px] sm:text-xs py-1.5 px-3 rounded-xl mb-1 text-center shadow-lg animate-pulse border border-yellow-300 shrink-0">
+          ⚔️ {eliminationBanner}
+        </div>
+      )}
 
-      {/* Middle Section: Saved Dice Board (Grows and adapts like PlayScreen) */}
-      <div className="flex-1 min-h-0 flex flex-col justify-center transition-all duration-300 relative my-0.5 sm:my-1">
-        <SavedBoard
-          savedDice={savedDice}
-          scoreResult={currentScoreResult}
-          onTapSavedDie={handleRemoveSavedDie}
-          showSixCelebration={showSixCelebration}
-          onDismissSixCelebration={() => setShowSixCelebration(false)}
-          forcePips={true}
-        />
-
-        {/* Winner overlay if game concluded */}
-        {winner && (
-          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center p-4 rounded-2xl bg-[#140e0a]/95 border-2 border-[#f2c14e] shadow-2xl backdrop-blur-xs text-center animate-scale-up">
-            <Award className="w-12 h-12 text-[#f2c14e] mb-2 drop-shadow-md animate-bounce" />
-            <h2 className="text-xl sm:text-2xl font-black text-white tracking-wide mb-1">
-              🏆 {winner.name} Wins!
-            </h2>
-            <p className="text-xs text-stone-300 mb-4 font-bold">
-              Final Score: {winner.score} Points
+      {/* TIEBREAKER ACTIVE ARENA: SHOW ONLY THE PLAYERS INVOLVED IN TIEBREAKER */}
+      {tiebreaker.isActive && tiebreaker.phase === 'rolling' ? (
+        <div className="flex-1 flex flex-col justify-between min-h-0 bg-[#2b0808]/90 border-2 border-red-500 rounded-2xl p-2.5 sm:p-3 shadow-2xl text-white my-1 overflow-y-auto">
+          <div className="flex flex-col items-center text-center mb-2">
+            <BattleToSurviveGraphic size="sm" className="mb-1" />
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-600/60 border border-yellow-400 text-yellow-300 font-black text-xs uppercase tracking-wider shadow-md">
+              <Swords className="w-4 h-4 text-yellow-300 animate-pulse" />
+              <span>Roll-Off Round {tiebreaker.roundNumber}</span>
+            </div>
+            <p className="text-[11px] text-stone-200 mt-1 font-bold">
+              Each tied player rolls one time on the tabletop. Enter their scores below:
             </p>
+            {tiebreaker.noticeMsg && (
+              <div className="mt-1 px-3 py-1 bg-yellow-400 text-stone-900 font-black text-xs rounded-lg shadow-md animate-bounce">
+                {tiebreaker.noticeMsg}
+              </div>
+            )}
+          </div>
+
+          {/* Cards for ONLY players involved in tiebreaker */}
+          <div className="space-y-2 mb-3">
+            {units
+              .filter(u => tiebreaker.tiedUnitIds.includes(u.id))
+              .map(player => (
+                <div
+                  key={player.id}
+                  className="flex items-center justify-between p-2.5 rounded-xl bg-black/60 border border-red-400/50 shadow-md gap-2"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div
+                      className="w-8 h-8 rounded-full text-white flex items-center justify-center font-black text-xs shrink-0 shadow-sm border border-white/40"
+                      style={{ backgroundColor: player.color }}
+                    >
+                      {player.name.charAt(0)}
+                    </div>
+                    <div className="flex flex-col text-left">
+                      <span className="text-xs sm:text-sm font-black text-white truncate">
+                        {player.name}
+                      </span>
+                      <span className="text-[10px] text-stone-400 font-bold">
+                        Game Score: {player.score} pts
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Input for single roll total */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[10px] sm:text-xs font-bold text-yellow-300 uppercase">
+                      Roll Score:
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="120"
+                      value={tiebreaker.currentRollScores[player.id] ?? ''}
+                      onChange={e => handleSetTiebreakerScore(player.id, parseInt(e.target.value, 10))}
+                      placeholder="0"
+                      className="w-16 sm:w-20 px-2 py-1 text-center bg-white text-stone-900 font-black text-sm rounded-lg border-2 border-yellow-400 shadow-inner focus:outline-hidden focus:ring-2 focus:ring-red-500"
+                    />
+                  </div>
+                </div>
+              ))}
+          </div>
+
+          {/* Submit Roll-Off Button */}
+          <button
+            onClick={handleResolveTiebreakerRolls}
+            className="w-full py-3 bg-gradient-to-r from-red-600 via-amber-600 to-red-600 hover:brightness-110 text-white font-black text-sm uppercase tracking-wider rounded-xl shadow-xl border-b-4 border-red-800 transition-all active:scale-98 cursor-pointer flex items-center justify-center gap-2"
+          >
+            <Swords className="w-4 h-4 text-yellow-300" />
+            <span>Resolve Roll-Off Results</span>
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Boards Strip at the Top */}
+          <div className="w-full mb-1 shrink-0">
+            <CardsStrip
+              units={units}
+              activeUnitId={activeUnitId}
+              currentRound={currentRound}
+              isEliminationPhase={isEliminationPhase}
+              onSelectUnit={handleSelectPlayerBoard}
+            />
+          </div>
+
+          {/* Middle Section: Saved Dice Board (Grows and adapts like PlayScreen) */}
+          <div className="flex-1 min-h-0 flex flex-col justify-center transition-all duration-300 relative my-0.5 sm:my-1">
+            <SavedBoard
+              savedDice={savedDice}
+              scoreResult={currentScoreResult}
+              onTapSavedDie={handleRemoveSavedDie}
+              showSixCelebration={showSixCelebration}
+              onDismissSixCelebration={() => setShowSixCelebration(false)}
+              forcePips={true}
+              colorError={colorErrorMessage}
+              eliminationBanner={eliminationBannerUnderLabels}
+            />
+
+            {/* Winner overlay if game concluded */}
+            {winner && (
+              <div className="absolute inset-0 z-30 flex flex-col items-center justify-center p-4 rounded-2xl bg-[#140e0a]/95 border-2 border-[#f2c14e] shadow-2xl backdrop-blur-xs text-center animate-scale-up">
+                <Award className="w-12 h-12 text-[#f2c14e] mb-2 drop-shadow-md animate-bounce" />
+                <h2 className="text-xl sm:text-2xl font-black text-white tracking-wide mb-1">
+                  🏆 {winner.name} Wins!
+                </h2>
+                <p className="text-xs text-stone-300 mb-4 font-bold">
+                  Final Score: {winner.score} Points
+                </p>
+                <button
+                  onClick={() => setPhase('setup')}
+                  className="py-2.5 px-6 bg-[#28974a] hover:bg-[#22803e] text-white font-black text-sm rounded-xl shadow-lg border-b-2 border-[#185e2e] cursor-pointer active:scale-95"
+                >
+                  Start New Game
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Rolling Area: Row 1 = Red Dice 1-6, Row 2 = Blue Dice 1-6 */}
+          <div className="relative w-full rounded-2xl bg-[#144b26] border border-[#2f9a4f]/70 p-1.5 sm:p-2.5 shadow-xl flex flex-col justify-center shrink-0 mb-1.5">
+            <div className="flex items-center justify-between px-1 mb-1 border-b border-white/10 pb-0.5">
+              <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-[#f2c14e]">
+                INPUT FINAL DICE — <span className="text-white underline">{activeUnit?.name}</span>'S TURN
+              </span>
+              <span className="text-[9px] text-white/70">
+                Tap dice to save • Under 3 score 0 pts
+              </span>
+            </div>
+
+            {/* Red Dice Row (1 to 6) */}
+            <div className="grid grid-cols-6 gap-1 sm:gap-2 mb-1.5 items-center justify-items-center">
+              {[1, 2, 3, 4, 5, 6].map(val => (
+                <div
+                  key={`red-${val}`}
+                  className="w-full max-w-[44px] sm:max-w-[50px] aspect-square flex items-center justify-center transition-transform active:scale-90"
+                >
+                  <DieComponent
+                    color="red"
+                    value={val}
+                    forcePips={true}
+                    onClick={() => handleTapPipDie('red', val)}
+                    className="hover:brightness-110 shadow-md cursor-pointer"
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Blue Dice Row (1 to 6) */}
+            <div className="grid grid-cols-6 gap-1 sm:gap-2 items-center justify-items-center">
+              {[1, 2, 3, 4, 5, 6].map(val => (
+                <div
+                  key={`blue-${val}`}
+                  className="w-full max-w-[44px] sm:max-w-[50px] aspect-square flex items-center justify-center transition-transform active:scale-90"
+                >
+                  <DieComponent
+                    color="blue"
+                    value={val}
+                    forcePips={true}
+                    onClick={() => handleTapPipDie('blue', val)}
+                    className="hover:brightness-110 shadow-md cursor-pointer"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Action Buttons: Score It, Undo, and Info */}
+          <div className="flex items-center gap-1.5 sm:gap-2 w-full max-w-lg mx-auto shrink-0">
+            {/* Score It Button */}
             <button
-              onClick={() => setPhase('setup')}
-              className="py-2.5 px-6 bg-[#28974a] hover:bg-[#22803e] text-white font-black text-sm rounded-xl shadow-lg border-b-2 border-[#185e2e] cursor-pointer active:scale-95"
+              onClick={handleScoreIt}
+              disabled={!activeUnit || !activeUnit.active || hasColorLimitError}
+              className={`flex-1 min-h-[44px] sm:min-h-[48px] py-1.5 px-3 ${
+                hasColorLimitError
+                  ? 'bg-stone-600/90 border-stone-700 opacity-50 cursor-not-allowed'
+                  : 'bg-[#e58a1f] hover:bg-[#cb7512] border-[#a65d0a] cursor-pointer'
+              } disabled:opacity-40 disabled:pointer-events-none text-white rounded-xl shadow-md transition-transform active:scale-98 flex flex-col items-center justify-center leading-tight border-b-2`}
+              title={hasColorLimitError ? 'Max 6 red and 6 blue allowed. Remove extra dice to score.' : 'Score It'}
             >
-              Start New Game
+              <span className="font-black text-xs sm:text-sm tracking-wide">
+                {hasColorLimitError ? 'CANNOT SCORE -' : 'SCORE IT -'}
+              </span>
+              <span className="font-bold text-[10px] sm:text-xs text-white/95 leading-none mt-0.5">
+                {hasColorLimitError ? 'Max 6 Red / 6 Blue' : `${currentScoreResult.total} Points`}
+              </span>
+            </button>
+
+            {/* Undo Button */}
+            <button
+              onClick={handleUndo}
+              disabled={historyLog.length === 0 && savedDice.length === 0}
+              className="min-h-[44px] sm:min-h-[48px] px-3.5 sm:px-4 bg-[#8c745e] hover:bg-[#735d49] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center gap-1 border-b-2 border-[#5c4a3a] cursor-pointer"
+              title="Undo last action"
+            >
+              <Undo2 className="w-4 h-4" />
+              <span>Undo</span>
+            </button>
+
+            {/* Info / Scoring Guide Button */}
+            <button
+              onClick={() => setShowInfoModal(true)}
+              className="min-h-[44px] sm:min-h-[48px] px-3 sm:px-4 bg-[#e8dec0] hover:bg-[#ded1af] text-[#3e2e1e] font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center justify-center border-b-2 border-[#c8bc9a] cursor-pointer"
+              title="Scoring Rules"
+            >
+              <Info className="w-4 h-4" />
             </button>
           </div>
-        )}
-      </div>
+        </>
+      )}
 
-      {/* Rolling Area: Row 1 = Red Dice 1-6, Row 2 = Blue Dice 1-6 */}
-      <div className="relative w-full rounded-2xl bg-[#144b26] border border-[#2f9a4f]/70 p-1.5 sm:p-2.5 shadow-xl flex flex-col justify-center shrink-0 mb-1.5">
-        <div className="flex items-center justify-between px-1 mb-1 border-b border-white/10 pb-0.5">
-          <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-[#f2c14e]">
-            INPUT FINAL DICE — <span className="text-white underline">{activeUnit?.name}</span>'S TURN
-          </span>
-          <span className="text-[9px] text-white/70">
-            Tap dice to save • Under 3 score 0 pts
-          </span>
-        </div>
-
-        {/* Red Dice Row (1 to 6) */}
-        <div className="grid grid-cols-6 gap-1 sm:gap-2 mb-1.5 items-center justify-items-center">
-          {[1, 2, 3, 4, 5, 6].map(val => (
-            <div
-              key={`red-${val}`}
-              className="w-full max-w-[44px] sm:max-w-[50px] aspect-square flex items-center justify-center transition-transform active:scale-90"
-            >
-              <DieComponent
-                color="red"
-                value={val}
-                forcePips={true}
-                onClick={() => handleTapPipDie('red', val)}
-                className="hover:brightness-110 shadow-md cursor-pointer"
-              />
+      {/* History Modal (Displays Last 5 Completed Rolls) */}
+      {showHistory && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-3 bg-black/75 backdrop-blur-xs animate-fade-in">
+          <div className="bg-[#faf4e6] border-2 border-[#c9b877] rounded-3xl p-4 sm:p-5 max-w-sm w-full shadow-2xl relative max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between pb-2 mb-3 border-b border-[#ebdcb9]">
+              <div className="flex items-center gap-2">
+                <History className="w-5 h-5 text-[#1c6a35]" />
+                <h3 className="text-base sm:text-lg font-black text-[#1c6a35]">
+                  Roll History (Last 5)
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowHistory(false)}
+                className="p-1 rounded-lg text-stone-500 hover:text-stone-800 hover:bg-black/5 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
-          ))}
-        </div>
 
-        {/* Blue Dice Row (1 to 6) */}
-        <div className="grid grid-cols-6 gap-1 sm:gap-2 items-center justify-items-center">
-          {[1, 2, 3, 4, 5, 6].map(val => (
-            <div
-              key={`blue-${val}`}
-              className="w-full max-w-[44px] sm:max-w-[50px] aspect-square flex items-center justify-center transition-transform active:scale-90"
-            >
-              <DieComponent
-                color="blue"
-                value={val}
-                forcePips={true}
-                onClick={() => handleTapPipDie('blue', val)}
-                className="hover:brightness-110 shadow-md cursor-pointer"
-              />
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              {historyLog.length === 0 ? (
+                <div className="py-8 text-center text-xs text-stone-500 font-medium">
+                  No completed rolls yet. Completed rolls will be recorded here to verify progress.
+                </div>
+              ) : (
+                historyLog
+                  .slice(-5)
+                  .reverse()
+                  .map((entry, idx) => (
+                    <div
+                      key={idx}
+                      className="p-2.5 bg-white/90 border border-[#ebdcb9] rounded-xl shadow-xs flex flex-col gap-1.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black uppercase bg-[#ebdcb9] text-[#5c442d] px-2 py-0.5 rounded-md">
+                            Round {entry.round}
+                          </span>
+                          <span className="text-xs font-black text-[#2e2316]">
+                            {entry.playerName}
+                          </span>
+                        </div>
+                        <span className="text-xs font-mono font-black text-[#1c6a35] bg-[#28974a]/10 px-2 py-0.5 rounded-md border border-[#28974a]/30">
+                          +{entry.addedScore} pts
+                        </span>
+                      </div>
+
+                      {/* Staged Dice */}
+                      <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                        {entry.savedDice.map((d, dIdx) => (
+                          <div
+                            key={dIdx}
+                            className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-black text-white shadow-xs ${
+                              d.color === 'red' ? 'bg-[#d62828]' : 'bg-[#1f7fd6]'
+                            }`}
+                          >
+                            {d.value}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+              )}
             </div>
-          ))}
+
+            <button
+              onClick={() => setShowHistory(false)}
+              className="mt-3 w-full py-2 bg-[#28974a] hover:bg-[#22803e] text-white font-black text-xs sm:text-sm rounded-xl transition-all active:scale-98 cursor-pointer shadow-md"
+            >
+              Close History
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Action Buttons: Score It, Undo, and Info */}
-      <div className="flex items-center gap-1.5 sm:gap-2 w-full max-w-lg mx-auto shrink-0">
-        {/* Score It Button */}
-        <button
-          onClick={handleScoreIt}
-          disabled={!activeUnit || !activeUnit.active}
-          className="flex-1 min-h-[44px] sm:min-h-[48px] py-1.5 px-3 bg-[#e58a1f] hover:bg-[#cb7512] disabled:opacity-40 disabled:pointer-events-none text-white rounded-xl shadow-md transition-transform active:scale-98 flex flex-col items-center justify-center leading-tight border-b-2 border-[#a65d0a] cursor-pointer"
-        >
-          <span className="font-black text-xs sm:text-sm tracking-wide">
-            SCORE IT -
-          </span>
-          <span className="font-bold text-[10px] sm:text-xs text-white/95 leading-none mt-0.5">
-            {currentScoreResult.total} Points
-          </span>
-        </button>
-
-        {/* Undo Button */}
-        <button
-          onClick={handleUndo}
-          disabled={historyLog.length === 0 && savedDice.length === 0}
-          className="min-h-[44px] sm:min-h-[48px] px-3.5 sm:px-4 bg-[#8c745e] hover:bg-[#735d49] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center gap-1 border-b-2 border-[#5c4a3a] cursor-pointer"
-          title="Undo last action"
-        >
-          <Undo2 className="w-4 h-4" />
-          <span>Undo</span>
-        </button>
-
-        {/* Info / Scoring Guide Button */}
-        <button
-          onClick={() => setShowInfoModal(true)}
-          className="min-h-[44px] sm:min-h-[48px] px-3 sm:px-4 bg-[#e8dec0] hover:bg-[#ded1af] text-[#3e2e1e] font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center justify-center border-b-2 border-[#c8bc9a] cursor-pointer"
-          title="Scoring Rules"
-        >
-          <Info className="w-4 h-4" />
-        </button>
-      </div>
+      {/* Battle to Survive Theatrical Curtain */}
+      <BattleToSurviveCurtain
+        isVisible={tiebreaker.isActive && (tiebreaker.phase === 'intro' || tiebreaker.phase === 'outro')}
+        phase={tiebreaker.phase}
+        eliminatedPlayerName={tiebreaker.eliminatedUnit?.name}
+        onIntroComplete={handleTiebreakerIntroComplete}
+        onOutroComplete={handleTiebreakerOutroComplete}
+      />
 
       {/* Scoring Info Modal */}
       {showInfoModal && (

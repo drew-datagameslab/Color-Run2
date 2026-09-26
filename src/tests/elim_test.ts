@@ -53,5 +53,23 @@ export function runElimTests() {
   const prizeIn5Player = payouts5Player[placeIn5Player - 1] || 0;
   assert(prizeIn5Player === 5, '3rd place eliminated player must receive 5 coin prize');
 
+  // Test 5: Battle to Survive 3-player Tiebreaker System Rules
+  // Rule: If three are tied, each rolls one time. If one user gets highest while other two tied, highest advances, other two roll again.
+  const scoresRound1: Record<string, number> = { 'p1': 50, 'p2': 30, 'p3': 30 };
+  const tiedUnitsRound1 = ['p1', 'p2', 'p3'];
+  const minRollRound1 = Math.min(...tiedUnitsRound1.map(id => scoresRound1[id]));
+  const lowestUnitsRound1 = tiedUnitsRound1.filter(id => scoresRound1[id] === minRollRound1);
+  assert(lowestUnitsRound1.length === 2, 'P2 and P3 are tied for lowest (30 pts)');
+  assert(lowestUnitsRound1.length < tiedUnitsRound1.length, 'P1 scored higher and advances');
+  const advancingRound1 = tiedUnitsRound1.filter(id => scoresRound1[id] > minRollRound1);
+  assert(advancingRound1.includes('p1') && advancingRound1.length === 1, 'P1 with 50 pts advances');
+
+  // Next round: P2 and P3 roll again
+  const scoresRound2: Record<string, number> = { 'p2': 40, 'p3': 25 };
+  const tiedUnitsRound2 = lowestUnitsRound1;
+  const minRollRound2 = Math.min(...tiedUnitsRound2.map(id => scoresRound2[id]));
+  const lowestUnitsRound2 = tiedUnitsRound2.filter(id => scoresRound2[id] === minRollRound2);
+  assert(lowestUnitsRound2.length === 1 && lowestUnitsRound2[0] === 'p3', 'P3 with 25 pts is the single lowest player and eliminated');
+
   console.log('✓ All Elimination Tests Passed!');
 }

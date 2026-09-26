@@ -3,13 +3,16 @@ import { DiceColor, Die, GamePhase, GameSettings, PlayerUnit, ScoreResult, UserA
 import { scoreDice } from '../lib/scoring';
 import { decideCPUSaves } from '../lib/cpu';
 import { resolveElimination } from '../lib/elimination';
-import { playSfx, playWarning5sSound, stopWarningSound } from '../lib/audio';
+import { playSfx, playWarning5sSound, stopWarningSound, playSwordSlashSound, startBattleMusic, stopBattleMusic, playRollDiceSound } from '../lib/audio';
+import { triggerTurnHaptic } from '../lib/haptics';
 import { getLocalFriends, addFriend, removeFriend } from '../lib/friends';
 import { CardsStrip } from './CardsStrip';
 import { SavedBoard } from './SavedBoard';
 import { RollArea } from './RollArea';
 import { PlayerProfileModal } from './PlayerProfileModal';
-import { Loader2 } from 'lucide-react';
+import { BattleToSurviveCurtain } from './BattleToSurviveCurtain';
+import { BattleToSurviveGraphic } from './BattleToSurviveGraphic';
+import { Loader2, Swords } from 'lucide-react';
 import { subscribeToRoom, markPlayerLeft, updateRoomGameState, getClientSessionId } from '../lib/matchmaking';
 import { calculatePayouts } from './PickGameScreen';
 
@@ -150,6 +153,42 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const [selectedPlayerForProfile, setSelectedPlayerForProfile] = useState<PlayerUnit | null>(null);
   const [friends, setFriends] = useState<Friend[]>(() => getLocalFriends(user.uid));
 
+  // Elimination Banner under Saved Dice and Points labels row
+  const [eliminationBannerUnderLabels, setEliminationBannerUnderLabels] = useState<string | null>(null);
+
+  const triggerEliminatedBanner = useCallback((playerName: string) => {
+    setEliminationBannerUnderLabels(`${playerName} has been eliminated!`);
+    playSwordSlashSound();
+    setTimeout(() => {
+      setEliminationBannerUnderLabels(null);
+    }, 6000);
+  }, []);
+
+  // Battle to Survive Roll-Off Tiebreaker State
+  const [tiebreakerState, setTiebreakerState] = useState<{
+    isActive: boolean;
+    phase: 'intro' | 'rolling' | 'outro' | null;
+    tiedUnitIds: string[];
+    activeTiedIndex: number;
+    rollScores: Record<string, number>;
+    eliminatedUnit: PlayerUnit | null;
+    roundNumber: number;
+    noticeMsg: string | null;
+    hasRolledCurrentTurn: boolean;
+    lastRollTotal: number | null;
+  }>({
+    isActive: false,
+    phase: null,
+    tiedUnitIds: [],
+    activeTiedIndex: 0,
+    rollScores: {},
+    eliminatedUnit: null,
+    roundNumber: 1,
+    noticeMsg: null,
+    hasRolledCurrentTurn: false,
+    lastRollTotal: null,
+  });
+
   // Turn timer & AFK management - 30s for roll 1, 20s for rolls 2 & 3 in multiplayer
   const [turnSecondsLeft, setTurnSecondsLeft] = useState(ROLL_1_TIME);
   const [isAfkOverlay, setIsAfkOverlay] = useState(false);
@@ -240,8 +279,18 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   useEffect(() => {
     return () => {
       stopWarningSound();
+      stopBattleMusic();
     };
   }, []);
+
+  // Vibration when it is the user's turn in Multiplayer, vs Computer and Friends Challenge games
+  const prevIsHumanOwnerRef = useRef(false);
+  useEffect(() => {
+    if (isHumanOwner && !prevIsHumanOwnerRef.current && phase !== 'over') {
+      triggerTurnHaptic();
+    }
+    prevIsHumanOwnerRef.current = isHumanOwner;
+  }, [isHumanOwner, curUnit?.id, phase]);
 
   const handleDismissSixCelebration = useCallback(() => {
     setShowSixCelebration(false);
@@ -1079,21 +1128,43 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         });
       }
     } else {
-      // Elimination phase: knock out lowest score!
-      const countToElim = liveUnits.length > 6 ? 2 : 1;
-      const { toElim, log } = resolveElimination(liveUnits, countToElim);
+      // Elimination phase: check if there is a tie for the lowest total score!
+      const minScore = Math.min(...liveUnits.map(u => u.score));
+      const tiedForLowest = liveUnits.filter(u => u.score === minScore);
+      const isTwoPlayerTie = liveUnits.length === 2 && liveUnits[0].score === liveUnits[1].score;
 
-      const remainingAfterElim = liveUnits.length - toElim.length;
+      if (isTwoPlayerTie || tiedForLowest.length > 1) {
+        // Trigger BATTLE TO SURVIVE TIEBREAKER!
+        const participating = isTwoPlayerTie ? liveUnits : tiedForLowest;
+        setTiebreakerState({
+          isActive: true,
+          phase: 'intro',
+          tiedUnitIds: participating.map(u => u.id),
+          activeTiedIndex: 0,
+          rollScores: {},
+          eliminatedUnit: null,
+          roundNumber: 1,
+          noticeMsg: null,
+          hasRolledCurrentTurn: false,
+          lastRollTotal: null,
+        });
+        startBattleMusic();
+        return;
+      }
+
+      // No tie: single lowest score player is eliminated
+      const lowestUnit = tiedForLowest[0];
+      const remainingAfterElim = liveUnits.length - 1;
 
       const finalizedUnits = currentUnits.map(u => {
-        const eliminatedMatch = toElim.find(e => e.id === u.id);
-        if (eliminatedMatch) {
+        if (u.id === lowestUnit.id) {
           return { ...u, active: false, place: remainingAfterElim + 1 };
         }
         return u;
       });
 
       setUnits(finalizedUnits);
+      triggerEliminatedBanner(lowestUnit.name);
 
       const survivors = finalizedUnits.filter(u => u.active);
       if (survivors.length <= 1) {
@@ -1132,9 +1203,8 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         return;
       }
 
-      // Show elimination toast or notice
-      const elimNames = toElim.map(e => e.name).join(', ');
-      showToast(`⚔️ Round complete: ${elimNames} knocked out!`);
+      // Show elimination toast
+      showToast(`⚔️ Round complete: ${lowestUnit.name} knocked out!`);
 
       const nextRound = round + 1;
       setRound(nextRound);
@@ -1176,6 +1246,238 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       }
     }
   };
+
+  // =========================================================================
+  // Battle to Survive Roll-Off Tiebreaker Handlers
+  // =========================================================================
+  const handleTiebreakerIntroComplete = useCallback(() => {
+    // 2-second intro curtain finished: raise curtain and show tiebreaker rolling screen
+    setTiebreakerState(prev => {
+      const firstTiedUnit = units.find(u => u.id === prev.tiedUnitIds[0]);
+      if (firstTiedUnit) {
+        const [c1, c2] = getUnitDiceColors(firstTiedUnit, userDiceColors);
+        setDice(createInitialDice(c1, c2));
+      }
+      return {
+        ...prev,
+        phase: 'rolling',
+        activeTiedIndex: 0,
+        rollScores: {},
+        hasRolledCurrentTurn: false,
+        lastRollTotal: null,
+      };
+    });
+  }, [units, userDiceColors]);
+
+  const handleDoTiebreakerRoll = useCallback(() => {
+    if (!tiebreakerState.isActive || tiebreakerState.phase !== 'rolling' || tiebreakerState.hasRolledCurrentTurn) return;
+
+    const currentTiedId = tiebreakerState.tiedUnitIds[tiebreakerState.activeTiedIndex];
+    const currentUnit = units.find(u => u.id === currentTiedId);
+    if (!currentUnit) return;
+
+    // 12 dice roll one time
+    const [c1, c2] = getUnitDiceColors(currentUnit, userDiceColors);
+    const rolledDice: Die[] = [];
+    for (let i = 1; i <= 6; i++) {
+      rolledDice.push({
+        id: i,
+        color: c1,
+        value: Math.floor(Math.random() * 6) + 1,
+        zone: 'active',
+        selected: false,
+        slotIndex: rolledDice.length,
+      });
+    }
+    for (let i = 7; i <= 12; i++) {
+      rolledDice.push({
+        id: i,
+        color: c2,
+        value: Math.floor(Math.random() * 6) + 1,
+        zone: 'active',
+        selected: false,
+        slotIndex: rolledDice.length,
+      });
+    }
+    setDice(rolledDice);
+    playRollDiceSound();
+
+    // Calculate score: scored points from valid sets or pip sum if 0
+    const scoredPts = scoreDice(rolledDice).total;
+    const pipSum = rolledDice.reduce((acc, d) => acc + d.value, 0);
+    const finalTotal = scoredPts > 0 ? scoredPts : pipSum;
+
+    setTiebreakerState(prev => ({
+      ...prev,
+      hasRolledCurrentTurn: true,
+      lastRollTotal: finalTotal,
+    }));
+  }, [tiebreakerState, units, userDiceColors]);
+
+  const handleConfirmTiebreakerRoll = useCallback((scoreVal?: number) => {
+    if (!tiebreakerState.isActive || tiebreakerState.phase !== 'rolling' || !tiebreakerState.hasRolledCurrentTurn) return;
+
+    const currentTiedId = tiebreakerState.tiedUnitIds[tiebreakerState.activeTiedIndex];
+    const finalScore = scoreVal !== undefined ? scoreVal : (tiebreakerState.lastRollTotal || 0);
+    const updatedScores = {
+      ...tiebreakerState.rollScores,
+      [currentTiedId]: finalScore,
+    };
+
+    const nextIdx = tiebreakerState.activeTiedIndex + 1;
+    if (nextIdx < tiebreakerState.tiedUnitIds.length) {
+      // Advance to next tied player
+      const nextUnit = units.find(u => u.id === tiebreakerState.tiedUnitIds[nextIdx]);
+      if (nextUnit) {
+        const [c1, c2] = getUnitDiceColors(nextUnit, userDiceColors);
+        setDice(createInitialDice(c1, c2));
+      }
+      setTiebreakerState(prev => ({
+        ...prev,
+        activeTiedIndex: nextIdx,
+        rollScores: updatedScores,
+        hasRolledCurrentTurn: false,
+        lastRollTotal: null,
+      }));
+      return;
+    }
+
+    // All participating tied players have rolled! Evaluate results:
+    const tiedUnits = units.filter(u => tiebreakerState.tiedUnitIds.includes(u.id));
+    const minRoll = Math.min(...tiedUnits.map(u => updatedScores[u.id]));
+    const lowestRollUnits = tiedUnits.filter(u => updatedScores[u.id] === minRoll);
+
+    if (lowestRollUnits.length === 1) {
+      // Single lowest player eliminated! Red curtain will return and show for 3 seconds
+      const eliminated = lowestRollUnits[0];
+      setTiebreakerState(prev => ({
+        ...prev,
+        phase: 'outro',
+        eliminatedUnit: eliminated,
+        rollScores: updatedScores,
+      }));
+      stopBattleMusic();
+      return;
+    }
+
+    // Tie-breakers rule:
+    // If three are tied, and 1 user gets highest while other two tied, highest advances, other two roll again.
+    // In general: if some players scored higher than minRoll, those higher advance, and the tied lowest roll again!
+    if (lowestRollUnits.length < tiedUnits.length) {
+      const advancingUnits = tiedUnits.filter(u => updatedScores[u.id] > minRoll);
+      const advancingNames = advancingUnits.map(u => u.name).join(', ');
+      const firstUnit = units.find(u => u.id === lowestRollUnits[0].id);
+      if (firstUnit) {
+        const [c1, c2] = getUnitDiceColors(firstUnit, userDiceColors);
+        setDice(createInitialDice(c1, c2));
+      }
+      setTiebreakerState(prev => ({
+        ...prev,
+        tiedUnitIds: lowestRollUnits.map(u => u.id),
+        activeTiedIndex: 0,
+        rollScores: {},
+        roundNumber: prev.roundNumber + 1,
+        noticeMsg: `${advancingNames} advance! ${lowestRollUnits.map(u => u.name).join(' & ')} remain tied and roll again!`,
+        hasRolledCurrentTurn: false,
+        lastRollTotal: null,
+      }));
+      playSfx('s3');
+      return;
+    }
+
+    // All remaining tied players had the exact same score: roll again!
+    const firstUnit = units.find(u => u.id === tiebreakerState.tiedUnitIds[0]);
+    if (firstUnit) {
+      const [c1, c2] = getUnitDiceColors(firstUnit, userDiceColors);
+      setDice(createInitialDice(c1, c2));
+    }
+    setTiebreakerState(prev => ({
+      ...prev,
+      activeTiedIndex: 0,
+      rollScores: {},
+      roundNumber: prev.roundNumber + 1,
+      noticeMsg: `Still tied (${minRoll} pts)! Roll again!`,
+      hasRolledCurrentTurn: false,
+      lastRollTotal: null,
+    }));
+    playSfx('add');
+  }, [tiebreakerState, units, userDiceColors]);
+
+  const handleTiebreakerOutroComplete = useCallback(() => {
+    stopBattleMusic();
+    const eliminated = tiebreakerState.eliminatedUnit;
+    setTiebreakerState({
+      isActive: false,
+      phase: null,
+      tiedUnitIds: [],
+      activeTiedIndex: 0,
+      rollScores: {},
+      eliminatedUnit: null,
+      roundNumber: 1,
+      noticeMsg: null,
+      hasRolledCurrentTurn: false,
+      lastRollTotal: null,
+    });
+
+    if (!eliminated) return;
+
+    const remainingActive = units.filter(u => u.active && u.id !== eliminated.id);
+    const place = remainingActive.length + 1;
+    const finalizedUnits = units.map(u =>
+      u.id === eliminated.id ? { ...u, active: false, place } : u
+    );
+
+    setUnits(finalizedUnits);
+    triggerEliminatedBanner(eliminated.name);
+
+    if (remainingActive.length <= 1) {
+      const winner = remainingActive[0] || finalizedUnits[0];
+      winner.place = 1;
+      onGameOver(winner, finalizedUnits);
+    } else {
+      const nextRound = round + 1;
+      setRound(nextRound);
+      setQIdx(0);
+      setRollsUsed(0);
+      setRollSlotsCount(12);
+      const [c1, c2] = getUnitDiceColors(remainingActive[0], userDiceColors);
+      setDice(createInitialDice(c1, c2));
+      if (remainingActive[0]?.isOwner && !remainingActive[0]?.isCPU) {
+        setTurnSecondsLeft(ROLL_1_TIME);
+        setIsAutoPilotTurn(false);
+      }
+    }
+  }, [tiebreakerState.eliminatedUnit, units, round, userDiceColors, onGameOver, triggerEliminatedBanner]);
+
+  // CPU automated turns during tiebreaker
+  useEffect(() => {
+    if (!tiebreakerState.isActive || tiebreakerState.phase !== 'rolling') return;
+    const currentTiedId = tiebreakerState.tiedUnitIds[tiebreakerState.activeTiedIndex];
+    const currentUnit = units.find(u => u.id === currentTiedId);
+    if (!currentUnit || !currentUnit.isCPU) return;
+
+    if (!tiebreakerState.hasRolledCurrentTurn) {
+      const rollTimer = setTimeout(() => {
+        handleDoTiebreakerRoll();
+      }, 1200);
+      return () => clearTimeout(rollTimer);
+    } else {
+      const confirmTimer = setTimeout(() => {
+        handleConfirmTiebreakerRoll(tiebreakerState.lastRollTotal || 0);
+      }, 1600);
+      return () => clearTimeout(confirmTimer);
+    }
+  }, [
+    tiebreakerState.isActive,
+    tiebreakerState.phase,
+    tiebreakerState.activeTiedIndex,
+    tiebreakerState.hasRolledCurrentTurn,
+    tiebreakerState.lastRollTotal,
+    tiebreakerState.tiedUnitIds,
+    units,
+    handleDoTiebreakerRoll,
+    handleConfirmTiebreakerRoll,
+  ]);
 
   // Dismiss elimination announcement without altering round or dice (state is already synced)
   const handleDismissElimModal = useCallback(() => {
@@ -1343,9 +1645,9 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   useEffect(() => {
     if ((showMultiplayerElimOverlay || showVsCpuElimOverlay) && !wasEliminatedSoundPlayedRef.current) {
       wasEliminatedSoundPlayedRef.current = true;
-      playSfx('warning5s');
+      triggerEliminatedBanner(humanPlayer?.name || user.name || 'You');
     }
-  }, [showMultiplayerElimOverlay, showVsCpuElimOverlay]);
+  }, [showMultiplayerElimOverlay, showVsCpuElimOverlay, humanPlayer?.name, user.name, triggerEliminatedBanner]);
 
   // Target display logic: target is reached once elimination phase begins or someone hits threshold
   const targetReached = phase === 'elimination' || units.some(u => u.score >= settings.threshold);
@@ -1475,11 +1777,15 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         {/* Players Scoreboards Strip */}
         <div className="mb-1">
           <CardsStrip
-            units={units}
-            activeUnitId={curUnit?.id}
+            units={tiebreakerState.isActive && tiebreakerState.phase === 'rolling'
+              ? units.filter(u => tiebreakerState.tiedUnitIds.includes(u.id))
+              : units}
+            activeUnitId={tiebreakerState.isActive && tiebreakerState.phase === 'rolling'
+              ? tiebreakerState.tiedUnitIds[tiebreakerState.activeTiedIndex]
+              : curUnit?.id}
             currentRound={round}
             isEliminationPhase={phase === 'elimination'}
-            isUserTurnToRoll={isHumanOwner && rollsUsed === 0 && !isAutoPilotTurn && (joiningCountdown === null || joiningCountdown <= 0)}
+            isUserTurnToRoll={!tiebreakerState.isActive && isHumanOwner && rollsUsed === 0 && !isAutoPilotTurn && (joiningCountdown === null || joiningCountdown <= 0)}
             onSelectUnit={setSelectedPlayerForProfile}
           />
         </div>
@@ -1547,6 +1853,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             onDismissSixCelebration={handleDismissSixCelebration}
             warningSecondsLeft={show15sWarning ? turnSecondsLeft : null}
             onTouchScreen={handleScreenTouchAction}
+            eliminationBanner={eliminationBannerUnderLabels}
           />
 
           {/* Elimination Overlay over the Saved Dice Area for Multiplayer Online & Friends Challenge */}
@@ -1632,18 +1939,41 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
         {/* Active Roll Area - Compact, fits dice compactly */}
         <div className="shrink-0 flex flex-col justify-center">
+          {/* Battle to Survive Status Banner during Roll-Off */}
+          {tiebreakerState.isActive && tiebreakerState.phase === 'rolling' && (
+            <div className="w-full bg-gradient-to-r from-red-950 via-[#750808] to-red-950 border-2 border-red-500 rounded-xl p-2 mb-1 text-center shadow-lg animate-fade-in shrink-0">
+              <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-red-600/70 border border-yellow-400 text-yellow-300 font-black text-xs uppercase tracking-wider shadow-sm mb-1">
+                <Swords className="w-3.5 h-3.5 text-yellow-300 animate-pulse" />
+                <span>⚡ ROLL-OFF FOR SURVIVAL — ROUND {tiebreakerState.roundNumber} ⚡</span>
+              </div>
+              <p className="text-xs text-white font-bold">
+                {units.find(u => u.id === tiebreakerState.tiedUnitIds[tiebreakerState.activeTiedIndex])?.name}'s Roll:{' '}
+                {tiebreakerState.hasRolledCurrentTurn ? (
+                  <span className="text-yellow-300 font-black">{tiebreakerState.lastRollTotal} Points</span>
+                ) : (
+                  'Ready to roll 1 time!'
+                )}
+              </p>
+              {tiebreakerState.noticeMsg && (
+                <p className="text-[11px] text-yellow-300 font-black mt-1 animate-pulse">
+                  {tiebreakerState.noticeMsg}
+                </p>
+              )}
+            </div>
+          )}
+
           <RollArea
             dice={dice}
-            rollsUsed={rollsUsed}
+            rollsUsed={tiebreakerState.isActive && tiebreakerState.phase === 'rolling' ? (tiebreakerState.hasRolledCurrentTurn ? 1 : 0) : rollsUsed}
             rollSlotsCount={rollSlotsCount}
-            isCPU={isCPU}
-            isHumanOwner={isHumanOwner}
-            isRemoteHuman={isRemoteHuman}
+            isCPU={tiebreakerState.isActive && tiebreakerState.phase === 'rolling' ? !!units.find(u => u.id === tiebreakerState.tiedUnitIds[tiebreakerState.activeTiedIndex])?.isCPU : isCPU}
+            isHumanOwner={tiebreakerState.isActive && tiebreakerState.phase === 'rolling' ? !!units.find(u => u.id === tiebreakerState.tiedUnitIds[tiebreakerState.activeTiedIndex])?.isOwner && !units.find(u => u.id === tiebreakerState.tiedUnitIds[tiebreakerState.activeTiedIndex])?.isCPU : isHumanOwner}
+            isRemoteHuman={tiebreakerState.isActive && tiebreakerState.phase === 'rolling' ? false : isRemoteHuman}
             joiningCountdown={joiningCountdown}
-            playerName={curUnit?.name || 'Player'}
+            playerName={tiebreakerState.isActive && tiebreakerState.phase === 'rolling' ? (units.find(u => u.id === tiebreakerState.tiedUnitIds[tiebreakerState.activeTiedIndex])?.name || 'Player') : (curUnit?.name || 'Player')}
             isRolling={isRolling}
             onTapActiveDie={handleTapActive}
-            onDoRoll={doRoll}
+            onDoRoll={tiebreakerState.isActive && tiebreakerState.phase === 'rolling' ? handleDoTiebreakerRoll : doRoll}
             spectatorState={{
               isUserOut: isHumanOut,
               choiceMade: spectatorChoiceMade,
@@ -1662,69 +1992,114 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
       {/* Bottom Controls Area (Fixed at bottom) */}
       <div className="shrink-0 flex flex-col gap-0.5 sm:gap-1 pt-0.5 pb-1">
-        {/* Action Buttons: ROLL, SCORE IT!, and INFO */}
-        <div className="flex gap-1.5 sm:gap-2 py-0.5">
-          <button
-            onClick={doRoll}
-            disabled={!canRoll}
-            className={`flex-1 min-h-[42px] sm:min-h-[46px] py-1.5 sm:py-2 px-2 bg-[#28974a] hover:bg-[#22803e] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-1 sm:gap-1.5 border-b-2 border-[#185e2e] ${
-              isTimeRunningOut
-                ? 'ring-4 ring-yellow-400 ring-offset-2 ring-offset-black/50 animate-pulse bg-red-700 hover:bg-red-800'
-                : rollsUsed === 0 && isHumanOwner && !isCPU && (joiningCountdown === null || joiningCountdown <= 0)
-                ? 'ring-2 ring-yellow-300 ring-offset-1 ring-offset-black/40 animate-pulse shadow-[0_0_12px_rgba(242,193,78,0.5)]'
-                : ''
-            }`}
-          >
-            {joiningCountdown !== null && joiningCountdown > 0 ? (
-              <span>⏳ Waiting for players ({joiningCountdown}s)</span>
-            ) : isRemoteHuman ? (
-              <span className="flex items-center gap-1.5">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-white/80" />
-                <span>Waiting for {curUnit.name}…</span>
-                {turnSecondsLeft <= 5 && turnSecondsLeft > 0 && (
-                  <span className="ml-1 bg-yellow-400 text-black text-[10px] md:text-xs font-mono font-black px-1.5 py-0.2 rounded-full">
-                    ⚠️ {turnSecondsLeft}s
+        {tiebreakerState.isActive && tiebreakerState.phase === 'rolling' ? (
+          /* Tiebreaker Roll-Off Action Controls */
+          <div className="py-0.5">
+            {(() => {
+              const currentTiedUnit = units.find(u => u.id === tiebreakerState.tiedUnitIds[tiebreakerState.activeTiedIndex]);
+              const isTiedHuman = currentTiedUnit ? (currentTiedUnit.isOwner && !currentTiedUnit.isCPU) : false;
+
+              if (isTiedHuman) {
+                if (!tiebreakerState.hasRolledCurrentTurn) {
+                  return (
+                    <button
+                      onClick={handleDoTiebreakerRoll}
+                      className="w-full min-h-[46px] py-2 px-3 bg-gradient-to-r from-red-600 via-amber-600 to-red-600 hover:brightness-110 text-white font-black text-sm uppercase tracking-wider rounded-xl shadow-xl border-b-2 border-red-800 transition-all active:scale-98 cursor-pointer flex items-center justify-center gap-2 animate-pulse"
+                    >
+                      <Swords className="w-5 h-5 text-yellow-300" />
+                      <span>🎲 Roll 1 Time For Survival!</span>
+                    </button>
+                  );
+                } else {
+                  return (
+                    <button
+                      onClick={() => handleConfirmTiebreakerRoll()}
+                      className="w-full min-h-[46px] py-2 px-3 bg-[#28974a] hover:bg-[#22803e] text-white font-black text-sm uppercase tracking-wider rounded-xl shadow-xl border-b-2 border-[#185e2e] transition-all active:scale-98 cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <span>Confirm Roll ({tiebreakerState.lastRollTotal} pts) ➔</span>
+                    </button>
+                  );
+                }
+              }
+
+              return (
+                <div className="w-full min-h-[46px] py-2 px-3 bg-black/75 border-2 border-red-500 text-white font-black text-xs sm:text-sm rounded-xl shadow-md flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-yellow-400" />
+                  <span>
+                    {currentTiedUnit?.name} is rolling for survival…
+                    {tiebreakerState.hasRolledCurrentTurn && (
+                      <span className="text-yellow-300 ml-1.5">({tiebreakerState.lastRollTotal} pts)</span>
+                    )}
                   </span>
-                )}
+                </div>
+              );
+            })()}
+          </div>
+        ) : (
+          /* Normal Action Buttons: ROLL, SCORE IT!, and INFO */
+          <div className="flex gap-1.5 sm:gap-2 py-0.5">
+            <button
+              onClick={doRoll}
+              disabled={!canRoll}
+              className={`flex-1 min-h-[42px] sm:min-h-[46px] py-1.5 sm:py-2 px-2 bg-[#28974a] hover:bg-[#22803e] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-1 sm:gap-1.5 border-b-2 border-[#185e2e] ${
+                isTimeRunningOut
+                  ? 'ring-4 ring-yellow-400 ring-offset-2 ring-offset-black/50 animate-pulse bg-red-700 hover:bg-red-800'
+                  : rollsUsed === 0 && isHumanOwner && !isCPU && (joiningCountdown === null || joiningCountdown <= 0)
+                  ? 'ring-2 ring-yellow-300 ring-offset-1 ring-offset-black/40 animate-pulse shadow-[0_0_12px_rgba(242,193,78,0.5)]'
+                  : ''
+              }`}
+            >
+              {joiningCountdown !== null && joiningCountdown > 0 ? (
+                <span>⏳ Waiting for players ({joiningCountdown}s)</span>
+              ) : isRemoteHuman ? (
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-white/80" />
+                  <span>Waiting for {curUnit.name}…</span>
+                  {turnSecondsLeft <= 5 && turnSecondsLeft > 0 && (
+                    <span className="ml-1 bg-yellow-400 text-black text-[10px] md:text-xs font-mono font-black px-1.5 py-0.2 rounded-full">
+                      ⚠️ {turnSecondsLeft}s
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <>
+                  <span>{rollsUsed === 0 ? '🎲 ROLL' : 'Rolls'}</span>
+                  {rollsUsed > 0 && (
+                    <span className="text-[11px] md:text-xs font-mono font-normal opacity-90">
+                      - {Math.max(0, 3 - rollsUsed)} left
+                    </span>
+                  )}
+                  {isTimeRunningOut && (
+                    <span className="ml-1 bg-yellow-400 text-black text-[10px] md:text-xs font-mono font-black px-1.5 py-0.2 rounded-full animate-bounce">
+                      ⚠️ {turnSecondsLeft}s!
+                    </span>
+                  )}
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={bankTurn}
+              disabled={!canScore}
+              className="flex-1 min-h-[42px] sm:min-h-[46px] py-1 sm:py-1.5 px-2 bg-[#e58a1f] hover:bg-[#cb7512] disabled:opacity-40 disabled:pointer-events-none text-white rounded-xl shadow-md transition-transform active:scale-98 flex flex-col items-center justify-center leading-tight border-b-2 border-[#a65d0a]"
+            >
+              <span className="font-black text-xs sm:text-sm tracking-wide">
+                SCORE IT -
               </span>
-            ) : (
-              <>
-                <span>{rollsUsed === 0 ? '🎲 ROLL' : 'Rolls'}</span>
-                {rollsUsed > 0 && (
-                  <span className="text-[11px] md:text-xs font-mono font-normal opacity-90">
-                    - {Math.max(0, 3 - rollsUsed)} left
-                  </span>
-                )}
-                {isTimeRunningOut && (
-                  <span className="ml-1 bg-yellow-400 text-black text-[10px] md:text-xs font-mono font-black px-1.5 py-0.2 rounded-full animate-bounce">
-                    ⚠️ {turnSecondsLeft}s!
-                  </span>
-                )}
-              </>
-            )}
-          </button>
+              <span className="font-normal text-[10px] sm:text-xs text-white/95 leading-none mt-0.5">
+                {scoreResult.total} Points
+              </span>
+            </button>
 
-          <button
-            onClick={bankTurn}
-            disabled={!canScore}
-            className="flex-1 min-h-[42px] sm:min-h-[46px] py-1 sm:py-1.5 px-2 bg-[#e58a1f] hover:bg-[#cb7512] disabled:opacity-40 disabled:pointer-events-none text-white rounded-xl shadow-md transition-transform active:scale-98 flex flex-col items-center justify-center leading-tight border-b-2 border-[#a65d0a]"
-          >
-            <span className="font-black text-xs sm:text-sm tracking-wide">
-              SCORE IT -
-            </span>
-            <span className="font-normal text-[10px] sm:text-xs text-white/95 leading-none mt-0.5">
-              {scoreResult.total} Points
-            </span>
-          </button>
-
-          <button
-            onClick={() => setShowInfoModal(true)}
-            className="py-2 sm:py-2.5 px-3 sm:px-4 bg-[#e8dec0] hover:bg-[#ded1af] text-[#3e2e1e] font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center justify-center border-b-2 border-[#c8bc9a]"
-            title="Game Rules & Scoring Info"
-          >
-            INFO
-          </button>
-        </div>
+            <button
+              onClick={() => setShowInfoModal(true)}
+              className="py-2 sm:py-2.5 px-3 sm:px-4 bg-[#e8dec0] hover:bg-[#ded1af] text-[#3e2e1e] font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center justify-center border-b-2 border-[#c8bc9a]"
+              title="Game Rules & Scoring Info"
+            >
+              INFO
+            </button>
+          </div>
+        )}
 
         {/* Hint tip text */}
         <div className="text-center text-[10px] sm:text-[11px] text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] mt-0.5 font-medium">
@@ -1839,6 +2214,15 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           </div>
         </div>
       )}
+
+      {/* Battle to Survive Theatrical Red Curtain */}
+      <BattleToSurviveCurtain
+        isVisible={tiebreakerState.isActive && (tiebreakerState.phase === 'intro' || tiebreakerState.phase === 'outro')}
+        phase={tiebreakerState.phase}
+        eliminatedPlayerName={tiebreakerState.eliminatedUnit?.name}
+        onIntroComplete={handleTiebreakerIntroComplete}
+        onOutroComplete={handleTiebreakerOutroComplete}
+      />
     </div>
   );
 };

@@ -16,6 +16,8 @@ interface SavedBoardProps {
   warningSecondsLeft?: number | null;
   onTouchScreen?: () => void;
   forcePips?: boolean;
+  colorError?: string | null;
+  eliminationBanner?: string | null;
 }
 
 export const SavedBoard: React.FC<SavedBoardProps> = ({
@@ -28,6 +30,8 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
   warningSecondsLeft,
   onTouchScreen,
   forcePips = false,
+  colorError,
+  eliminationBanner,
 }) => {
   // Group all saved dice by their face value (1..6).
   // This ensures that as dice are tapped in (especially in the companion app),
@@ -301,6 +305,58 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
           </span>
         </div>
       </div>
+
+      {/* Red banner message when a user is eliminated: "[User] has been eliminated!" */}
+      <AnimatePresence>
+        {eliminationBanner && (
+          <motion.div
+            key="elimination-banner-under-labels"
+            initial={{ height: 0, opacity: 0, scaleY: 0.85 }}
+            animate={{ height: 'auto', opacity: 1, scaleY: 1 }}
+            exit={{ height: 0, opacity: 0, scaleY: 0.85 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="overflow-hidden w-full px-1 pb-1 shrink-0"
+          >
+            <div
+              id="elimination-alert-banner"
+              className="bg-gradient-to-r from-red-700 via-rose-600 to-red-700 border-2 border-red-300 rounded-lg sm:rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 flex items-center justify-center shadow-xl text-white gap-2"
+            >
+              <span className="text-xs sm:text-sm font-black tracking-wider uppercase text-yellow-300 drop-shadow-md text-center">
+                ⚔️ {eliminationBanner}
+              </span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Error banner if user inputs more than 6 red or blue dice */}
+      <AnimatePresence>
+        {colorError && (
+          <motion.div
+            key="dice-limit-error-banner"
+            initial={{ height: 0, opacity: 0, scaleY: 0.85 }}
+            animate={{ height: 'auto', opacity: 1, scaleY: 1 }}
+            exit={{ height: 0, opacity: 0, scaleY: 0.85 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="overflow-hidden w-full px-1 pb-1 shrink-0"
+          >
+            <div
+              id="dice-limit-error-banner"
+              className="bg-gradient-to-r from-red-600 via-rose-600 to-red-600 border border-red-300 rounded-lg sm:rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 flex items-center justify-between shadow-lg text-white gap-2"
+            >
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                <AlertTriangle className="w-4 h-4 text-yellow-300 shrink-0 animate-bounce" />
+                <span className="text-[10px] sm:text-xs font-black tracking-wide uppercase drop-shadow-xs truncate">
+                  {colorError}
+                </span>
+              </div>
+              <span className="text-[9px] sm:text-[10px] font-bold bg-black/40 text-yellow-200 px-2 py-0.5 rounded-md border border-yellow-300/40 shrink-0 whitespace-nowrap">
+                Tap die to remove
+              </span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Slide-down 15-second Turn / Idle Warning Bar for Multiplayer Online Games */}
       <AnimatePresence>

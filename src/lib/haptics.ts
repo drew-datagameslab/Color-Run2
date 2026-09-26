@@ -60,9 +60,7 @@ export const triggerCelebrationHaptic = async (): Promise<void> => {
   try {
     await Haptics.notification({ type: NotificationType.Success });
     return;
-  } catch {
-    // Fall through
-  }
+  } catch {}
 
   try {
     if (
@@ -72,7 +70,27 @@ export const triggerCelebrationHaptic = async (): Promise<void> => {
     ) {
       navigator.vibrate([35, 45, 65]);
     }
-  } catch {
-    // Ignore
-  }
+  } catch {}
 };
+
+/**
+ * Tactile vibration feedback when it is the user's turn in Multiplayer,
+ * vs Computer, and Friends Challenge games.
+ */
+export const triggerTurnHaptic = async (): Promise<void> => {
+  try {
+    await Haptics.impact({ style: ImpactStyle.Heavy });
+    return;
+  } catch {}
+
+  try {
+    if (
+      typeof window !== 'undefined' &&
+      typeof navigator !== 'undefined' &&
+      typeof navigator.vibrate === 'function'
+    ) {
+      navigator.vibrate([60, 60, 80]); // Distinctive double-pulse alert
+    }
+  } catch {}
+};
+
