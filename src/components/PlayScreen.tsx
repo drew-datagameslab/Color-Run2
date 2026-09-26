@@ -81,6 +81,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     settings.mode === 'challenge_friend' ||
     Boolean((settings as any).isChallenge);
 
+  // Pass & Play: every human player shares this device and takes their own turns on it
+  const isPassAndPlay = settings.mode === 'pass_and_play';
+  // True for players whose turns are played on this device (never CPU or remote players)
+  const isLocalHuman = (u?: PlayerUnit) => !!u && !u.isCPU && (u.isOwner || isPassAndPlay);
+
   // Multiplayer room detection (no host concept: all players are peers in a shared room)
   // In Friends Challenge, timing rules are identical to Multiplayer Online games.
   const isMultiplayer =
@@ -110,7 +115,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         name: s.name,
         isCPU: isCPU,
         isOwner: isLocalUser,
-        isOnlinePlayer: !isLocalUser && isHuman,
+        isOnlinePlayer: !isLocalUser && isHuman && !isPassAndPlay,
         color: s.color,
         image: s.image,
         diceColors: s.diceColors || (isLocalUser ? userDiceColors : ['blue', 'red']),
@@ -220,7 +225,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   // Queue of active player units
   const activeUnits = units.filter(u => u.active);
   const curUnit = activeUnits[qIdx] || activeUnits[0];
-  const isHumanOwner = curUnit ? (curUnit.isOwner && !curUnit.isCPU) : false;
+  const isHumanOwner = isLocalHuman(curUnit);
   const isRemoteHuman = curUnit ? (!curUnit.isOwner && curUnit.isOnlinePlayer && !curUnit.isCPU) : false;
   const isCPU = curUnit ? (curUnit.isCPU || isAutoPilotTurn) : false;
 
@@ -540,10 +545,10 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         return prev;
       });
 
-      if (curUnit.isOwner && !curUnit.isCPU) {
-        // User turn alert chime & toast alert
+      if (isLocalHuman(curUnit)) {
+        // User turn alert chime & toast alert (Pass & Play names the player to hand the device to)
         playSfx('add');
-        showToast('👉 Your Turn! Tap ROLL');
+        showToast(isPassAndPlay ? `👉 ${curUnit.name}'s Turn! Tap ROLL` : '👉 Your Turn! Tap ROLL');
       }
     }
   }, [curUnit, round, ROLL_1_TIME, userDiceColors]);
@@ -928,7 +933,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const bankTurn = useCallback(() => {
     stopWarningSound();
     if (!curUnit) return;
-    const canAct = (curUnit.isOwner ?? false) || (curUnit.isCPU && isTurnAuthority) || (isRemoteHuman && isTurnAuthority && turnSecondsLeft <= -15);
+    const canAct = isLocalHuman(curUnit) || (curUnit.isCPU && isTurnAuthority) || (isRemoteHuman && isTurnAuthority && turnSecondsLeft <= -15);
     if (!canAct) return;
     if (joiningCountdown !== null && joiningCountdown > 0) return;
 
@@ -1059,7 +1064,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         const [c1, c2] = getUnitDiceColors(liveUnits[0], userDiceColors);
         const nextDice = createInitialDice(c1, c2);
         setDice(nextDice);
-        if (liveUnits[0]?.isOwner && !liveUnits[0]?.isCPU) {
+        if (isLocalHuman(liveUnits[0])) {
           setTurnSecondsLeft(ROLL_1_TIME);
           setIsAutoPilotTurn(false);
         }
@@ -1101,7 +1106,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       const [c1, c2] = getUnitDiceColors(liveUnits[0], userDiceColors);
       const nextDice = createInitialDice(c1, c2);
       setDice(nextDice);
-      if (liveUnits[0]?.isOwner && !liveUnits[0]?.isCPU) {
+      if (isLocalHuman(liveUnits[0])) {
         setTurnSecondsLeft(ROLL_1_TIME);
         setIsAutoPilotTurn(false);
       }
@@ -1209,7 +1214,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     const [c1, c2] = getUnitDiceColors(survivors[0], userDiceColors);
     const nextDice = createInitialDice(c1, c2);
     setDice(nextDice);
-    if (survivors[0]?.isOwner && !survivors[0]?.isCPU) {
+    if (isLocalHuman(survivors[0])) {
       setTurnSecondsLeft(ROLL_1_TIME);
       setIsAutoPilotTurn(false);
     }
@@ -1250,9 +1255,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   // =========================================================================
   const tbNameOf = (unitId: string) => units.find(u => u.id === unitId)?.name || 'Player';
   const tiedCurrentUnit = tiebreaker ? units.find(u => u.id === currentTiedUnitId(tiebreaker)) : undefined;
-  // In Pass & Play every human shares this device, so each rolls here
-  const isTiedLocalHuman =
-    !!tiedCurrentUnit && !tiedCurrentUnit.isCPU && (tiedCurrentUnit.isOwner || settings.mode === 'pass_and_play');
+  const isTiedLocalHuman = isLocalHuman(tiedCurrentUnit);
   const isTiedRemoteHuman = !!tiedCurrentUnit && !tiedCurrentUnit.isCPU && !isTiedLocalHuman;
   // A single device rolls for CPU players so bots never roll twice in room games
   const isTiebreakerAuthority = !isMultiplayer || myToken === turnAuthorityToken;
