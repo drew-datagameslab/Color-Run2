@@ -49,7 +49,10 @@ export interface RoomGameState {
     | 'phase_change'
     | 'tiebreaker_start'
     | 'tiebreaker_roll'
-    | 'tiebreaker_next';
+    | 'tiebreaker_save'
+    | 'tiebreaker_next'
+    | 'tiebreaker_blink'
+    | 'tiebreaker_outro';
   lastActionBy: string; // unitId or uid
   lastActionSessionId?: string; // unique persistent device/browser session ID
   lastActionId?: string;

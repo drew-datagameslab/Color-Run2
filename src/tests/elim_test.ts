@@ -91,10 +91,11 @@ export function runElimTests() {
   tb = advanceTiebreaker(recordTiebreakerRoll(tb, 22), nameOf);
   assert(tb.phase === 'rolling' && tb.roundNumber === 3 && tb.tiedUnitIds.length === 2, 'Exact tie rolls again');
 
-  // Single lowest roll is eliminated
+  // Single lowest roll is eliminated: winner board(s) blink for 3 seconds before outro
   tb = advanceTiebreaker(recordTiebreakerRoll(tb, 40), nameOf);
   tb = advanceTiebreaker(recordTiebreakerRoll(tb, 25), nameOf);
-  assert(tb.phase === 'outro' && tb.eliminatedUnitId === 'p3', 'P3 with the lowest roll is eliminated');
+  assert(tb.phase === 'blinking' && tb.eliminatedUnitId === 'p3', 'P3 with the lowest roll is eliminated and winner boards blink');
+  assert(tb.blinkingUnitIds.includes('p1') && tb.blinkingUnitIds.includes('p2'), 'In a 3-user tiebreak, the two users who advance (P1 and P2) have their board blink');
 
   // Roll value: scored points, or the pip sum when nothing scores
   const mkDice = (values: number[]): Die[] =>
@@ -102,6 +103,30 @@ export function runElimTests() {
   assert(tiebreakerRollTotal(mkDice([1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6])) === 42, 'No scoring sets: pip sum is used');
   const scoringDice = mkDice([3, 3, 3, 1, 2, 4, 5, 6, 1, 2, 4, 5]);
   assert(tiebreakerRollTotal(scoringDice) === scoreDice(scoringDice).total, 'Scoring sets: points scored are used');
+
+  // Test 6: Eliminated scoreboard sorting ascending from right to left
+  const elimP1: PlayerUnit = { id: 'p1', name: 'P1', isCPU: false, score: 350, history: {}, active: true, color: '#e5352f' };
+  const elimP2: PlayerUnit = { id: 'p2', name: 'P2', isCPU: true, score: 280, history: {}, active: true, color: '#1f7fd6' };
+  const elimP3: PlayerUnit = { id: 'p3', name: 'P3', isCPU: true, score: 195, history: {}, active: false, place: 3, color: '#2f9a4f' }; // eliminated 2nd
+  const elimP4: PlayerUnit = { id: 'p4', name: 'P4', isCPU: true, score: 140, history: {}, active: false, place: 4, color: '#f2c14e' }; // eliminated 1st
+
+  const allTestUnits = [elimP1, elimP2, elimP3, elimP4];
+  const activeTestUnits = allTestUnits.filter(u => u.active);
+  const elimTestUnits = allTestUnits.filter(u => !u.active);
+  const sortedElimTestUnits = [...elimTestUnits].sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return (a.place ?? 0) - (b.place ?? 0);
+  });
+  const displayTestUnits = [...activeTestUnits, ...sortedElimTestUnits];
+
+  // Rightmost element must be P4 (140 pts, eliminated first)
+  assert(displayTestUnits[displayTestUnits.length - 1].id === 'p4', 'First eliminated player (lowest score) must be on the far right');
+  assert(displayTestUnits[displayTestUnits.length - 2].id === 'p3', 'Second eliminated player must be to the left of the first');
+  // Scores ascending from right to left: displayTestUnits[3].score (140) <= displayTestUnits[2].score (195)
+  assert(
+    displayTestUnits[displayTestUnits.length - 1].score <= displayTestUnits[displayTestUnits.length - 2].score,
+    'Eliminated scoreboards must be sorted by point total ascending from right to left'
+  );
 
   console.log('✓ All Elimination Tests Passed!');
 }

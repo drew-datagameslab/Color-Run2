@@ -74,17 +74,23 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
   // Tiebreaker State for Companion Scoreboard
   const [tiebreaker, setTiebreaker] = useState<{
     isActive: boolean;
-    phase: 'intro' | 'rolling' | 'outro' | null;
+    phase: 'intro' | 'rolling' | 'blinking' | 'outro' | null;
+    initialTiedUnitIds: string[];
     tiedUnitIds: string[];
     currentRollScores: Record<string, number>;
+    advancedUnitIds: string[];
+    blinkingUnitIds: string[];
     eliminatedUnit: PlayerUnit | null;
     roundNumber: number;
     noticeMsg: string | null;
   }>({
     isActive: false,
     phase: null,
+    initialTiedUnitIds: [],
     tiedUnitIds: [],
     currentRollScores: {},
+    advancedUnitIds: [],
+    blinkingUnitIds: [],
     eliminatedUnit: null,
     roundNumber: 1,
     noticeMsg: null,
@@ -545,12 +551,16 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
       const tiedForLowest = activeUnits.filter(u => u.score === minScore);
 
       if (participating.length > 0) {
+        const tiedIds = participating.map(u => u.id);
         setUnits(updatedUnits);
         setTiebreaker({
           isActive: true,
           phase: 'intro',
-          tiedUnitIds: participating.map(u => u.id),
+          initialTiedUnitIds: tiedIds,
+          tiedUnitIds: tiedIds,
           currentRollScores: {},
+          advancedUnitIds: [],
+          blinkingUnitIds: [],
           eliminatedUnit: null,
           roundNumber: 1,
           noticeMsg: null,
@@ -615,8 +625,11 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
     setTiebreaker({
       isActive: false,
       phase: null,
+      initialTiedUnitIds: [],
       tiedUnitIds: [],
       currentRollScores: {},
+      advancedUnitIds: [],
+      blinkingUnitIds: [],
       eliminatedUnit: null,
       roundNumber: 1,
       noticeMsg: null,
@@ -660,26 +673,43 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
 
     // Same roll-off rules as the app game (src/lib/tiebreaker.ts)
     const next = resolveTiebreakerRound(
-      { ...startTiebreaker(tiebreaker.tiedUnitIds), roundNumber: tiebreaker.roundNumber },
+      {
+        ...startTiebreaker(tiebreaker.tiedUnitIds),
+        initialTiedUnitIds: tiebreaker.initialTiedUnitIds,
+        advancedUnitIds: tiebreaker.advancedUnitIds,
+        roundNumber: tiebreaker.roundNumber,
+      },
       scores,
       id => units.find(u => u.id === id)?.name || 'Player'
     );
 
-    if (next.phase === 'outro') {
-      // Single lowest player is eliminated!
+    if (next.phase === 'blinking') {
+      // Single lowest player is eliminated! The winner(s) board blinks for 3 seconds
       setTiebreaker(prev => ({
         ...prev,
-        phase: 'outro',
+        phase: 'blinking',
+        blinkingUnitIds: next.blinkingUnitIds,
         eliminatedUnit: units.find(u => u.id === next.eliminatedUnitId) || null,
       }));
-      stopBattleMusic();
+      playSfx('fanfare');
+
+      setTimeout(() => {
+        setTiebreaker(prev => ({
+          ...prev,
+          phase: 'outro',
+        }));
+        stopBattleMusic();
+      }, 3000);
       return;
     }
 
-    // Higher rolls advance; players still tied for lowest roll again
+    // Higher rolls advance (show ADVANCE); players still tied for lowest roll again
     setTiebreaker(prev => ({
       ...prev,
+      phase: 'rolling',
       tiedUnitIds: next.tiedUnitIds,
+      advancedUnitIds: next.advancedUnitIds,
+      blinkingUnitIds: next.blinkingUnitIds,
       currentRollScores: {},
       roundNumber: next.roundNumber,
       noticeMsg: next.noticeMsg,
@@ -746,8 +776,27 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
       )}
 
       {/* TIEBREAKER ACTIVE ARENA: SHOW ONLY THE PLAYERS INVOLVED IN TIEBREAKER */}
-      {tiebreaker.isActive && tiebreaker.phase === 'rolling' ? (
+      {tiebreaker.isActive && (tiebreaker.phase === 'rolling' || tiebreaker.phase === 'blinking') ? (
         <div className="flex-1 flex flex-col justify-between min-h-0 bg-[#2b0808]/90 border-2 border-red-500 rounded-2xl p-2.5 sm:p-3 shadow-2xl text-white my-1 overflow-y-auto">
+          {/* Boards Strip at the Top showing TIEBREAKER scores */}
+          <div className="w-full mb-1.5 shrink-0">
+            <CardsStrip
+              units={units.filter(u =>
+                tiebreaker.initialTiedUnitIds?.includes(u.id) ||
+                tiebreaker.tiedUnitIds.includes(u.id) ||
+                tiebreaker.advancedUnitIds?.includes(u.id)
+              )}
+              activeUnitId={tiebreaker.tiedUnitIds[0]}
+              currentRound={currentRound}
+              isEliminationPhase={isEliminationPhase}
+              onSelectUnit={handleSelectPlayerBoard}
+              isTiebreakerActive={true}
+              tiebreakerScores={tiebreaker.currentRollScores}
+              tiebreakerAdvancedIds={tiebreaker.advancedUnitIds}
+              blinkingUnitIds={tiebreaker.blinkingUnitIds}
+            />
+          </div>
+
           <div className="flex flex-col items-center text-center mb-2">
             <BattleToSurviveGraphic size="sm" className="mb-1" />
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-600/60 border border-yellow-400 text-yellow-300 font-black text-xs uppercase tracking-wider shadow-md">
@@ -755,7 +804,7 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
               <span>Roll-Off Round {tiebreaker.roundNumber}</span>
             </div>
             <p className="text-[11px] text-stone-200 mt-1 font-bold">
-              Each tied player rolls one time on the tabletop. Enter their scores below:
+              Each tied player rolls a normal turn (3 rolls to build and match for the best outcome) on the tabletop. Enter their scores below:
             </p>
             {tiebreaker.noticeMsg && (
               <div className="mt-1 px-3 py-1 bg-yellow-400 text-stone-900 font-black text-xs rounded-lg shadow-md animate-bounce">
@@ -790,10 +839,10 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
                     </div>
                   </div>
 
-                  {/* Input for single roll total */}
+                  {/* Input for turn score */}
                   <div className="flex items-center gap-1.5 shrink-0">
                     <span className="text-[10px] sm:text-xs font-bold text-yellow-300 uppercase">
-                      Roll Score:
+                      Turn Score:
                     </span>
                     <input
                       type="number"
@@ -815,7 +864,7 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
             className="w-full py-3 bg-gradient-to-r from-red-600 via-amber-600 to-red-600 hover:brightness-110 text-white font-black text-sm uppercase tracking-wider rounded-xl shadow-xl border-b-4 border-red-800 transition-all active:scale-98 cursor-pointer flex items-center justify-center gap-2"
           >
             <Swords className="w-4 h-4 text-yellow-300" />
-            <span>Resolve Roll-Off Results</span>
+            <span>SCORE IT & RESOLVE</span>
           </button>
         </div>
       ) : (
@@ -828,6 +877,10 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
               currentRound={currentRound}
               isEliminationPhase={isEliminationPhase}
               onSelectUnit={handleSelectPlayerBoard}
+              isTiebreakerActive={tiebreaker.isActive}
+              tiebreakerScores={tiebreaker.currentRollScores}
+              tiebreakerAdvancedIds={tiebreaker.advancedUnitIds}
+              blinkingUnitIds={tiebreaker.blinkingUnitIds}
             />
           </div>
 

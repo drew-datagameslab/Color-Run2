@@ -306,3 +306,25 @@
   }
 }
 
+/* ----------------------------------------------------
+   TIEBREAKER WINNER / ADVANCING BOARD BLINK ANIMATION
+   ---------------------------------------------------- */
+@keyframes tiebreakerWinnerBlink {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1.04);
+    box-shadow: 0 0 24px rgba(250, 204, 21, 0.95), inset 0 0 12px rgba(250, 204, 21, 0.6);
+    filter: brightness(1.25);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.97);
+    box-shadow: 0 0 6px rgba(250, 204, 21, 0.2);
+    filter: brightness(0.85);
+  }
+}
+.animate-tiebreaker-blink {
+  animation: tiebreakerWinnerBlink 0.5s ease-in-out infinite !important;
+}
+
+

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { DiceColor, Die, GamePhase, GameSettings, PlayerUnit, ScoreResult, UserAccount, Friend } from '../types/game';
 import { scoreDice } from '../lib/scoring';
 import { decideCPUSaves } from '../lib/cpu';
-import { TiebreakerState, findLowestTie, startTiebreaker, tiebreakerRollTotal, currentTiedUnitId, recordTiebreakerRoll, advanceTiebreaker } from '../lib/tiebreaker';
+import { TiebreakerState, findLowestTie, startTiebreaker, tiebreakerRollTotal, currentTiedUnitId, recordTiebreakerRoll, advanceTiebreaker, resolveTiebreakerRound } from '../lib/tiebreaker';
 import { playSfx, playWarning5sSound, stopWarningSound, playEliminatedSound, startBattleMusic, stopBattleMusic } from '../lib/audio';
 import { triggerTurnHaptic } from '../lib/haptics';
 import { getLocalFriends, addFriend, removeFriend } from '../lib/friends';
@@ -229,6 +229,15 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const isRemoteHuman = curUnit ? (!curUnit.isOwner && curUnit.isOnlinePlayer && !curUnit.isCPU) : false;
   const isCPU = curUnit ? (curUnit.isCPU || isAutoPilotTurn) : false;
 
+  const tiedCurrentUnit = tiebreaker ? units.find(u => u.id === currentTiedUnitId(tiebreaker)) : undefined;
+  const isTiedLocalHuman = isLocalHuman(tiedCurrentUnit);
+  const isTiedRemoteHuman = !!tiedCurrentUnit && !tiedCurrentUnit.isCPU && !isTiedLocalHuman;
+
+  const isEffectiveHuman = tbActive ? isTiedLocalHuman : isHumanOwner;
+  const isEffectiveCPU = tbActive ? !!tiedCurrentUnit?.isCPU : isCPU;
+  const isEffectiveRemote = tbActive ? isTiedRemoteHuman : isRemoteHuman;
+  const effectivePlayerName = (tbActive ? tiedCurrentUnit?.name : curUnit?.name) || 'Player';
+
   const humanUnits = units.filter(u => !u.isCPU && (u.isOwner || u.isOnlinePlayer));
   const mySessionId = getClientSessionId();
   const sortedHumanTokens = humanUnits.map(u => u.sessionId || u.uid).filter(Boolean).sort() as string[];
@@ -244,6 +253,39 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     !isMultiplayer ||
     myToken === turnAuthorityToken ||
     (isRemoteHuman && myToken === fallbackAuthorityToken);
+
+  const tbNameOf = (unitId: string) => units.find(u => u.id === unitId)?.name || 'Player';
+  const isTiebreakerAuthority = !isMultiplayer || myToken === turnAuthorityToken;
+  const tbTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => {
+    return () => tbTimersRef.current.forEach(clearTimeout);
+  }, []);
+
+  const freshDiceFor = (unitId: string | undefined): Die[] | null => {
+    const unit = units.find(u => u.id === unitId);
+    if (!unit) return null;
+    const [c1, c2] = getUnitDiceColors(unit, userDiceColors);
+    return createInitialDice(c1, c2);
+  };
+
+  const publishTiebreaker = (
+    lastAction: 'tiebreaker_start' | 'tiebreaker_roll' | 'tiebreaker_save' | 'tiebreaker_next' | 'tiebreaker_blink' | 'tiebreaker_outro',
+    state: TiebreakerState,
+    tbDice: Die[] | null,
+    extra: Partial<RoomGameState> = {}
+  ) => {
+    if (!settings.roomId) return;
+    updateRoomGameState(settings.roomId, {
+      ...extra,
+      ...(tbDice ? { dice: tbDice } : {}),
+      rollsUsed: 0,
+      tiebreaker: state,
+      lastAction,
+      lastActionBy: user.uid,
+      actionTimestamp: Date.now(),
+    });
+  };
 
   // Timers are added to keep games moving in online rooms and friends challenges.
   // When the user is only playing against computer players (Play vs Computer rooms), no timers are needed.
@@ -283,14 +325,44 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     };
   }, []);
 
-  // Vibration when it is the user's turn in Multiplayer, vs Computer and Friends Challenge games
-  const prevIsHumanOwnerRef = useRef(false);
+  // Vibration when it is the user's turn in Multiplayer, vs CPU, and Friends Challenge games
+  const isVibrationEligibleMode =
+    settings.mode === 'online' ||
+    settings.mode === 'cpu' ||
+    settings.mode === 'challenge' ||
+    settings.mode === 'challenge_friend' ||
+    isMultiplayer ||
+    isFriendsChallenge;
+
+  const isUserTurnToRoll =
+    !tbActive &&
+    isHumanOwner &&
+    !isAutoPilotTurn &&
+    (joiningCountdown === null || joiningCountdown <= 0) &&
+    phase !== 'over';
+
+  const isUserTiebreakerTurn =
+    tbActive &&
+    tiebreaker?.phase === 'rolling' &&
+    isTiedLocalHuman &&
+    rollsUsed === 0;
+
+  const isUserTurn = isVibrationEligibleMode && (isUserTurnToRoll || isUserTiebreakerTurn);
+
+  const activeTurnId = isUserTiebreakerTurn
+    ? `tb-${tiedCurrentUnit?.id}-r${tiebreaker?.roundNumber}-i${tiebreaker?.activeTiedIndex}`
+    : isUserTurnToRoll
+    ? `turn-${curUnit?.id}-r${round}-q${qIdx}`
+    : null;
+
+  const lastVibratedTurnRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (isHumanOwner && !prevIsHumanOwnerRef.current && phase !== 'over') {
+    if (isUserTurn && activeTurnId && lastVibratedTurnRef.current !== activeTurnId) {
+      lastVibratedTurnRef.current = activeTurnId;
       triggerTurnHaptic();
     }
-    prevIsHumanOwnerRef.current = isHumanOwner;
-  }, [isHumanOwner, curUnit?.id, phase]);
+  }, [isUserTurn, activeTurnId]);
 
   const handleDismissSixCelebration = useCallback(() => {
     setShowSixCelebration(false);
@@ -479,11 +551,9 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             if (typeof gs.rollsUsed === 'number') setRollsUsed(gs.rollsUsed);
             checkBonusChimes(gs.dice);
           } else if (
-            gs.lastAction === 'tiebreaker_start' ||
-            gs.lastAction === 'tiebreaker_roll' ||
-            gs.lastAction === 'tiebreaker_next'
+            gs.lastAction?.startsWith('tiebreaker')
           ) {
-            // Battle to Survive roll-off started, rolled or advanced on another device
+            // Battle to Survive tiebreaker event on another device
             applyRemoteTiebreakerRef.current(gs.lastAction, gs.tiebreaker, gs.dice);
           } else if (gs.lastAction === 'bank' || gs.lastAction === 'elimination' || gs.lastAction === 'phase_change') {
             if (rollAnimTimeoutRef.current) {
@@ -570,11 +640,11 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     }
 
     // Play 5-second countdown warning audio when timer reaches 5 seconds (only for local human player)
-    if (turnSecondsLeft === 5 && isHumanOwner) {
+    if (turnSecondsLeft === 5 && isEffectiveHuman) {
       playWarning5sSound();
     }
 
-    if (isHumanOwner && turnSecondsLeft <= 0) {
+    if (isEffectiveHuman && turnSecondsLeft <= 0) {
       stopWarningSound();
       // User turn time ran out - auto-roll or score for this roll to keep match moving
       const active = dice.filter(d => d.zone === 'active');
@@ -586,7 +656,8 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       return;
     }
 
-    if (isRemoteHuman && isTurnAuthority && turnSecondsLeft <= -15) {
+    const isCurrentAuthority = tbActive ? isTiebreakerAuthority : isTurnAuthority;
+    if (isEffectiveRemote && isCurrentAuthority && turnSecondsLeft <= -15) {
       stopWarningSound();
       // Remote human had 15 seconds of network grace beyond their full turn time with no response!
       // Turn authority executes a single roll/bank to keep the room progressing,
@@ -723,19 +794,31 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     });
 
     // Broadcast roll to peers immediately when the roll starts so all devices animate in sync
-    if (settings.roomId && (isHumanOwner || (isCPU && isTurnAuthority))) {
-      updateRoomGameState(settings.roomId, {
-        round,
-        phase,
-        activeUnitIndex: qIdx,
-        activeUnitId: curUnit.id,
-        rollsUsed: nextRoll,
-        dice: finalDice,
-        rollSlotsCount: newSlots,
-        lastAction: 'roll',
-        lastActionBy: user.uid,
-        actionTimestamp: Date.now(),
-      });
+    if (settings.roomId && (isEffectiveHuman || (isEffectiveCPU && (tbActive ? isTiebreakerAuthority : isTurnAuthority)))) {
+      if (tbActive && tiebreaker) {
+        updateRoomGameState(settings.roomId, {
+          rollsUsed: nextRoll,
+          dice: finalDice,
+          rollSlotsCount: newSlots,
+          tiebreaker: tiebreakerRef.current,
+          lastAction: 'tiebreaker_roll',
+          lastActionBy: user.uid,
+          actionTimestamp: Date.now(),
+        });
+      } else if (isHumanOwner || (isCPU && isTurnAuthority)) {
+        updateRoomGameState(settings.roomId, {
+          round,
+          phase,
+          activeUnitIndex: qIdx,
+          activeUnitId: curUnit.id,
+          rollsUsed: nextRoll,
+          dice: finalDice,
+          rollSlotsCount: newSlots,
+          lastAction: 'roll',
+          lastActionBy: user.uid,
+          actionTimestamp: Date.now(),
+        });
+      }
     }
 
     setIsRolling(true);
@@ -765,7 +848,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       setRollsUsed(nextRoll);
 
       // Human player gets time for rolls 2 & 3 (20s in multiplayer, 10s otherwise)
-      if (isHumanOwner && !isCPU) {
+      if (isEffectiveHuman && !isEffectiveCPU) {
         setTurnSecondsLeft(ROLL_2_3_TIME);
       }
       setIsRolling(false);
@@ -775,12 +858,13 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   // Tapping active die: moves matching set to saved area.
   // Stops warning sound immediately, resets timer, and leaves original slot space blank in rolling area!
   const handleTapActive = (id: number) => {
-    if (!isHumanOwner || isCPU || rollsUsed === 0 || isRolling) return;
+    if (!isEffectiveHuman || isEffectiveCPU || rollsUsed === 0 || isRolling) return;
     if (joiningCountdown !== null && joiningCountdown > 0) return;
+    if (tbActive && tiebreaker?.phase !== 'rolling') return;
 
     // Stop warning sound immediately and reset turn timer when user moves dice!
     stopWarningSound();
-    if (isHumanOwner && !isCPU) {
+    if (isEffectiveHuman && !isEffectiveCPU) {
       setTurnSecondsLeft(rollsUsed === 0 ? ROLL_1_TIME : ROLL_2_3_TIME);
     }
 
@@ -813,18 +897,29 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       });
       setDice(finalized);
       checkBonusChimes(finalized);
-      if (settings.roomId && isHumanOwner) {
-        updateRoomGameState(settings.roomId, {
-          round,
-          phase,
-          activeUnitIndex: qIdx,
-          activeUnitId: curUnit.id,
-          rollsUsed,
-          dice: finalized,
-          lastAction: 'save_dice',
-          lastActionBy: user.uid,
-          actionTimestamp: Date.now(),
-        });
+      if (settings.roomId && (isEffectiveHuman || (isEffectiveCPU && (tbActive ? isTiebreakerAuthority : isTurnAuthority)))) {
+        if (tbActive && tiebreaker) {
+          updateRoomGameState(settings.roomId, {
+            dice: finalized,
+            rollsUsed,
+            tiebreaker: tiebreakerRef.current,
+            lastAction: 'tiebreaker_save',
+            lastActionBy: user.uid,
+            actionTimestamp: Date.now(),
+          });
+        } else if (isHumanOwner || (isCPU && isTurnAuthority)) {
+          updateRoomGameState(settings.roomId, {
+            round,
+            phase,
+            activeUnitIndex: qIdx,
+            activeUnitId: curUnit.id,
+            rollsUsed,
+            dice: finalized,
+            lastAction: 'save_dice',
+            lastActionBy: user.uid,
+            actionTimestamp: Date.now(),
+          });
+        }
       }
     } else {
       setDice(updated);
@@ -833,12 +928,13 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
   // Tapping saved die sends it back to active area into a vacant slot. Resets timer & stops warning sound!
   const handleTapSaved = (id: number) => {
-    if (!isHumanOwner || isCPU || isRolling) return;
+    if (!isEffectiveHuman || isEffectiveCPU || isRolling) return;
     if (joiningCountdown !== null && joiningCountdown > 0) return;
+    if (tbActive && tiebreaker?.phase !== 'rolling') return;
 
     // Stop warning sound immediately and reset turn timer when user moves dice!
     stopWarningSound();
-    if (isHumanOwner && !isCPU) {
+    if (isEffectiveHuman && !isEffectiveCPU) {
       setTurnSecondsLeft(rollsUsed === 0 ? ROLL_1_TIME : ROLL_2_3_TIME);
     }
 
@@ -883,18 +979,29 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
     setDice(result);
 
-    if (settings.roomId && isHumanOwner) {
-      updateRoomGameState(settings.roomId, {
-        round,
-        phase,
-        activeUnitIndex: qIdx,
-        activeUnitId: curUnit.id,
-        rollsUsed,
-        dice: result,
-        lastAction: 'save_dice',
-        lastActionBy: user.uid,
-        actionTimestamp: Date.now(),
-      });
+    if (settings.roomId && (isEffectiveHuman || (isEffectiveCPU && (tbActive ? isTiebreakerAuthority : isTurnAuthority)))) {
+      if (tbActive && tiebreaker) {
+        updateRoomGameState(settings.roomId, {
+          dice: result,
+          rollsUsed,
+          tiebreaker: tiebreakerRef.current,
+          lastAction: 'tiebreaker_save',
+          lastActionBy: user.uid,
+          actionTimestamp: Date.now(),
+        });
+      } else if (isHumanOwner || (isCPU && isTurnAuthority)) {
+        updateRoomGameState(settings.roomId, {
+          round,
+          phase,
+          activeUnitIndex: qIdx,
+          activeUnitId: curUnit.id,
+          rollsUsed,
+          dice: result,
+          lastAction: 'save_dice',
+          lastActionBy: user.uid,
+          actionTimestamp: Date.now(),
+        });
+      }
     }
   };
 
@@ -915,10 +1022,14 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   // Next Turn or Round Resolution
   const bankTurn = useCallback(() => {
     stopWarningSound();
-    if (!curUnit) return;
-    const canAct = isLocalHuman(curUnit) || (curUnit.isCPU && isTurnAuthority) || (isRemoteHuman && isTurnAuthority && turnSecondsLeft <= -15);
+    const activePlayer = tbActive ? tiedCurrentUnit : curUnit;
+    if (!activePlayer) return;
+    const canAct = tbActive
+      ? (isTiedLocalHuman || (tiedCurrentUnit?.isCPU && isTiebreakerAuthority) || (isTiedRemoteHuman && isTiebreakerAuthority && turnSecondsLeft <= -15))
+      : (isLocalHuman(curUnit) || (curUnit.isCPU && isTurnAuthority) || (isRemoteHuman && isTurnAuthority && turnSecondsLeft <= -15));
     if (!canAct) return;
     if (joiningCountdown !== null && joiningCountdown > 0) return;
+    if (tbActive && tiebreaker?.phase !== 'rolling') return;
 
     // Automatically commit any full sets remaining in active dice before banking
     let curDice = [...dice];
@@ -953,6 +1064,85 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     const currentSaved = curDice.filter(d => d.zone === 'saved');
     const finalScore = scoreDice(currentSaved);
     playSfx('add');
+
+    // === TIEBREAKER TURN RESOLUTION ===
+    if (tbActive && tiebreaker && tiebreaker.phase === 'rolling' && tiedCurrentUnit) {
+      const tb = tiebreaker;
+      const turnTotal = finalScore.total > 0 ? finalScore.total : curDice.reduce((acc, d) => acc + d.value, 0);
+
+      setRollsUsed(0);
+      setAnnouncedChimes({});
+      setShowSixCelebration(false);
+
+      const nextRollScores = {
+        ...tb.rollScores,
+        [tiedCurrentUnit.id]: turnTotal,
+      };
+
+      const nextTiedIdx = tb.activeTiedIndex + 1;
+      if (nextTiedIdx < tb.tiedUnitIds.length) {
+        // Next tied player in this tiebreak round takes their normal turn!
+        const nextTargetUnitId = tb.tiedUnitIds[nextTiedIdx];
+        const nextDiceForTurn = freshDiceFor(nextTargetUnitId) || createInitialDice(settings.colorA, settings.colorB);
+        const nextTb: TiebreakerState = {
+          ...tb,
+          activeTiedIndex: nextTiedIdx,
+          rollScores: nextRollScores,
+          lastRollTotal: turnTotal,
+        };
+
+        setDice(nextDiceForTurn);
+        setTurnSecondsLeft(ROLL_1_TIME);
+        setIsAutoPilotTurn(false);
+        setTiebreaker(nextTb);
+
+        publishTiebreaker('tiebreaker_next', nextTb, nextDiceForTurn);
+      } else {
+        // Final player in the tiebreak hits "SCORE IT"!
+        const resolved = resolveTiebreakerRound(tb, nextRollScores, tbNameOf);
+
+        if (resolved.phase === 'blinking') {
+          // Winner's board (or two advancing boards in 3-player) will blink for 3 seconds!
+          const blinkingTb: TiebreakerState = {
+            ...resolved,
+            phase: 'blinking',
+            rollScores: nextRollScores,
+          };
+          setTiebreaker(blinkingTb);
+          publishTiebreaker('tiebreaker_blink', blinkingTb, null);
+          playSfx('fanfare');
+
+          // Winner's board blinks for 3 seconds, then closing animation appears!
+          const blinkTimer = setTimeout(() => {
+            const outroTb: TiebreakerState = {
+              ...blinkingTb,
+              phase: 'outro',
+            };
+            isTiebreakerDriverRef.current = true;
+            setTiebreaker(outroTb);
+            stopBattleMusic();
+            publishTiebreaker('tiebreaker_outro', outroTb, null);
+          }, 3000);
+          tbTimersRef.current.push(blinkTimer);
+        } else {
+          // If 3-player tiebreak and 1 user scored most while others tied again:
+          // The user who scored most shows "ADVANCE" under the score while the other users roll again.
+          // The score from round one goes back to zero for the two remaining users, who roll again.
+          // Or if all tied again: scores go back to zero and they roll again.
+          const nextTargetUnitId = currentTiedUnitId(resolved);
+          const nextDiceForTurn = freshDiceFor(nextTargetUnitId) || createInitialDice(settings.colorA, settings.colorB);
+
+          setDice(nextDiceForTurn);
+          setTurnSecondsLeft(ROLL_1_TIME);
+          setIsAutoPilotTurn(false);
+          setTiebreaker(resolved);
+          playSfx('s3');
+
+          publishTiebreaker('tiebreaker_next', resolved, nextDiceForTurn);
+        }
+      }
+      return;
+    }
 
     // Update player score & history
     const updatedUnits = units.map(u => {
@@ -1022,7 +1212,31 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     } else {
       finishBank();
     }
-  }, [curUnit, dice, qIdx, round, phase, settings.colorA, settings.colorB, units, userDiceColors, checkBonusChimes, showSixCelebration, isTurnAuthority]);
+  }, [
+    curUnit,
+    dice,
+    qIdx,
+    round,
+    phase,
+    settings.colorA,
+    settings.colorB,
+    units,
+    userDiceColors,
+    checkBonusChimes,
+    showSixCelebration,
+    isTurnAuthority,
+    tbActive,
+    tiebreaker,
+    tiedCurrentUnit,
+    isTiedLocalHuman,
+    isTiedRemoteHuman,
+    isTiebreakerAuthority,
+    turnSecondsLeft,
+    joiningCountdown,
+    tbNameOf,
+    freshDiceFor,
+    publishTiebreaker,
+  ]);
 
   doRollRef.current = doRoll;
   bankTurnRef.current = bankTurn;
@@ -1230,49 +1444,6 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     }
   };
 
-  // =========================================================================
-  // Battle to Survive Roll-Off Tiebreaker
-  // Every device runs the video and roll-off from the same shared state. The device whose
-  // player rolls (or the turn authority, for CPU players and timed-out remote players)
-  // performs the roll and publishes it; everyone else animates the published dice.
-  // =========================================================================
-  const tbNameOf = (unitId: string) => units.find(u => u.id === unitId)?.name || 'Player';
-  const tiedCurrentUnit = tiebreaker ? units.find(u => u.id === currentTiedUnitId(tiebreaker)) : undefined;
-  const isTiedLocalHuman = isLocalHuman(tiedCurrentUnit);
-  const isTiedRemoteHuman = !!tiedCurrentUnit && !tiedCurrentUnit.isCPU && !isTiedLocalHuman;
-  // A single device rolls for CPU players so bots never roll twice in room games
-  const isTiebreakerAuthority = !isMultiplayer || myToken === turnAuthorityToken;
-  const tbTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-
-  useEffect(() => {
-    return () => tbTimersRef.current.forEach(clearTimeout);
-  }, []);
-
-  const freshDiceFor = (unitId: string | undefined): Die[] | null => {
-    const unit = units.find(u => u.id === unitId);
-    if (!unit) return null;
-    const [c1, c2] = getUnitDiceColors(unit, userDiceColors);
-    return createInitialDice(c1, c2);
-  };
-
-  const publishTiebreaker = (
-    lastAction: 'tiebreaker_start' | 'tiebreaker_roll' | 'tiebreaker_next',
-    state: TiebreakerState,
-    tbDice: Die[] | null,
-    extra: Partial<RoomGameState> = {}
-  ) => {
-    if (!settings.roomId) return;
-    updateRoomGameState(settings.roomId, {
-      ...extra,
-      ...(tbDice ? { dice: tbDice } : {}),
-      rollsUsed: 0,
-      tiebreaker: state,
-      lastAction,
-      lastActionBy: user.uid,
-      actionTimestamp: Date.now(),
-    });
-  };
-
   // Applies a new roll-off state on this device: music, sounds and fresh dice for the next roller
   const showTiebreakerState = (next: TiebreakerState, prev: TiebreakerState | null) => {
     if (!prev) startBattleMusic();
@@ -1281,72 +1452,33 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     } else if (prev && next.roundNumber > prev.roundNumber) {
       playSfx('s3');
     }
-    if (next.phase !== 'outro' && next.lastRollTotal === null) {
+    if (next.phase !== 'outro') {
       const nextDice = freshDiceFor(currentTiedUnitId(next));
       if (nextDice) setDice(nextDice);
     }
     setTiebreaker(next);
   };
 
-  // Tumble animation matching a normal game roll, then lands on the final dice
-  const animateTiebreakerRoll = (finalDice: Die[], onDone: () => void) => {
-    setDice(finalDice);
-    setRollSlotsCount(12);
-    setIsRolling(true);
-    const doneTimer = setTimeout(() => {
-      setDice(finalDice);
-      setIsRolling(false);
-      onDone();
-    }, 1100);
-    tbTimersRef.current.push(doneTimer);
-  };
-
   const beginTiebreaker = (currentUnits: PlayerUnit[], tiedIds: string[]) => {
     const state = startTiebreaker(tiedIds);
     isTiebreakerDriverRef.current = false;
     setRollsUsed(0);
+    setRollSlotsCount(12);
+    const initialDice = freshDiceFor(tiedIds[0]) || createInitialDice(settings.colorA, settings.colorB);
+    setDice(initialDice);
     showTiebreakerState(state, null);
-    publishTiebreaker('tiebreaker_start', state, freshDiceFor(tiedIds[0]), {
+    publishTiebreaker('tiebreaker_start', state, initialDice, {
       unitStatus: buildUnitStatusRecord(currentUnits),
     });
   };
 
   const handleTiebreakerIntroComplete = () => {
-    // The video raises after 2s to reveal the roll-off (each device times its own intro)
+    // The video raises after 4s to reveal the roll-off (each device times its own intro)
     setTiebreaker(tb => (tb && tb.phase === 'intro' ? { ...tb, phase: 'rolling' } : tb));
+    setRollsUsed(0);
+    setRollSlotsCount(12);
+    setTurnSecondsLeft(ROLL_1_TIME);
   };
-
-  // Rolls all 12 dice one time for the current tied player
-  const performTiebreakerRoll = () => {
-    const tb = tiebreakerRef.current;
-    if (!tb || tb.phase === 'outro' || tb.lastRollTotal !== null || isRolling) return;
-    const unit = units.find(u => u.id === currentTiedUnitId(tb));
-    if (!unit) return;
-
-    const rolling: TiebreakerState = { ...tb, phase: 'rolling' };
-    const [c1, c2] = getUnitDiceColors(unit, userDiceColors);
-    const finalDice = createInitialDice(c1, c2).map(d => ({
-      ...d,
-      value: Math.floor(Math.random() * 6) + 1,
-    }));
-    const rolled = recordTiebreakerRoll(rolling, tiebreakerRollTotal(finalDice));
-
-    publishTiebreaker('tiebreaker_roll', rolled, finalDice);
-    setTiebreaker(rolling);
-    animateTiebreakerRoll(finalDice, () => {
-      setTiebreaker(rolled);
-      // Show the roll's points for 2 seconds, then move on to the next player
-      const nextTimer = setTimeout(() => {
-        const advanced = advanceTiebreaker(rolled, tbNameOf);
-        if (advanced.phase === 'outro') isTiebreakerDriverRef.current = true;
-        showTiebreakerState(advanced, rolled);
-        publishTiebreaker('tiebreaker_next', advanced, freshDiceFor(currentTiedUnitId(advanced)));
-      }, 2000);
-      tbTimersRef.current.push(nextTimer);
-    });
-  };
-  const performTiebreakerRollRef = useRef(performTiebreakerRoll);
-  performTiebreakerRollRef.current = performTiebreakerRoll;
 
   // Roll-off state published by another device
   const applyRemoteTiebreaker = (
@@ -1359,8 +1491,26 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     isTiebreakerDriverRef.current = false;
     if (lastAction === 'tiebreaker_roll' && remoteDice) {
       if (!prev) startBattleMusic();
-      setTiebreaker({ ...next, lastRollTotal: null });
-      animateTiebreakerRoll(remoteDice, () => setTiebreaker(next));
+      setIsRolling(true);
+      setDice(remoteDice);
+      setTimeout(() => {
+        setIsRolling(false);
+      }, 1100);
+      setTiebreaker(next);
+      return;
+    }
+    if (lastAction === 'tiebreaker_save' && remoteDice) {
+      setDice(remoteDice);
+      return;
+    }
+    if (lastAction === 'tiebreaker_blink') {
+      setTiebreaker(next);
+      playSfx('fanfare');
+      return;
+    }
+    if (lastAction === 'tiebreaker_outro') {
+      setTiebreaker(next);
+      stopBattleMusic();
       return;
     }
     showTiebreakerState(next, prev);
@@ -1381,26 +1531,6 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       triggerEliminatedBanner(tbNameOf(tb.eliminatedUnitId));
     }
   };
-
-  // Who rolls: CPU players roll as they do in the game. Human players roll their own dice;
-  // if their turn timer runs out (or a remote player stops responding) the roll is made for them.
-  useEffect(() => {
-    if (!tiebreaker || tiebreaker.phase !== 'rolling' || tiebreaker.lastRollTotal !== null || isRolling) return;
-    if (!tiedCurrentUnit) return;
-
-    let delay: number | null = null;
-    if (tiedCurrentUnit.isCPU) {
-      if (isTiebreakerAuthority) delay = settings.mode === 'online' ? 850 : 1200;
-    } else if (isTiedLocalHuman) {
-      if (isTimerEnabled) delay = ROLL_1_TIME * 1000;
-    } else if (isTiebreakerAuthority) {
-      delay = (ROLL_1_TIME + 15) * 1000;
-    }
-    if (delay === null) return;
-
-    const timer = setTimeout(() => performTiebreakerRollRef.current(), delay);
-    return () => clearTimeout(timer);
-  }, [tiebreaker, isRolling, tiedCurrentUnit?.id, tiedCurrentUnit?.isCPU, isTiedLocalHuman, isTiebreakerAuthority, isTimerEnabled, ROLL_1_TIME]);
 
   // Dismiss elimination announcement without altering round or dice (state is already synced)
   const handleDismissElimModal = useCallback(() => {
@@ -1427,19 +1557,22 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
   // CPU Automated Turn Runner (waits if elimination modal or 6-of-a-kind celebration or joining countdown is displayed)
   useEffect(() => {
+    const curPlayer = tbActive ? tiedCurrentUnit : curUnit;
+    const isBot = tbActive ? !!tiedCurrentUnit?.isCPU : isCPU;
     if (
-      tbActive ||
-      !isCPU ||
-      !curUnit ||
+      !isBot ||
+      !curPlayer ||
       isRolling ||
       elimModalMsg ||
       showSixCelebration ||
-      (joiningCountdown !== null && joiningCountdown > 0)
+      (joiningCountdown !== null && joiningCountdown > 0) ||
+      (tbActive && tiebreaker?.phase !== 'rolling')
     )
       return;
 
     // In multiplayer: only the designated turn authority client runs the CPU bots!
-    if (settings.mode === 'online' && !isTurnAuthority && !isAutoPilotTurn) {
+    const authority = tbActive ? isTiebreakerAuthority : isTurnAuthority;
+    if (settings.mode === 'online' && !authority && !isAutoPilotTurn) {
       return;
     }
 
@@ -1461,21 +1594,31 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         setDice(nextDice);
         checkBonusChimes(nextDice);
 
-        if (settings.roomId && isTurnAuthority) {
-          updateRoomGameState(settings.roomId, {
-            round,
-            phase,
-            activeUnitIndex: qIdx,
-            activeUnitId: curUnit.id,
-            rollsUsed,
-            dice: nextDice,
-            lastAction: 'save_dice',
-            lastActionBy: user.uid,
-            actionTimestamp: Date.now(),
-          });
+        if (settings.roomId && authority) {
+          if (tbActive && tiebreaker) {
+            updateRoomGameState(settings.roomId, {
+              dice: nextDice,
+              rollsUsed,
+              tiebreaker: tiebreakerRef.current,
+              lastAction: 'tiebreaker_save',
+              lastActionBy: user.uid,
+              actionTimestamp: Date.now(),
+            });
+          } else {
+            updateRoomGameState(settings.roomId, {
+              round,
+              phase,
+              activeUnitIndex: qIdx,
+              activeUnitId: curUnit.id,
+              rollsUsed,
+              dice: nextDice,
+              lastAction: 'save_dice',
+              lastActionBy: user.uid,
+              actionTimestamp: Date.now(),
+            });
+          }
         }
-        // Yield execution! This gives time for the dice to move to the saved area,
-        // updates component dice state, and syncs to remote peers.
+        // Yield execution!
         return;
       }
 
@@ -1508,6 +1651,9 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     spectatorFastForward,
     elimModalMsg,
     tbActive,
+    tiebreaker,
+    tiedCurrentUnit,
+    isTiebreakerAuthority,
     showSixCelebration,
     joiningCountdown,
     doRoll,
@@ -1518,17 +1664,19 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const canRoll =
     rollsUsed < 3 &&
     dice.filter(d => d.zone === 'active').length > 0 &&
-    isHumanOwner &&
-    !isCPU &&
+    isEffectiveHuman &&
+    !isEffectiveCPU &&
     !isRolling &&
-    (joiningCountdown === null || joiningCountdown <= 0);
+    (joiningCountdown === null || joiningCountdown <= 0) &&
+    (!tbActive || tiebreaker?.phase === 'rolling');
 
   const canScore =
     (rollsUsed === 3 || dice.filter(d => d.zone === 'active').length === 0) &&
     rollsUsed > 0 &&
-    isHumanOwner &&
-    !isCPU &&
-    (joiningCountdown === null || joiningCountdown <= 0);
+    isEffectiveHuman &&
+    !isEffectiveCPU &&
+    (joiningCountdown === null || joiningCountdown <= 0) &&
+    (!tbActive || tiebreaker?.phase === 'rolling');
 
   const humanPlayer = units.find(u => u.isOwner);
   const isHumanOut = humanPlayer ? !humanPlayer.active : false;
@@ -1702,12 +1850,36 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         {/* Players Scoreboards Strip */}
         <div className="mb-1">
           <CardsStrip
-            units={tiebreaker ? units.filter(u => tiebreaker.tiedUnitIds.includes(u.id)) : units}
+            units={
+              tiebreaker
+                ? units.filter(
+                    u =>
+                      tiebreaker.initialTiedUnitIds?.includes(u.id) ||
+                      tiebreaker.tiedUnitIds.includes(u.id) ||
+                      tiebreaker.advancedUnitIds?.includes(u.id)
+                  )
+                : units
+            }
             activeUnitId={tiebreaker ? tiedCurrentUnit?.id : curUnit?.id}
             currentRound={round}
-            isEliminationPhase={phase === 'elimination'}
-            isUserTurnToRoll={!tbActive && isHumanOwner && rollsUsed === 0 && !isAutoPilotTurn && (joiningCountdown === null || joiningCountdown <= 0)}
+            isEliminationPhase={phase === 'elimination' || tbActive}
+            isUserTurnToRoll={
+              (!tbActive && isHumanOwner && rollsUsed === 0 && !isAutoPilotTurn && (joiningCountdown === null || joiningCountdown <= 0)) ||
+              (tbActive && isTiedLocalHuman && rollsUsed === 0 && tiebreaker.phase === 'rolling')
+            }
             onSelectUnit={setSelectedPlayerForProfile}
+            isTiebreakerActive={tbActive}
+            tiebreakerScores={tiebreaker?.rollScores}
+            tiebreakerAdvancedIds={tiebreaker?.advancedUnitIds}
+            blinkingUnitIds={tiebreaker?.blinkingUnitIds}
+            liveTurnScore={
+              tbActive && tiedCurrentUnit
+                ? {
+                    unitId: tiedCurrentUnit.id,
+                    score: scoreResult.total > 0 ? scoreResult.total : (tiebreaker?.rollScores[tiedCurrentUnit.id] ?? 0),
+                  }
+                : null
+            }
           />
         </div>
 
@@ -1865,15 +2037,10 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             <div className="w-full bg-gradient-to-r from-red-950 via-[#750808] to-red-950 border-2 border-red-500 rounded-xl p-2 mb-1 text-center shadow-lg animate-fade-in shrink-0">
               <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-red-600/70 border border-yellow-400 text-yellow-300 font-black text-xs uppercase tracking-wider shadow-sm mb-1">
                 <Swords className="w-3.5 h-3.5 text-yellow-300 animate-pulse" />
-                <span>⚡ ROLL-OFF FOR SURVIVAL — ROUND {tiebreaker.roundNumber} ⚡</span>
+                <span>⚡ BATTLE TO SURVIVE — ROUND {tiebreaker.roundNumber} ⚡</span>
               </div>
               <p className="text-xs text-white font-bold">
-                {tiedCurrentUnit?.name}'s Roll:{' '}
-                {tiebreaker.lastRollTotal !== null ? (
-                  <span className="text-yellow-300 font-black">{tiebreaker.lastRollTotal} Points</span>
-                ) : (
-                  'Roll all 12 dice 1 time!'
-                )}
+                {tiedCurrentUnit?.name}'s Turn (3 rolls to build your best outcome)
               </p>
               {tiebreaker.noticeMsg && (
                 <p className="text-[11px] text-yellow-300 font-black mt-1 animate-pulse">
@@ -1885,16 +2052,16 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
           <RollArea
             dice={dice}
-            rollsUsed={tiebreaker ? (tiebreaker.lastRollTotal !== null ? 1 : 0) : rollsUsed}
+            rollsUsed={rollsUsed}
             rollSlotsCount={rollSlotsCount}
-            isCPU={tiebreaker ? !!tiedCurrentUnit?.isCPU : isCPU}
-            isHumanOwner={tiebreaker ? isTiedLocalHuman : isHumanOwner}
-            isRemoteHuman={tiebreaker ? isTiedRemoteHuman : isRemoteHuman}
+            isCPU={isEffectiveCPU}
+            isHumanOwner={isEffectiveHuman}
+            isRemoteHuman={isEffectiveRemote}
             joiningCountdown={joiningCountdown}
-            playerName={(tiebreaker ? tiedCurrentUnit?.name : curUnit?.name) || 'Player'}
+            playerName={(tbActive ? tiedCurrentUnit?.name : curUnit?.name) || 'Player'}
             isRolling={isRolling}
-            onTapActiveDie={tiebreaker ? () => {} : handleTapActive}
-            onDoRoll={tiebreaker ? () => { if (isTiedLocalHuman) performTiebreakerRoll(); } : doRoll}
+            onTapActiveDie={handleTapActive}
+            onDoRoll={doRoll}
             spectatorState={{
               isUserOut: isHumanOut,
               choiceMade: spectatorChoiceMade,
@@ -1913,32 +2080,10 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
       {/* Bottom Controls Area (Fixed at bottom) */}
       <div className="shrink-0 flex flex-col gap-0.5 sm:gap-1 pt-0.5 pb-1">
-        {tiebreaker ? (
-          /* Tiebreaker Roll-Off Controls: humans tap ROLL just like a normal turn */
-          <div className="py-0.5">
-            {isTiedLocalHuman && tiebreaker.lastRollTotal === null ? (
-              <button
-                onClick={performTiebreakerRoll}
-                disabled={isRolling || tiebreaker.phase !== 'rolling'}
-                className="w-full min-h-[42px] sm:min-h-[46px] py-1.5 sm:py-2 px-2 bg-[#28974a] hover:bg-[#22803e] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-1.5 border-b-2 border-[#185e2e] ring-2 ring-yellow-300 ring-offset-1 ring-offset-black/40 animate-pulse shadow-[0_0_12px_rgba(242,193,78,0.5)]"
-              >
-                <Swords className="w-4 h-4 text-yellow-300" />
-                <span>🎲 ROLL FOR SURVIVAL</span>
-              </button>
-            ) : (
-              <div className="w-full min-h-[42px] sm:min-h-[46px] py-2 px-3 bg-black/75 border-2 border-red-500 text-white font-black text-xs sm:text-sm rounded-xl shadow-md flex items-center justify-center gap-2">
-                {tiebreaker.lastRollTotal !== null ? (
-                  <span>
-                    {tiedCurrentUnit?.name} rolled <span className="text-yellow-300">{tiebreaker.lastRollTotal} pts</span>
-                  </span>
-                ) : (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-yellow-400" />
-                    <span>{tiedCurrentUnit?.name} is rolling for survival…</span>
-                  </>
-                )}
-              </div>
-            )}
+        {tiebreaker?.phase === 'blinking' ? (
+          <div className="w-full min-h-[42px] sm:min-h-[46px] py-2 px-3 bg-gradient-to-r from-yellow-500 via-amber-400 to-yellow-500 text-stone-950 font-black text-xs sm:text-sm rounded-xl shadow-lg flex items-center justify-center gap-2 border-2 border-yellow-200 animate-pulse">
+            <Swords className="w-4 h-4 text-stone-950" />
+            <span>Advancing boards blinking! Preparing results…</span>
           </div>
         ) : (
           /* Normal Action Buttons: ROLL, SCORE IT!, and INFO */
@@ -1949,17 +2094,17 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
               className={`flex-1 min-h-[42px] sm:min-h-[46px] py-1.5 sm:py-2 px-2 bg-[#28974a] hover:bg-[#22803e] disabled:opacity-40 disabled:pointer-events-none text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-1 sm:gap-1.5 border-b-2 border-[#185e2e] ${
                 isTimeRunningOut
                   ? 'ring-4 ring-yellow-400 ring-offset-2 ring-offset-black/50 animate-pulse bg-red-700 hover:bg-red-800'
-                  : rollsUsed === 0 && isHumanOwner && !isCPU && (joiningCountdown === null || joiningCountdown <= 0)
+                  : rollsUsed === 0 && isEffectiveHuman && !isEffectiveCPU && (joiningCountdown === null || joiningCountdown <= 0)
                   ? 'ring-2 ring-yellow-300 ring-offset-1 ring-offset-black/40 animate-pulse shadow-[0_0_12px_rgba(242,193,78,0.5)]'
                   : ''
               }`}
             >
               {joiningCountdown !== null && joiningCountdown > 0 ? (
                 <span>⏳ Waiting for players ({joiningCountdown}s)</span>
-              ) : isRemoteHuman ? (
+              ) : isEffectiveRemote ? (
                 <span className="flex items-center gap-1.5">
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-white/80" />
-                  <span>Waiting for {curUnit.name}…</span>
+                  <span>Waiting for {effectivePlayerName}…</span>
                   {turnSecondsLeft <= 5 && turnSecondsLeft > 0 && (
                     <span className="ml-1 bg-yellow-400 text-black text-[10px] md:text-xs font-mono font-black px-1.5 py-0.2 rounded-full">
                       ⚠️ {turnSecondsLeft}s
@@ -2010,10 +2155,10 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         <div className="text-center text-[10px] sm:text-[11px] text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] mt-0.5 font-medium">
           {joiningCountdown !== null && joiningCountdown > 0
             ? '⏳ Waiting for all players to join before starting round 1…'
-            : tiebreaker
-            ? (isTiedLocalHuman && tiebreaker.lastRollTotal === null
-              ? <span className="text-[#f2c14e] font-bold animate-pulse">👉 Your roll! Tap ROLL FOR SURVIVAL to roll all 12 dice</span>
-              : '⚔️ Lowest roll is eliminated. Higher rolls advance.')
+            : tbActive
+            ? (isEffectiveHuman
+              ? <span className="text-[#f2c14e] font-bold animate-pulse">👉 Your turn in Battle to Survive! Build and match your best score in 3 rolls</span>
+              : `⚔️ ${tiedCurrentUnit?.name}'s turn in Battle to Survive. Lowest score is eliminated.`)
             : isRemoteHuman
             ? `⏳ ${curUnit?.name}'s turn — waiting for their roll…`
             : isCPU

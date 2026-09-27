@@ -2,8 +2,8 @@ import React, { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const BATTLE_VIDEO_SRC = '/assets/video/battle.mp4';
-const INTRO_MS = 2000;
-const OUTRO_MS = 3000;
+const INTRO_MS = 4000;
+const OUTRO_MS = 4000;
 
 interface BattleVideoOverlayProps {
   isVisible: boolean;
@@ -17,8 +17,8 @@ interface BattleVideoOverlayProps {
  * Full-screen "Battle to Survive" video overlay for the elimination roll-off.
  * The 1080x1080 video uses object-cover, so it fills any screen: the sides are
  * cropped on phones, and top/bottom on wide screens such as an unfolded Fold.
- * Intro: on screen for 2s, then raises up to reveal the roll-off.
- * Outro: drops back down for 3s once the eliminated player is decided.
+ * Intro: on screen for 4s, then raises up to reveal the roll-off.
+ * Outro: drops back down for 4s once the eliminated player is decided.
  */
 export const BattleVideoOverlay: React.FC<BattleVideoOverlayProps> = ({
   isVisible,

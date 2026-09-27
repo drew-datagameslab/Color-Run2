@@ -79,22 +79,31 @@ export const triggerButtonHaptic = async (): Promise<void> => {
 
 /**
  * Vibration feedback when it becomes the user's turn in Multiplayer, vs Computer, or Friends Challenge.
+ * Fires two 1-second vibrations.
  */
 export const triggerTurnHaptic = async (): Promise<void> => {
+  // 1. Try Capacitor Native Haptics: two 1-second vibrations
   try {
-    await Haptics.notification({ type: NotificationType.Warning });
-    return;
+    await Haptics.vibrate({ duration: 1000 });
+    setTimeout(async () => {
+      try {
+        await Haptics.vibrate({ duration: 1000 });
+      } catch {
+        // Ignore
+      }
+    }, 1300);
   } catch {
     // Fall through
   }
 
+  // 2. Web Vibration API fallback: two 1-second vibrations with 300ms pause in between
   try {
     if (
       typeof window !== 'undefined' &&
       typeof navigator !== 'undefined' &&
       typeof navigator.vibrate === 'function'
     ) {
-      navigator.vibrate([40, 60, 40]); // Distinct double pulse alerting user's turn
+      navigator.vibrate([1000, 300, 1000]); // Two 1-second vibrations
     }
   } catch {
     // Ignore

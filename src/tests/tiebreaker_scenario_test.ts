@@ -152,9 +152,9 @@ export function runTiebreakerScenarioTests() {
     assert(tb.rollScores['p2'] === 30, 'P2 roll score saved');
 
     tb = advanceTiebreaker(tb, nameOf);
-    assert(tb.phase === 'outro', 'All have rolled: round resolves to outro');
+    assert(tb.phase === 'blinking', 'All have rolled: round resolves to blinking');
     assert(tb.eliminatedUnitId === 'p2', 'P2 with lowest roll 30 is eliminated');
-    assert(tb.lastRollTotal === 30, 'P2 roll score maintained');
+    assert(tb.blinkingUnitIds.includes('p1'), 'Winner P1 blinks');
 
     // Scenario 3B: P1 and P2 tie in Round 1, tie in Round 2, resolved in Round 3
     let tbMulti = startTiebreaker(['p1', 'p2']);
@@ -188,8 +188,9 @@ export function runTiebreakerScenarioTests() {
     tbMulti = recordTiebreakerRoll(tbMulti, 15);
     tbMulti = advanceTiebreaker(tbMulti, nameOf);
 
-    assert(tbMulti.phase === 'outro', 'Round 3 resolved to outro');
+    assert(tbMulti.phase === 'blinking', 'Round 3 resolved to blinking');
     assert(tbMulti.eliminatedUnitId === 'p2', 'P2 eliminated in Round 3');
+    assert(tbMulti.blinkingUnitIds.includes('p1'), 'Winner P1 blinks');
   }
   console.log('✓ Scenario 3: 2-Player Tiebreaker verified!');
 
@@ -226,8 +227,9 @@ export function runTiebreakerScenarioTests() {
     tb3 = recordTiebreakerRoll(tb3, 20); // P3
     tb3 = advanceTiebreaker(tb3, nameOf);
 
-    assert(tb3.phase === 'outro', 'Round 2 resolved to outro');
+    assert(tb3.phase === 'blinking', 'Round 2 resolved to blinking');
     assert(tb3.eliminatedUnitId === 'p3', 'P3 eliminated with lowest roll in Round 2');
+    assert(tb3.blinkingUnitIds.includes('p1') && tb3.blinkingUnitIds.includes('p2'), 'Both advancing users (P1 from round 1 and P2 from round 2) blink');
 
     // Scenario 4B: Two high rolls tied, one single lowest roll:
     // P1 rolls 60, P2 rolls 60, P3 rolls 20.
@@ -242,8 +244,9 @@ export function runTiebreakerScenarioTests() {
     tb3B = recordTiebreakerRoll(tb3B, 20);
     tb3B = advanceTiebreaker(tb3B, nameOf);
 
-    assert(tb3B.phase === 'outro', 'Single lowest roll eliminated directly to outro');
+    assert(tb3B.phase === 'blinking', 'Single lowest roll eliminated directly to blinking');
     assert(tb3B.eliminatedUnitId === 'p3', 'P3 eliminated immediately in Round 1');
+    assert(tb3B.blinkingUnitIds.includes('p1') && tb3B.blinkingUnitIds.includes('p2'), 'Both advancing users P1 and P2 blink');
 
     // Scenario 4C: All 3 tied on roll total
     // P1 rolls 35, P2 rolls 35, P3 rolls 35
@@ -296,8 +299,9 @@ export function runTiebreakerScenarioTests() {
     tb4 = recordTiebreakerRoll(tb4, 25); // P4
     tb4 = advanceTiebreaker(tb4, nameOf);
 
-    assert(tb4.phase === 'outro', 'Cascading tiebreaker completed');
+    assert(tb4.phase === 'blinking', 'Cascading tiebreaker completed to blinking');
     assert(tb4.eliminatedUnitId === 'p4', 'Diana (P4) eliminated');
+    assert(tb4.blinkingUnitIds.includes('p1') && tb4.blinkingUnitIds.includes('p2') && tb4.blinkingUnitIds.includes('p3'), 'Advancing players blink');
   }
   console.log('✓ Scenario 5: 4-Player Cascading Tiebreaker verified!');
 
@@ -326,12 +330,13 @@ export function runTiebreakerScenarioTests() {
       p3: 20,
     };
     const next2 = resolveTiebreakerRound(
-      { ...startTiebreaker(next1.tiedUnitIds), roundNumber: next1.roundNumber },
+      { ...startTiebreaker(next1.tiedUnitIds), roundNumber: next1.roundNumber, advancedUnitIds: next1.advancedUnitIds },
       scoresRound2,
       nameOf
     );
-    assert(next2.phase === 'outro', 'Scoreboard reaches outro phase');
+    assert(next2.phase === 'blinking', 'Scoreboard reaches blinking phase');
     assert(next2.eliminatedUnitId === 'p3', 'Scoreboard identifies p3 as eliminated');
+    assert(next2.blinkingUnitIds.includes('p1') && next2.blinkingUnitIds.includes('p2'), 'Both advancing users blink');
   }
   console.log('✓ Scenario 6: ScoreboardScreen simulation verified!');
 

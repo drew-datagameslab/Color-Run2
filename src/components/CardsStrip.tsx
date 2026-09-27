@@ -9,6 +9,11 @@ interface CardsStripProps {
   isEliminationPhase: boolean;
   isUserTurnToRoll?: boolean;
   onSelectUnit?: (unit: PlayerUnit) => void;
+  isTiebreakerActive?: boolean;
+  tiebreakerScores?: Record<string, number>;
+  tiebreakerAdvancedIds?: string[];
+  blinkingUnitIds?: string[];
+  liveTurnScore?: { unitId: string; score: number } | null;
 }
 
 export const CardsStrip: React.FC<CardsStripProps> = ({
@@ -18,13 +23,28 @@ export const CardsStrip: React.FC<CardsStripProps> = ({
   isEliminationPhase,
   isUserTurnToRoll = false,
   onSelectUnit,
+  isTiebreakerActive = false,
+  tiebreakerScores = {},
+  tiebreakerAdvancedIds = [],
+  blinkingUnitIds = [],
+  liveTurnScore = null,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Active players first in their order, eliminated players pushed to the far right of the boards
+  // Active players first in their order, eliminated players pushed to the far right of the boards.
+  // When a player is eliminated first, they shift to the far right (greyed out).
+  // Eliminated players are then sorted by point total, ascending from right to left (i.e. highest score on the left, lowest on the far right).
   const activeUnits = units.filter(u => u.active);
   const eliminatedUnits = units.filter(u => !u.active);
-  const displayUnits = [...activeUnits, ...eliminatedUnits];
+  const sortedEliminatedUnits = [...eliminatedUnits].sort((a, b) => {
+    if (b.score !== a.score) {
+      // Ascending from right to left means higher point total on the left, lower on the right
+      return b.score - a.score;
+    }
+    // Secondary tiebreak: earlier eliminated player (higher place number, e.g. 4th vs 3rd) stays to the far right
+    return (a.place ?? 0) - (b.place ?? 0);
+  });
+  const displayUnits = [...activeUnits, ...sortedEliminatedUnits];
   const activeIdx = displayUnits.findIndex(u => u.id === activeUnitId);
 
   // Auto-scroll rule:
@@ -59,8 +79,16 @@ export const CardsStrip: React.FC<CardsStripProps> = ({
         {displayUnits.map((unit) => {
           const isActive = unit.id === activeUnitId && unit.active;
           const isOut = !unit.active;
+          const isBlinking = blinkingUnitIds?.includes(unit.id);
           // isUserTurnToRoll is only true when the active player rolls on this device (includes Pass & Play)
           const showTurnOverlay = isUserTurnToRoll && isActive && !isOut;
+          const isAdvanced = tiebreakerAdvancedIds?.includes(unit.id);
+          const currentUnitTiebreakScore =
+            unit.id === activeUnitId && liveTurnScore?.unitId === unit.id
+              ? liveTurnScore.score
+              : tiebreakerScores[unit.id] !== undefined
+              ? tiebreakerScores[unit.id]
+              : 0;
 
           return (
             <div
@@ -77,10 +105,12 @@ export const CardsStrip: React.FC<CardsStripProps> = ({
                 }
                 ${isOut
                   ? 'bg-[#37383c] border-white/10 opacity-50 grayscale'
-                  : isEliminationPhase
+                  : isEliminationPhase || isTiebreakerActive
                   ? 'bg-[#d62828]'
                   : 'bg-[#28974a]'}
-                ${isActive
+                ${isBlinking
+                  ? 'animate-tiebreaker-blink ring-4 ring-yellow-400 border-2 border-yellow-300 z-30'
+                  : isActive
                   ? 'border-2 border-[#f2c14e] ring-2 ring-[#f2c14e]/50 shadow-[0_0_10px_rgba(242,193,78,0.5)] scale-[1.02]'
                   : 'border border-white/20'}`}
             >
@@ -105,7 +135,7 @@ export const CardsStrip: React.FC<CardsStripProps> = ({
                 </span>
               </div>
 
-              {/* Points Total in Boards */}
+              {/* Points Total in Boards (Points players are tied with) */}
               <div className="text-base sm:text-lg font-black text-white text-center leading-tight my-0.5 drop-shadow-sm">
                 {unit.score}
               </div>
@@ -117,27 +147,44 @@ export const CardsStrip: React.FC<CardsStripProps> = ({
                 </div>
               )}
 
-              {/* Round History Rows (Shows 3 rolls) */}
-              <div className="w-full flex flex-col gap-0 mt-0.5 pt-0.5 border-t border-white/20 text-[8px] sm:text-[9px] font-mono leading-[1.25]">
-                {scoreRows.map(r => {
-                  const rScore = unit.history[r];
-                  return (
-                    <div
-                      key={r}
-                      className={`flex justify-between items-center px-1 py-[1px] rounded leading-[1.25] ${
-                        r === currentRound && unit.active
-                          ? 'bg-black/25 font-black text-[#f2c14e]'
-                          : 'text-white/85'
-                      }`}
-                    >
-                      <span className="opacity-80 leading-[1.25]">{r}</span>
-                      <span className="font-bold leading-[1.25]">
-                        {rScore !== undefined ? rScore : '—'}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+              {/* Scoreboard Lower Section: Underneath, remove roll history while tiebreaker screen is active.
+                  Add the word "TIEBREAKER" and the user's score during the tiebreak underneath. */}
+              {isTiebreakerActive ? (
+                <div className="w-full flex flex-col items-center mt-0.5 pt-0.5 border-t border-white/25">
+                  <div className="text-[7.5px] sm:text-[8.5px] font-black tracking-wider text-white uppercase text-center leading-none">
+                    TIEBREAKER
+                  </div>
+                  <div
+                    className={`text-sm sm:text-base font-black text-center leading-tight mt-0.5 drop-shadow-sm ${
+                      isAdvanced ? 'text-yellow-300 animate-pulse text-xs sm:text-sm font-extrabold' : 'text-white'
+                    }`}
+                  >
+                    {isAdvanced ? 'ADVANCE' : currentUnitTiebreakScore}
+                  </div>
+                </div>
+              ) : (
+                /* Round History Rows (Shows 3 rolls) in standard play */
+                <div className="w-full flex flex-col gap-0 mt-0.5 pt-0.5 border-t border-white/20 text-[8px] sm:text-[9px] font-mono leading-[1.25]">
+                  {scoreRows.map(r => {
+                    const rScore = unit.history[r];
+                    return (
+                      <div
+                        key={r}
+                        className={`flex justify-between items-center px-1 py-[1px] rounded leading-[1.25] ${
+                          r === currentRound && unit.active
+                            ? 'bg-black/25 font-black text-[#f2c14e]'
+                            : 'text-white/85'
+                        }`}
+                      >
+                        <span className="opacity-80 leading-[1.25]">{r}</span>
+                        <span className="font-bold leading-[1.25]">
+                          {rScore !== undefined ? rScore : '—'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* "Your turn to roll!" overlay on the user's scoreboard */}
               {showTurnOverlay && (
