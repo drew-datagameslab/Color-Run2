@@ -106,6 +106,22 @@ export interface UserAccount {
   isGuest?: boolean;
   createdAt?: string;
   diceColors?: [DiceColor, DiceColor];
+  // Experience, Leveling & Progression System
+  xp?: number;
+  totalXp?: number;
+  level?: number;
+  prestige?: number;
+  title?: string;
+  banner?: string;
+  nameColor?: string;
+  unlockedRewards?: string[];
+  unlockedEmotes?: string[];
+  unlockedTitles?: string[];
+  unlockedBanners?: string[];
+  lastFirstWinDate?: string;
+  missions?: any[];
+  rankedUnlocked?: boolean;
+  matchmakingRating?: number;
 }
 
 export interface UserFileRecord {

@@ -25,6 +25,8 @@ export interface RoomPlayer {
   diceColors?: [DiceColor, DiceColor];
   type: 'human' | 'cpu';
   joinedAt: number;
+  level?: number;
+  prestige?: number;
 }
 
 export interface RoomGameState {
@@ -61,6 +63,15 @@ export interface RoomGameState {
   elimModalMsg?: string | null;
   /** Battle to Survive roll-off shared by all devices; null when none is running */
   tiebreaker?: TiebreakerState | null;
+  /** Shared real-time emoji reaction for multiplayer rooms */
+  latestEmote?: {
+    id: string;
+    senderUid: string;
+    senderName: string;
+    emoji: string;
+    timestamp: number;
+    duringElimination?: boolean;
+  };
 }
 
 export interface GameRoom {
@@ -91,6 +102,9 @@ export interface GameRoom {
     image?: string;
     status?: 'pending' | 'joined' | 'will_join_later' | 'dismissed';
   }[];
+  isRanked?: boolean;
+  minLevel?: number;
+  maxLevel?: number;
 }
 
 export const BOT_NAMES = ['Ava', 'Pixel', 'Chip', 'Byte', 'Vector', 'Nova', 'Key', 'Mouse'];
@@ -182,9 +196,12 @@ export async function findOrCreateRoom(
   playerCount: 2 | 4 | 6 | 8,
   buyIn: number,
   user: UserAccount,
-  equippedColors: [DiceColor, DiceColor]
+  equippedColors: [DiceColor, DiceColor],
+  isRanked?: boolean
 ): Promise<{ room: GameRoom; isNew: boolean }> {
-  const gameKey = `${tier}_${playerCount}`;
+  const userLevel = user.level || 1;
+  const bracket = isRanked ? 'ranked' : (userLevel < 10 ? 'beginner' : 'open');
+  const gameKey = isRanked ? `ranked_${tier}_${playerCount}` : `${tier}_${playerCount}_${bracket}`;
   const now = Date.now();
   const userDiceColors: [DiceColor, DiceColor] = user.diceColors || equippedColors;
   const sessionId = getClientSessionId();
@@ -198,6 +215,8 @@ export async function findOrCreateRoom(
     diceColors: userDiceColors,
     type: 'human',
     joinedAt: now,
+    level: user.level || 1,
+    prestige: user.prestige || 0,
   };
 
   const lobbyRef = doc(db, 'lobbies', gameKey);
@@ -285,6 +304,8 @@ export async function findOrCreateRoom(
         status: 'waiting',
         players: [currentPlayer],
         filledBots: [],
+        isRanked: !!isRanked,
+        minLevel: isRanked ? 10 : (bracket === 'open' ? 10 : 1),
         updatedAt: currentTime,
       };
 

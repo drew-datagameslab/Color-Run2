@@ -29,6 +29,7 @@ import { ScoreboardScreen } from './components/ScoreboardScreen';
 import { MatchmakingScreen } from './components/MatchmakingScreen';
 import { GameInviteOverlay } from './components/GameInviteOverlay';
 import { RulesModal } from './components/RulesModal';
+import { MissionsModal } from './components/MissionsModal';
 import { StandingsSheet } from './components/StandingsSheet';
 import { StripAd } from './components/StripAd';
 import { FullScreenAd } from './components/FullScreenAd';
@@ -53,6 +54,17 @@ import {
   subscribeToOnlinePresence,
   mergeFriendsWithPresence,
 } from './lib/presence';
+import { calculateMatchXp, applyXpToUser, MatchXpResult } from './lib/levelSystem';
+import { MatchSummaryStats } from './components/PlayScreen';
+import {
+  getMissionsData,
+  recordMatchForMissions,
+  recordEmoteSent,
+  claimMissionReward,
+  MissionGoal,
+  MissionsData,
+} from './lib/missions';
+import { triggerButtonHaptic } from './lib/haptics';
 
 export default function App() {
   const [user, setUser] = useState<UserAccount>(() => getInitialUser());
@@ -62,7 +74,7 @@ export default function App() {
     'signin' | 'avatar' | 'mainmenu' | 'modeselect' | 'pickgame' | 'play' | 'winner' | 'shop' | 'scoreboard' | 'challenge_lobby'
   >('signin');
 
-  const [gameMode, setGameMode] = useState<'online' | 'cpu' | 'pass_and_play' | 'challenge' | 'challenge_friend'>('online');
+  const [gameMode, setGameMode] = useState<'online' | 'cpu' | 'pass_and_play' | 'challenge' | 'challenge_friend' | 'ranked'>('online');
   const [friends, setFriends] = useState<Friend[]>(() => getLocalFriends(user.uid));
   const [isChallengeFriendModalOpen, setIsChallengeFriendModalOpen] = useState(false);
   const [selectedChallengeFriend, setSelectedChallengeFriend] = useState<Friend | null>(null);
@@ -81,9 +93,11 @@ export default function App() {
   const [gameWinner, setGameWinner] = useState<PlayerUnit | null>(null);
   const [finalUnits, setFinalUnits] = useState<PlayerUnit[]>([]);
   const [pendingWonCoins, setPendingWonCoins] = useState<number>(0);
+  const [pendingXpResult, setPendingXpResult] = useState<MatchXpResult | null>(null);
 
   // Modals
   const [isRulesOpen, setIsRulesOpen] = useState(false);
+  const [rulesInitialTab, setRulesInitialTab] = useState<'rules' | 'levels'>('rules');
   const [isStandingsOpen, setIsStandingsOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isMenuModalOpen, setIsMenuModalOpen] = useState(false);
@@ -92,9 +106,77 @@ export default function App() {
   const [isChallengeFriendsOpen, setIsChallengeFriendsOpen] = useState(false);
   const [toastNotice, setToastNotice] = useState('');
 
+  // Daily and Weekly Missions State
+  const [missionsData, setMissionsData] = useState<MissionsData>(() => getMissionsData(user.uid));
+  const [isMissionsModalOpen, setIsMissionsModalOpen] = useState(false);
+  const [missionsModalTab, setMissionsModalTab] = useState<'daily' | 'weekly'>('daily');
+  const [floatingCoin, setFloatingCoin] = useState<{
+    id: number;
+    amount: number;
+    x: number;
+    y: number;
+    isFloating: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    if (user?.uid) {
+      setMissionsData(getMissionsData(user.uid));
+    }
+  }, [user?.uid]);
+
   const triggerToast = (msg: string) => {
     setToastNotice(msg);
     setTimeout(() => setToastNotice(''), 2500);
+  };
+
+  const handleOpenRules = (tab: 'rules' | 'levels' = 'rules') => {
+    setRulesInitialTab(tab);
+    setIsRulesOpen(true);
+  };
+
+  const handleClaimMission = (mission: MissionGoal, buttonRect: DOMRect) => {
+    const result = claimMissionReward(user.uid, mission.id);
+    if (!result.success) return;
+
+    // 1. Get click position from button
+    const startX = buttonRect.left + buttonRect.width / 2;
+    const startY = buttonRect.top + buttonRect.height / 2;
+
+    // 2. Target the coin indicator in the user profile header
+    const coinEl =
+      document.getElementById('header-coin-counter') ||
+      document.getElementById('header-user-coins') ||
+      document.getElementById('header-user-bar');
+    const targetRect = coinEl?.getBoundingClientRect();
+    const targetX = targetRect ? targetRect.left + targetRect.width / 2 : startX;
+    const targetY = targetRect ? targetRect.top + targetRect.height / 2 : 35;
+
+    const bubbleId = Date.now();
+    setFloatingCoin({
+      id: bubbleId,
+      amount: result.rewardCoins,
+      x: startX,
+      y: startY,
+      isFloating: false,
+    });
+
+    // Next frame: smooth animation floating up to the user coin display
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        setFloatingCoin(prev => (prev?.id === bubbleId ? { ...prev, x: targetX, y: targetY, isFloating: true } : prev));
+      }, 25);
+    });
+
+    // When the bubble arrives at the user bar: credit coins, play sound & haptics
+    setTimeout(() => {
+      handleUpdateCoins(result.rewardCoins);
+      playSfx('add');
+      triggerButtonHaptic();
+      setFloatingCoin(null);
+      triggerToast(`🪙 +${result.rewardCoins} coins added for "${mission.title}"!`);
+    }, 750);
+
+    setMissionsData({ ...result.missionsData });
   };
 
   // Check Daily Gift Dice Roll Overlay when player opens the app for first time each day
@@ -398,7 +480,7 @@ export default function App() {
     setScreen('play');
   };
 
-  const handleGameOver = (winner: PlayerUnit, units: PlayerUnit[]) => {
+  const handleGameOver = (winner: PlayerUnit, units: PlayerUnit[], stats?: MatchSummaryStats) => {
     setGameWinner(winner);
     setFinalUnits(units);
 
@@ -415,6 +497,82 @@ export default function App() {
       }
     } else if (!winner.isCPU) {
       wonCoins = 150; // Winner bonus!
+    }
+
+    // Calculate match XP earned
+    const humanUnit = units.find(u => !u.isCPU);
+    const placement = stats?.placement || humanUnit?.place || (winner.id === humanUnit?.id ? 1 : 2);
+    const totalP = currentGameSettings?.playersCount || units.length;
+    const survivedRounds = stats?.survivedRounds ?? Math.max(0, totalP - placement);
+    const colorBonusPoints = stats?.colorBonusPoints ?? 0;
+
+    const xpCalc = calculateMatchXp({
+      finished: stats?.finished ?? true,
+      survivedRounds,
+      placement,
+      colorBonusPoints,
+      lastFirstWinDate: user.lastFirstWinDate,
+    });
+
+    const { updatedState, leveledUp, newRewards, coinsAwarded } = applyXpToUser(
+      {
+        xp: user.xp || 0,
+        totalXp: user.totalXp || 0,
+        level: user.level || 1,
+        prestige: user.prestige || 0,
+        unlockedRewards: user.unlockedRewards || [],
+        unlockedEmotes: user.unlockedEmotes || [],
+        unlockedTitles: user.unlockedTitles || [],
+        unlockedBanners: user.unlockedBanners || [],
+        lastFirstWinDate: user.lastFirstWinDate,
+        rankedUnlocked: !!user.rankedUnlocked,
+        missions: user.missions || [],
+      },
+      xpCalc.totalXp,
+      xpCalc.isFirstWin
+    );
+
+    const fullXpResult: MatchXpResult = {
+      ...xpCalc,
+      leveledUp,
+      previousLevel: user.level || 1,
+      newLevel: updatedState.level,
+      unlockedRewards: newRewards,
+    };
+    setPendingXpResult(fullXpResult);
+
+    if (coinsAwarded > 0) {
+      wonCoins += coinsAwarded;
+    }
+
+    const mergedUser: UserAccount = {
+      ...user,
+      ...updatedState,
+    };
+    handleSaveUser(mergedUser);
+
+    // Record match for Daily and Weekly Missions
+    if (currentGameSettings) {
+      const matchRecord = recordMatchForMissions(user.uid, {
+        mode: currentGameSettings.mode,
+        tier: currentGameSettings.tier || 'standard',
+        playersCount: currentGameSettings.playersCount || units.length,
+        isWin: placement === 1,
+        placement,
+        survivedRounds,
+        colorRunsScored: stats?.colorRunsScored || 0,
+        scoredFiveOfAKind: stats?.scoredFiveOfAKind,
+        bankedCenturyClub: stats?.bankedCenturyClub,
+        precisionRoller: stats?.precisionRoller,
+        wonTiebreaker: stats?.wonTiebreaker,
+        underdogAscendant: stats?.underdogAscendant,
+        isFriendChallenge: stats?.isFriendChallenge,
+        finished: true,
+      });
+      setMissionsData(matchRecord.missionsData);
+      if (matchRecord.newlyCompletedMissions.length > 0) {
+        triggerToast(`🎯 Completed: "${matchRecord.newlyCompletedMissions[0].title}"! Claim your coins on Main Menu.`);
+      }
     }
 
     setPendingWonCoins(wonCoins);
@@ -510,17 +668,24 @@ export default function App() {
 
         {screen === 'mainmenu' && (
           <MainMenuScreen
+            missionsData={missionsData}
+            onOpenMissions={(tab) => {
+              setMissionsModalTab(tab);
+              setIsMissionsModalOpen(true);
+            }}
             onPlay={() => setScreen('modeselect')}
             onOpenShop={() => setScreen('shop')}
             onOpenScoreboard={() => setScreen('scoreboard')}
-            onOpenRules={() => setIsRulesOpen(true)}
+            onOpenRules={() => handleOpenRules('rules')}
             onOpenTournament={() => triggerToast('🏆 Tournament Mode arriving in next update!')}
           />
         )}
 
         {screen === 'modeselect' && (
           <ModeSelectScreen
+            user={user}
             friends={friends}
+            onToast={triggerToast}
             onSelectMode={mode => {
               if (mode === 'challenge_friend') {
                 setSelectedChallengeFriend(null);
@@ -551,6 +716,9 @@ export default function App() {
                 });
               } else if (mode === 'cpu') {
                 setGameMode('cpu');
+                setScreen('pickgame');
+              } else if (mode === 'ranked') {
+                setGameMode('ranked');
                 setScreen('pickgame');
               } else {
                 setGameMode('online');
@@ -590,10 +758,68 @@ export default function App() {
               triggerToast(`You won ${amount} coins in the last game!`);
               playSfx('add');
             }}
-            onExitGame={(prizeWon?: number) => {
-              if (prizeWon && prizeWon > 0) {
-                handleUpdateCoins(prizeWon);
-                triggerToast(`You won ${prizeWon} coins in the last game!`);
+            onEmoteSentDuringElimination={() => {
+              const res = recordEmoteSent(user.uid, true);
+              setMissionsData({ ...res.missionsData });
+              if (res.newlyCompletedMissions.length > 0) {
+                triggerToast(`🎯 Completed: "${res.newlyCompletedMissions[0].title}"! Claim 20 coins.`);
+              }
+            }}
+            onExitGame={(prizeWon?: number, stats?: MatchSummaryStats) => {
+              let totalCoins = prizeWon || 0;
+              if (stats && stats.finished) {
+                if (currentGameSettings) {
+                  const matchRecord = recordMatchForMissions(user.uid, {
+                    mode: currentGameSettings.mode,
+                    tier: currentGameSettings.tier || 'standard',
+                    playersCount: currentGameSettings.playersCount || 2,
+                    isWin: stats.placement === 1,
+                    placement: stats.placement,
+                    survivedRounds: stats.survivedRounds,
+                    colorRunsScored: stats.colorRunsScored || 0,
+                    scoredFiveOfAKind: stats.scoredFiveOfAKind,
+                    bankedCenturyClub: stats.bankedCenturyClub,
+                    precisionRoller: stats.precisionRoller,
+                    wonTiebreaker: stats.wonTiebreaker,
+                    underdogAscendant: stats.underdogAscendant,
+                    isFriendChallenge: stats.isFriendChallenge,
+                    finished: true,
+                  });
+                  setMissionsData(matchRecord.missionsData);
+                }
+
+                const xpCalc = calculateMatchXp({
+                  finished: true,
+                  survivedRounds: stats.survivedRounds,
+                  placement: stats.placement,
+                  colorBonusPoints: stats.colorBonusPoints,
+                  lastFirstWinDate: user.lastFirstWinDate,
+                });
+                if (xpCalc.totalXp > 0) {
+                  const { updatedState, coinsAwarded } = applyXpToUser(
+                    {
+                      xp: user.xp || 0,
+                      totalXp: user.totalXp || 0,
+                      level: user.level || 1,
+                      prestige: user.prestige || 0,
+                      unlockedRewards: user.unlockedRewards || [],
+                      unlockedEmotes: user.unlockedEmotes || [],
+                      unlockedTitles: user.unlockedTitles || [],
+                      unlockedBanners: user.unlockedBanners || [],
+                      lastFirstWinDate: user.lastFirstWinDate,
+                      rankedUnlocked: !!user.rankedUnlocked,
+                      missions: user.missions || [],
+                    },
+                    xpCalc.totalXp,
+                    xpCalc.isFirstWin
+                  );
+                  totalCoins += coinsAwarded;
+                  handleSaveUser({ ...user, ...updatedState });
+                  triggerToast(`+${xpCalc.totalXp} XP earned! ${totalCoins > 0 ? `Won ${totalCoins} coins!` : ''}`);
+                }
+              }
+              if (totalCoins > 0) {
+                handleUpdateCoins(totalCoins);
                 playSfx('add');
               }
               setScreen('mainmenu');
@@ -607,6 +833,8 @@ export default function App() {
             units={finalUnits}
             settings={currentGameSettings}
             wonCoins={pendingWonCoins}
+            xpResult={pendingXpResult}
+            currentUser={user}
             onCoinsAwarded={handleCoinsAwardedFromWinner}
             onPlayAgain={handlePlayAgain}
             onHome={() => {
@@ -685,7 +913,21 @@ export default function App() {
       />
 
       {/* Rules Modal */}
-      <RulesModal isOpen={isRulesOpen} onClose={() => setIsRulesOpen(false)} />
+      <RulesModal
+        isOpen={isRulesOpen}
+        initialTab={rulesInitialTab}
+        onClose={() => setIsRulesOpen(false)}
+      />
+
+      {/* Daily & Weekly Missions Modal Overlay */}
+      <MissionsModal
+        isOpen={isMissionsModalOpen}
+        onClose={() => setIsMissionsModalOpen(false)}
+        missionsData={missionsData}
+        initialTab={missionsModalTab}
+        onClaim={handleClaimMission}
+        coins={coins}
+      />
 
       {/* Standings Sheet */}
       <StandingsSheet
@@ -694,7 +936,7 @@ export default function App() {
         threshold={currentGameSettings?.threshold || 250}
         isElimination={false}
         onClose={() => setIsStandingsOpen(false)}
-        onOpenRules={() => setIsRulesOpen(true)}
+        onOpenRules={() => handleOpenRules('rules')}
         onNewGame={() => {
           setIsStandingsOpen(false);
           setScreen('modeselect');
@@ -713,6 +955,7 @@ export default function App() {
         onOpenFiles={() => setIsFilesModalOpen(true)}
         onLogOut={handleLogOut}
         onToast={triggerToast}
+        onOpenRules={handleOpenRules}
       />
 
       {/* Cheeseburger Navigation Menu (Leave game -> Main Menu, Shop, Rules, Settings, Files) */}
@@ -727,7 +970,7 @@ export default function App() {
         onGoToShop={() => setScreen('shop')}
         onGoToMainMenu={() => setScreen('mainmenu')}
         onOpenProfile={() => setIsProfileModalOpen(true)}
-        onOpenRules={() => setIsRulesOpen(true)}
+        onOpenRules={() => handleOpenRules('rules')}
         onOpenScoreboard={() => setScreen('scoreboard')}
         onOpenChallengeFriends={() => setIsChallengeFriendsOpen(true)}
         onLogOut={handleLogOut}
@@ -778,6 +1021,27 @@ export default function App() {
           setFriends(updated);
         }}
       />
+
+      {/* Floating Mission Claim Coin Bubble */}
+      {floatingCoin && (
+        <div
+          id="mission-floating-coin"
+          className="fixed z-50 pointer-events-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 text-[#3b2a0c] font-black text-xs sm:text-sm shadow-[0_4px_24px_rgba(245,158,11,0.85)] border-2 border-yellow-100 whitespace-nowrap"
+          style={{
+            left: `${floatingCoin.x}px`,
+            top: `${floatingCoin.y}px`,
+            transform: floatingCoin.isFloating
+              ? 'translate(-50%, -50%) scale(0.85)'
+              : 'translate(-50%, -50%) scale(1.15)',
+            opacity: floatingCoin.isFloating ? 0.95 : 1,
+            transition: floatingCoin.isFloating
+              ? 'all 750ms cubic-bezier(0.2, 0.8, 0.25, 1)'
+              : 'transform 0.1s ease-out',
+          }}
+        >
+          <span className="drop-shadow-xs">+ 🪙 {floatingCoin.amount.toLocaleString()}</span>
+        </div>
+      )}
     </div>
   );
 }

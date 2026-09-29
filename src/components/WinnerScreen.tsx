@@ -1,13 +1,16 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Trophy, RotateCcw, Home } from 'lucide-react';
-import { PlayerUnit, GameSettings } from '../types/game';
+import { Trophy, RotateCcw, Home, Sparkles, ChevronDown, ChevronUp, Award } from 'lucide-react';
+import { PlayerUnit, GameSettings, UserAccount } from '../types/game';
 import { playSfx } from '../lib/audio';
+import { MatchXpResult, calculateLevelFromTotalXp, getXpForNextLevel } from '../lib/levelSystem';
 
 interface WinnerScreenProps {
   winner: PlayerUnit;
   units: PlayerUnit[];
   settings?: GameSettings | null;
   wonCoins?: number;
+  xpResult?: MatchXpResult | null;
+  currentUser?: UserAccount;
   onCoinsAwarded?: (amount: number) => void;
   onPlayAgain: () => void;
   onHome: () => void;
@@ -18,6 +21,8 @@ export const WinnerScreen: React.FC<WinnerScreenProps> = ({
   units,
   settings,
   wonCoins = 0,
+  xpResult,
+  currentUser,
   onCoinsAwarded,
   onPlayAgain,
   onHome,
@@ -25,6 +30,7 @@ export const WinnerScreen: React.FC<WinnerScreenProps> = ({
   const [bubblePos, setBubblePos] = useState<{ x: number; y: number } | null>(null);
   const [isFloating, setIsFloating] = useState(false);
   const [bubbleVisible, setBubbleVisible] = useState(false);
+  const [showXpBreakdown, setShowXpBreakdown] = useState(false);
   const awardedRef = useRef(false);
 
   const awardCoinsOnce = (amount: number) => {
@@ -109,8 +115,10 @@ export const WinnerScreen: React.FC<WinnerScreenProps> = ({
     return (a.place || 99) - (b.place || 99) || b.score - a.score;
   });
 
+  const levelInfo = calculateLevelFromTotalXp(currentUser?.totalXp || 0);
+
   return (
-    <div className="w-full max-w-sm mx-auto flex flex-col items-center justify-start max-h-[92vh] overflow-y-auto p-2 sm:p-3 select-none my-auto relative">
+    <div className="w-full max-w-sm mx-auto flex flex-col items-center justify-start max-h-[92vh] overflow-y-auto p-2 sm:p-3 select-none my-auto relative custom-scrollbar">
       {/* Floating Won Coins Bubble */}
       {bubbleVisible && bubblePos && wonCoins > 0 && (
         <div
@@ -158,7 +166,7 @@ export const WinnerScreen: React.FC<WinnerScreenProps> = ({
         </div>
 
         {/* Standings List */}
-        <div className="w-full bg-white/80 border border-[#ebdcb9] rounded-2xl p-2 mb-3 max-h-48 overflow-y-auto space-y-1.5">
+        <div className="w-full bg-white/80 border border-[#ebdcb9] rounded-2xl p-2 mb-2.5 max-h-40 overflow-y-auto space-y-1.5 custom-scrollbar">
           {ranked.map((p, idx) => {
             const isMe = !p.isCPU;
             return (
@@ -191,6 +199,77 @@ export const WinnerScreen: React.FC<WinnerScreenProps> = ({
           })}
         </div>
 
+        {/* Level & Match XP Card */}
+        {xpResult && (
+          <div className="w-full bg-[#f4ecdb] border border-[#d6c497] rounded-2xl p-2.5 mb-3 text-left shadow-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm">⚡</span>
+                <span className="font-black text-xs text-[#2c1d11]">Match XP Earned</span>
+              </div>
+              <span className="font-black text-xs text-[#1c6a35] bg-[#2f9a4f]/15 px-2 py-0.5 rounded-full">
+                +{xpResult.totalXp} XP
+              </span>
+            </div>
+
+            {/* Level Bar */}
+            <div className="w-full mb-1.5">
+              <div className="flex items-center justify-between text-[10px] font-bold text-[#6d5138] mb-1">
+                <span>
+                  {currentUser?.prestige && currentUser.prestige > 0 ? `⭐ Prestige ${currentUser.prestige} ` : ''}
+                  Level {levelInfo.level}
+                </span>
+                <span>
+                  {levelInfo.level >= 50
+                    ? 'Max Level (Prestige Ready!)'
+                    : `${levelInfo.xpInLevel} / ${levelInfo.xpNeededForNext} XP (${levelInfo.progressPercent}%)`}
+                </span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-[#ded1b6] overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-emerald-500 to-amber-400 rounded-full transition-all duration-1000 ease-out"
+                  style={{ width: `${levelInfo.progressPercent}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Level Up Celebration Banner */}
+            {xpResult.leveledUp && (
+              <div className="my-1.5 p-2 rounded-xl bg-gradient-to-r from-amber-500/20 via-yellow-400/25 to-amber-500/20 border border-amber-400/80 animate-bounce-subtle text-center">
+                <div className="inline-flex items-center gap-1 text-xs font-black text-[#855307]">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                  <span>LEVEL UP! Reached Level {xpResult.newLevel}!</span>
+                </div>
+                {xpResult.unlockedRewards.length > 0 && (
+                  <div className="text-[11px] font-bold text-[#4a3622] mt-0.5">
+                    🎁 Unlocked: {xpResult.unlockedRewards.map(r => r.title).join(', ')}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Expandable Breakdown Details */}
+            <button
+              onClick={() => setShowXpBreakdown(!showXpBreakdown)}
+              className="w-full flex items-center justify-between text-[10px] font-bold text-[#8c745e] hover:text-[#5c4a3a] pt-1 border-t border-[#e2d5ba] cursor-pointer"
+            >
+              <span>View XP Breakdown</span>
+              {showXpBreakdown ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+
+            {showXpBreakdown && (
+              <div className="mt-1 space-y-0.5 text-[10px] text-[#5c4a3a] font-medium pt-1">
+                {xpResult.breakdown.map((item, i) => (
+                  <div key={i} className="flex items-center justify-between py-0.5">
+                    <span>{item.label}</span>
+                    <span className="font-bold text-[#2f9a4f]">+{item.xp} XP</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Buttons */}
         <div className="w-full flex flex-col gap-1.5">
           <button
@@ -212,3 +291,4 @@ export const WinnerScreen: React.FC<WinnerScreenProps> = ({
     </div>
   );
 };
+

@@ -1,19 +1,34 @@
 import React from 'react';
-import { Users, Swords, ArrowLeft, Globe, Bot } from 'lucide-react';
-import { Friend } from '../types/game';
+import { Users, Swords, ArrowLeft, Globe, Bot, Trophy, Lock } from 'lucide-react';
+import { Friend, UserAccount } from '../types/game';
 
 interface ModeSelectScreenProps {
+  user?: UserAccount;
   friends?: Friend[];
-  onSelectMode: (mode: 'online' | 'cpu' | 'challenge_friend' | 'pass_and_play') => void;
+  onSelectMode: (mode: 'online' | 'cpu' | 'challenge_friend' | 'pass_and_play' | 'ranked') => void;
   onSelectFriend?: (friend: Friend) => void;
   onInviteFriends?: () => void;
+  onToast?: (msg: string) => void;
   onBack: () => void;
 }
 
 export const ModeSelectScreen: React.FC<ModeSelectScreenProps> = ({
+  user,
   onSelectMode,
+  onToast,
   onBack,
 }) => {
+  const currentLevel = user?.level || 1;
+  const isRankedUnlocked = currentLevel >= 10 || !!user?.rankedUnlocked;
+
+  const handleRankedClick = () => {
+    if (isRankedUnlocked) {
+      onSelectMode('ranked');
+    } else {
+      onToast?.(`🔒 Ranked Mode unlocks at Level 10! (You are Level ${currentLevel})`);
+    }
+  };
+
   return (
     <div className="w-full max-h-[calc(100vh-65px)] overflow-y-auto custom-scrollbar flex flex-col justify-center items-center select-none py-4 px-2">
       {/* 1. Main Select Game Mode Card (centered, scrollable if height constrained) */}
@@ -22,11 +37,60 @@ export const ModeSelectScreen: React.FC<ModeSelectScreenProps> = ({
           <h2 className="text-lg sm:text-xl font-black text-[#1c6a35] mb-0.5 text-center">
             Select Game Mode
           </h2>
-          <p className="text-[11px] sm:text-xs text-[#6e533c] text-center mb-3.5 font-medium">
+          <p className="text-[11px] sm:text-xs text-[#6e533c] text-center mb-3 font-medium">
             Choose how you want to play Color Run
           </p>
 
           <div className="w-full flex flex-col gap-2.5">
+            {/* Mode: Ranked Competitive (Unlocks at Level 10) */}
+            <button
+              onClick={handleRankedClick}
+              className={`w-full p-2.5 sm:p-3 rounded-2xl border-2 shadow-md text-left transition-all active:scale-98 flex items-center justify-between gap-3 group cursor-pointer ${
+                isRankedUnlocked
+                  ? 'bg-gradient-to-r from-amber-500/10 via-yellow-400/15 to-amber-500/10 hover:bg-[#fff9e6] border-[#e5a01f]'
+                  : 'bg-stone-100 hover:bg-stone-150 border-stone-300 opacity-80'
+              }`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform ${
+                    isRankedUnlocked
+                      ? 'bg-gradient-to-br from-amber-500 to-yellow-500 text-stone-950 font-black'
+                      : 'bg-stone-400 text-stone-100'
+                  }`}
+                >
+                  <Trophy className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-sm font-black ${isRankedUnlocked ? 'text-[#8c5700]' : 'text-stone-600'}`}>
+                      Ranked Mode
+                    </span>
+                    {isRankedUnlocked ? (
+                      <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-700 font-extrabold text-[9px] border border-amber-400/50">
+                        COMPETITIVE
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.2 rounded-full bg-stone-300 text-stone-600 font-bold text-[9px]">
+                        LOCKED
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-[#6d5138] leading-tight">
+                    {isRankedUnlocked
+                      ? 'Ranked MMR matchmaking against verified players.'
+                      : `Unlocks at Level 10 (Current: Lv. ${currentLevel} / 10)`}
+                  </div>
+                </div>
+              </div>
+
+              {!isRankedUnlocked && (
+                <div className="shrink-0 p-1.5 rounded-full bg-stone-200 text-stone-500">
+                  <Lock className="w-4 h-4" />
+                </div>
+              )}
+            </button>
+
             {/* Mode 1: Multiplayer Online */}
             <button
               onClick={() => onSelectMode('online')}

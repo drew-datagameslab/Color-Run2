@@ -393,6 +393,21 @@ export async function syncUserProfileToFirestore(
       phoneNumber: user.phoneNumber || null,
       avatar: user.avatar,
       diceColors: user.diceColors || ['blue', 'red'],
+      // Level & XP progression
+      level: user.level || 1,
+      xp: user.xp || 0,
+      totalXp: user.totalXp || 0,
+      prestige: user.prestige || 0,
+      title: user.title || null,
+      banner: user.banner || null,
+      nameColor: user.nameColor || null,
+      unlockedRewards: user.unlockedRewards || [],
+      unlockedEmotes: user.unlockedEmotes || [],
+      unlockedTitles: user.unlockedTitles || [],
+      unlockedBanners: user.unlockedBanners || [],
+      lastFirstWinDate: user.lastFirstWinDate || null,
+      rankedUnlocked: user.rankedUnlocked || ((user.level || 1) >= 10),
+      matchmakingRating: user.matchmakingRating || ((user.level || 1) * 100),
       updatedAt: new Date().toISOString(),
     };
     if (coins !== undefined) {
@@ -428,6 +443,20 @@ export async function loadUserProfileFromFirestore(userId: string): Promise<User
         isGuest: !!data.isGuest,
         diceColors: (data.diceColors as [DiceColor, DiceColor]) || ['blue', 'red'],
         createdAt: data.createdAt,
+        level: data.level || 1,
+        xp: data.xp || 0,
+        totalXp: data.totalXp || 0,
+        prestige: data.prestige || 0,
+        title: data.title || undefined,
+        banner: data.banner || undefined,
+        nameColor: data.nameColor || undefined,
+        unlockedRewards: data.unlockedRewards || [],
+        unlockedEmotes: data.unlockedEmotes || [],
+        unlockedTitles: data.unlockedTitles || [],
+        unlockedBanners: data.unlockedBanners || [],
+        lastFirstWinDate: data.lastFirstWinDate || undefined,
+        rankedUnlocked: data.rankedUnlocked || ((data.level || 1) >= 10),
+        matchmakingRating: data.matchmakingRating || ((data.level || 1) * 100),
       };
     }
   } catch (err) {

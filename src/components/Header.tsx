@@ -36,27 +36,54 @@ export const Header: React.FC<HeaderProps> = ({
           title="Profile & Customization: Volume, Dice, Backgrounds, Avatars"
         >
           {/* Avatar Icon */}
-          <div
-            className="w-10 h-10 sm:w-11 sm:h-11 rounded-full border-2 border-[#f2c14e] shadow-md flex items-center justify-center font-bold text-sm text-white overflow-hidden bg-[#e58a1f] shrink-0 group-hover:ring-2 group-hover:ring-[#f2c14e]/50 transition-all"
-            style={{
-              backgroundImage: user.avatar.image ? `url(${user.avatar.image})` : undefined,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              backgroundColor: user.avatar.color,
-            }}
-          >
-            {!user.avatar.image && (user.name.slice(0, 2).toUpperCase() || 'P1')}
+          <div className="relative shrink-0">
+            <div
+              className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full border-2 shadow-md flex items-center justify-center font-bold text-sm text-white overflow-hidden shrink-0 group-hover:ring-2 group-hover:ring-[#f2c14e]/50 transition-all ${
+                user.prestige && user.prestige > 0
+                  ? 'border-amber-300 ring-2 ring-yellow-400/80 shadow-[0_0_12px_rgba(245,158,11,0.5)] animate-pulse'
+                  : 'border-[#f2c14e] bg-[#e58a1f]'
+              }`}
+              style={{
+                backgroundImage: user.avatar.image ? `url(${user.avatar.image})` : undefined,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundColor: user.avatar.color,
+              }}
+            >
+              {!user.avatar.image && (user.name.slice(0, 2).toUpperCase() || 'P1')}
+            </div>
+
+            {/* Level Badge attached to Avatar */}
+            <div className="absolute -bottom-1 -right-1 px-1.5 py-0.5 rounded-full bg-[#1e1915] border border-amber-400/80 text-[9px] font-black text-amber-300 shadow-xs flex items-center gap-0.5">
+              {user.prestige && user.prestige > 0 ? (
+                <>
+                  <span className="text-[8px] text-yellow-300">⭐</span>
+                  <span>{user.level || 1}</span>
+                </>
+              ) : (
+                <span>Lv.{user.level || 1}</span>
+              )}
+            </div>
           </div>
 
           {/* User Name + Coins Below */}
           <div id="header-user-coins" className="flex flex-col leading-tight">
-            <span className="text-white font-black text-sm sm:text-base uppercase tracking-wide truncate max-w-[120px] sm:max-w-[180px] group-hover:text-[#f2c14e] transition-colors">
+            <span
+              className="font-black text-sm sm:text-base uppercase tracking-wide truncate max-w-[120px] sm:max-w-[180px] transition-colors"
+              style={{ color: user.nameColor || '#ffffff' }}
+            >
               {user.name}
             </span>
-            <span className="text-xs font-bold text-[#f2c14e] flex items-center gap-1 font-mono">
-              <span>🪙</span>
-              <span>{coins.toLocaleString()}</span>
-            </span>
+            <div className="flex items-center gap-1.5 font-mono text-xs">
+              <span id="header-coin-counter" className="font-bold text-[#f2c14e] flex items-center gap-1">
+                <span>🪙</span>
+                <span>{coins.toLocaleString()}</span>
+              </span>
+              <span className="text-white/30 text-[10px]">•</span>
+              <span className="font-bold text-amber-300/90 text-[11px]">
+                {user.prestige && user.prestige > 0 ? `Prestige ${user.prestige}` : `Level ${user.level || 1}`}
+              </span>
+            </div>
           </div>
         </button>
 

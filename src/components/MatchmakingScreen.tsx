@@ -31,6 +31,7 @@ interface MatchmakingScreenProps {
   initialRoom?: GameRoom;
   friends?: Friend[];
   isChallengeMode?: boolean;
+  isRanked?: boolean;
   onMatchReady: (settings: GameSettings) => void;
   onCancel: () => void;
   onToast?: (msg: string) => void;
@@ -45,6 +46,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   initialRoom,
   friends = [],
   isChallengeMode = false,
+  isRanked = false,
   onMatchReady,
   onCancel,
   onToast,
@@ -204,7 +206,8 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
             playerCount,
             buyIn,
             user,
-            equippedColors
+            equippedColors,
+            isRanked
           );
           activeRoom = foundRoom;
         }

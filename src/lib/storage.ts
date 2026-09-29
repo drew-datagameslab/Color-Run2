@@ -52,6 +52,18 @@ export function getInitialUser(): UserAccount {
         scoreboardUnlocked: parsed.scoreboardUnlocked ?? false,
         isAdFree: parsed.isAdFree || adFreeGlobal,
         diceColors: parsed.diceColors || ['blue', 'red'],
+        level: parsed.level || 1,
+        xp: parsed.xp || 0,
+        totalXp: parsed.totalXp || 0,
+        prestige: parsed.prestige || 0,
+        title: parsed.title || undefined,
+        banner: parsed.banner || undefined,
+        nameColor: parsed.nameColor || undefined,
+        unlockedRewards: parsed.unlockedRewards || [],
+        unlockedEmotes: parsed.unlockedEmotes || [],
+        unlockedTitles: parsed.unlockedTitles || [],
+        unlockedBanners: parsed.unlockedBanners || [],
+        rankedUnlocked: parsed.rankedUnlocked || (parsed.level >= 10),
       };
     }
   } catch {
@@ -71,6 +83,15 @@ export function getInitialUser(): UserAccount {
     scoreboardUnlocked: false,
     isAdFree: !!adFreeGlobal,
     diceColors: ['blue', 'red'],
+    level: 1,
+    xp: 0,
+    totalXp: 0,
+    prestige: 0,
+    unlockedRewards: [],
+    unlockedEmotes: [],
+    unlockedTitles: [],
+    unlockedBanners: [],
+    rankedUnlocked: false,
   };
 }
 

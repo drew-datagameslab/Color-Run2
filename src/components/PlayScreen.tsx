@@ -4,7 +4,7 @@ import { scoreDice } from '../lib/scoring';
 import { decideCPUSaves } from '../lib/cpu';
 import { TiebreakerState, findLowestTie, startTiebreaker, tiebreakerRollTotal, currentTiedUnitId, recordTiebreakerRoll, advanceTiebreaker, resolveTiebreakerRound } from '../lib/tiebreaker';
 import { playSfx, playWarning5sSound, stopWarningSound, playEliminatedSound, startBattleMusic, stopBattleMusic } from '../lib/audio';
-import { triggerTurnHaptic } from '../lib/haptics';
+import { triggerTurnHaptic, triggerButtonHaptic } from '../lib/haptics';
 import { getLocalFriends, addFriend, removeFriend } from '../lib/friends';
 import { CardsStrip } from './CardsStrip';
 import { SavedBoard } from './SavedBoard';
@@ -15,13 +15,28 @@ import { Loader2, Swords } from 'lucide-react';
 import { subscribeToRoom, markPlayerLeft, updateRoomGameState, getClientSessionId, RoomGameState } from '../lib/matchmaking';
 import { calculatePayouts } from './PickGameScreen';
 
+export interface MatchSummaryStats {
+  survivedRounds: number;
+  colorBonusPoints: number;
+  placement: number;
+  finished: boolean;
+  colorRunsScored?: number;
+  scoredFiveOfAKind?: boolean;
+  bankedCenturyClub?: boolean;
+  precisionRoller?: boolean;
+  wonTiebreaker?: boolean;
+  underdogAscendant?: boolean;
+  isFriendChallenge?: boolean;
+}
+
 interface PlayScreenProps {
   settings: GameSettings;
   user: UserAccount;
-  onGameOver: (winner: PlayerUnit, units: PlayerUnit[]) => void;
+  onGameOver: (winner: PlayerUnit, units: PlayerUnit[], stats?: MatchSummaryStats) => void;
   onOpenMenu: () => void;
   onAwardPrize?: (amount: number, place: number) => void;
-  onExitGame: (prizeWon?: number) => void;
+  onExitGame: (prizeWon?: number, stats?: MatchSummaryStats) => void;
+  onEmoteSentDuringElimination?: () => void;
 }
 
 function createInitialDice(colorA: DiceColor, colorB: DiceColor): Die[] {
@@ -72,6 +87,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   onOpenMenu,
   onAwardPrize,
   onExitGame,
+  onEmoteSentDuringElimination,
 }) => {
   const userDiceColors: [DiceColor, DiceColor] = user.diceColors || [settings.colorA, settings.colorB];
 
@@ -222,6 +238,50 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const [spectatorChoiceMade, setSpectatorChoiceMade] = useState(false);
   const [spectatorFastForward, setSpectatorFastForward] = useState(false);
 
+  // Emoji Reactions State
+  const [floatingEmotes, setFloatingEmotes] = useState<
+    Array<{ id: string; emoji: string; senderName: string; isSelf: boolean; x: number; y: number }>
+  >([]);
+  const CELEBRATORY_EMOTES = ['🥳', '🔥', '👑', '👏', '🎲', '🎉', '💪', '🏆'];
+
+  const sendEmote = (emoji: string) => {
+    const emoteId = 'emote_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const isElim = phase === 'elimination' || tbActive;
+
+    const randomOffsetX = Math.random() * 80 - 40;
+    const spawnX = Math.max(50, Math.min(window.innerWidth - 50, window.innerWidth / 2 + randomOffsetX));
+    const spawnY = Math.max(100, window.innerHeight * 0.65);
+
+    setFloatingEmotes(prev => [
+      ...prev,
+      { id: emoteId, emoji, senderName: user.name, isSelf: true, x: spawnX, y: spawnY },
+    ]);
+    setTimeout(() => {
+      setFloatingEmotes(prev => prev.filter(e => e.id !== emoteId));
+    }, 2800);
+
+    playSfx('add');
+    triggerButtonHaptic();
+
+    if (isElim) {
+      emotesSentDuringElimRef.current += 1;
+      onEmoteSentDuringElimination?.();
+    }
+
+    if (settings.roomId) {
+      updateRoomGameState(settings.roomId, {
+        latestEmote: {
+          id: emoteId,
+          senderUid: user.uid,
+          senderName: user.name,
+          emoji,
+          timestamp: Date.now(),
+          duringElimination: isElim,
+        },
+      });
+    }
+  };
+
   // Queue of active player units
   const activeUnits = units.filter(u => u.active);
   const curUnit = activeUnits[qIdx] || activeUnits[0];
@@ -257,6 +317,39 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const tbNameOf = (unitId: string) => units.find(u => u.id === unitId)?.name || 'Player';
   const isTiebreakerAuthority = !isMultiplayer || myToken === turnAuthorityToken;
   const tbTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const humanColorBonusTotalRef = useRef<number>(0);
+  const humanColorRunsCountRef = useRef<number>(0);
+  const humanFiveOfAKindScoredRef = useRef<boolean>(false);
+  const humanCenturyClubScoredRef = useRef<boolean>(false);
+  const humanEverInBottomTwoRef = useRef<boolean>(false);
+  const humanWonTiebreakerRef = useRef<boolean>(false);
+  const humanWasLastWhenElimStartedRef = useRef<boolean>(false);
+  const lastEmoteIdRef = useRef<string>('');
+  const emotesSentDuringElimRef = useRef<number>(0);
+
+  const getMatchStats = (currentUnitsList: PlayerUnit[], winnerUnit?: PlayerUnit): MatchSummaryStats => {
+    const human = currentUnitsList.find(u => !u.isCPU);
+    const place = human?.place || (winnerUnit?.id === human?.id ? 1 : 2);
+    const totalP = settings.playersCount || currentUnitsList.length;
+    const isWin = place === 1;
+    return {
+      survivedRounds: Math.max(0, totalP - place),
+      colorBonusPoints: humanColorBonusTotalRef.current,
+      placement: place,
+      finished: true,
+      colorRunsScored: humanColorRunsCountRef.current,
+      scoredFiveOfAKind: humanFiveOfAKindScoredRef.current,
+      bankedCenturyClub: humanCenturyClubScoredRef.current,
+      precisionRoller: isWin && !humanEverInBottomTwoRef.current,
+      wonTiebreaker: humanWonTiebreakerRef.current,
+      underdogAscendant: isWin && humanWasLastWhenElimStartedRef.current,
+      isFriendChallenge:
+        settings.isChallenge ||
+        settings.isFriendsChallenge ||
+        settings.mode === 'challenge_friend' ||
+        settings.mode === 'challenge',
+    };
+  };
 
   useEffect(() => {
     return () => tbTimersRef.current.forEach(clearTimeout);
@@ -442,6 +535,34 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       const gs = updatedRoom.gameState;
       if (!gs) return;
 
+      // Sync real-time emoji reactions from peers in the room
+      if (gs.latestEmote && gs.latestEmote.id && gs.latestEmote.id !== lastEmoteIdRef.current) {
+        lastEmoteIdRef.current = gs.latestEmote.id;
+        const isSelf = gs.latestEmote.senderUid === user.uid;
+        if (!isSelf) {
+          const emoteId = gs.latestEmote.id;
+          const randomOffsetX = Math.random() * 80 - 40;
+          const spawnX = Math.max(50, Math.min(window.innerWidth - 50, window.innerWidth / 2 + randomOffsetX));
+          const spawnY = Math.max(100, window.innerHeight * 0.55);
+
+          setFloatingEmotes(prev => [
+            ...prev,
+            {
+              id: emoteId,
+              emoji: gs.latestEmote!.emoji,
+              senderName: gs.latestEmote!.senderName,
+              isSelf: false,
+              x: spawnX,
+              y: spawnY,
+            },
+          ]);
+          playSfx('add');
+          setTimeout(() => {
+            setFloatingEmotes(prev => prev.filter(e => e.id !== emoteId));
+          }, 2800);
+        }
+      }
+
       const isNewAction =
         !lastActionIdRef.current ||
         (gs.lastActionId && gs.lastActionId !== lastActionIdRef.current) ||
@@ -521,7 +642,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             setUnits(prev => {
               const winner = prev.find(u => u.active) || prev[0];
               if (winner) winner.place = 1;
-              onGameOver(winner, prev);
+              onGameOver(winner, prev, getMatchStats(prev, winner));
               return prev;
             });
             return;
@@ -577,7 +698,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           setUnits(prev => {
             const winner = prev.find(u => u.active) || prev[0];
             if (winner) winner.place = 1;
-            onGameOver(winner, prev);
+            onGameOver(winner, prev, getMatchStats(prev, winner));
             return prev;
           });
         }
@@ -716,11 +837,15 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         announcedChimesRef.current[k] = tier;
         if (tier === 3) playSfx('s3');
         else if (tier === 4) playSfx('s4');
-        else if (tier === 5) playSfx('s5');
-        else if (tier === 6) {
+        else if (tier === 5) {
+          playSfx('s5');
+          humanFiveOfAKindScoredRef.current = true;
+        } else if (tier === 6) {
           playSfx('s6');
           setShowSixCelebration(true);
           triggeredSix = true;
+          humanColorRunsCountRef.current += 1;
+          humanFiveOfAKindScoredRef.current = true;
         }
       }
     }
@@ -1063,6 +1188,10 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
     const currentSaved = curDice.filter(d => d.zone === 'saved');
     const finalScore = scoreDice(currentSaved);
+    if (isHumanOwner && !isCPU) {
+      const turnCb = finalScore.sets.reduce((sum, s) => sum + (s.cb || 0), 0);
+      humanColorBonusTotalRef.current += turnCb;
+    }
     playSfx('add');
 
     // === TIEBREAKER TURN RESOLUTION ===
@@ -1102,6 +1231,12 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         const resolved = resolveTiebreakerRound(tb, nextRollScores, tbNameOf);
 
         if (resolved.phase === 'blinking') {
+          // Check if human was tied and survived / won
+          const human = units.find(u => u.isOwner || (!u.isCPU && !isMultiplayer));
+          if (human && tb.tiedUnitIds.includes(human.id) && resolved.eliminatedUnitId !== human.id) {
+            humanWonTiebreakerRef.current = true;
+          }
+
           // Winner's board (or two advancing boards in 3-player) will blink for 3 seconds!
           const blinkingTb: TiebreakerState = {
             ...resolved,
@@ -1147,6 +1282,15 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     // Update player score & history
     const updatedUnits = units.map(u => {
       if (u.id === curUnit.id) {
+        if (u.isOwner) {
+          if (finalScore.total >= 70) {
+            humanCenturyClubScoredRef.current = true;
+          }
+          const has5OfAKind = finalScore.sets.some(s => Object.values(s.byColor).some(cnt => cnt >= 5));
+          if (has5OfAKind) {
+            humanFiveOfAKindScoredRef.current = true;
+          }
+        }
         const nextScore = u.score + finalScore.total;
         const nextHist = { ...u.history, [round]: finalScore.total };
         return { ...u, score: nextScore, history: nextHist };
@@ -1248,6 +1392,14 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     if (phase === 'regular') {
       const thresholdReached = liveUnits.some(u => u.score >= settings.threshold);
       if (thresholdReached) {
+        // Track if human entered elimination threshold in last place
+        const sortedScores = [...liveUnits].sort((a, b) => a.score - b.score);
+        const lowestScore = sortedScores[0]?.score;
+        const human = liveUnits.find(u => u.isOwner || (!u.isCPU && !isMultiplayer));
+        if (human && human.score === lowestScore) {
+          humanWasLastWhenElimStartedRef.current = true;
+        }
+
         setPhase('elimination');
         const msg = `Someone reached ${settings.threshold} points! From here, every player plays a full round, then the lowest total is knocked out. Last one standing wins!`;
         triggerEliminationWarning(msg);
@@ -1334,6 +1486,16 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         });
       }
     } else {
+      // Elimination phase: check if human is in the bottom two among live units (Precision Roller tracking)
+      if (liveUnits.length >= 3) {
+        const sortedLive = [...liveUnits].sort((a, b) => a.score - b.score);
+        const bottomTwoIds = sortedLive.slice(0, 2).map(u => u.id);
+        const human = liveUnits.find(u => u.isOwner || (!u.isCPU && !isMultiplayer));
+        if (human && bottomTwoIds.includes(human.id)) {
+          humanEverInBottomTwoRef.current = true;
+        }
+      }
+
       // Elimination phase: a tie for the lowest total starts the Battle to Survive roll-off
       const tied = findLowestTie(liveUnits);
       if (tied.length > 0) {
@@ -1396,7 +1558,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         });
       }
 
-      onGameOver(winner, unitsWithWinner);
+      onGameOver(winner, unitsWithWinner, getMatchStats(unitsWithWinner, winner));
       return;
     }
 
@@ -1752,7 +1914,13 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     if (settings.roomId && user?.uid) {
       markPlayerLeft(settings.roomId, user.uid);
     }
-    onExitGame(eliminatedPrize);
+    const stats: MatchSummaryStats = {
+      survivedRounds: Math.max(0, (settings.playersCount || units.length) - humanPlace),
+      colorBonusPoints: humanColorBonusTotalRef.current,
+      placement: humanPlace,
+      finished: true,
+    };
+    onExitGame(eliminatedPrize, stats);
   };
 
   const handleExitClick = () => {
@@ -1764,7 +1932,13 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       onOpenMenu();
     } else {
       // User is eliminated — they can leave early and still receive any prize they earned!
-      onExitGame(eliminatedPrize);
+      const stats: MatchSummaryStats = {
+        survivedRounds: Math.max(0, (settings.playersCount || units.length) - humanPlace),
+        colorBonusPoints: humanColorBonusTotalRef.current,
+        placement: humanPlace,
+        finished: true,
+      };
+      onExitGame(eliminatedPrize, stats);
     }
   };
 
@@ -1999,31 +2173,40 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
               className="absolute inset-0 z-30 flex flex-col items-center justify-center p-3 sm:p-4 rounded-2xl bg-[#140e0a]/95 border-2 border-[#e58a1f] shadow-2xl backdrop-blur-xs text-center animate-scale-up select-none"
             >
               <div className="text-3xl sm:text-4xl mb-1.5 drop-shadow-md">
-                🤖
+                🚫
               </div>
-              <h2 className="text-base sm:text-lg md:text-xl font-black text-white tracking-wide mb-3 drop-shadow-md">
-                You're out — the CPUs are still playing!
+              <h2 className="text-base sm:text-lg md:text-xl font-black text-white tracking-wide mb-1 drop-shadow-md">
+                You have been eliminated!
               </h2>
+
+              {eliminatedPrize > 0 ? (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-400/60 text-amber-300 font-bold text-xs sm:text-sm mb-3 shadow-xs">
+                  <span>🪙</span>
+                  <span>You won {eliminatedPrize} coins in this game!</span>
+                </div>
+              ) : (
+                <p className="text-[11px] sm:text-xs text-stone-300 mb-3 max-w-[260px] leading-snug">
+                  You're out — the CPUs are still playing!
+                </p>
+              )}
 
               <div className="flex flex-row items-center justify-center gap-2 sm:gap-3 w-full max-w-[290px]">
                 <button
-                  id="btn-speed-to-final-score"
+                  id="btn-speed-to-finish"
                   onClick={() => {
                     setSpectatorChoiceMade(true);
                     setSpectatorFastForward(true);
                   }}
                   className="flex-1 py-2 sm:py-2.5 px-2.5 bg-[#28974a] hover:bg-[#22803e] text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-95 cursor-pointer border-b-2 border-[#185e2e] whitespace-nowrap"
                 >
-                  Speed to Final Score
+                  Speed to finish
                 </button>
                 <button
-                  id="btn-watch-game"
-                  onClick={() => {
-                    setSpectatorChoiceMade(true);
-                  }}
-                  className="flex-1 py-2 sm:py-2.5 px-2.5 bg-[#efe3ad] hover:bg-[#e4d69b] text-[#2e2316] font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-95 cursor-pointer border-b-2 border-[#cfc38a] whitespace-nowrap"
+                  id="btn-exit-game"
+                  onClick={handleEliminationExit}
+                  className="flex-1 py-2 sm:py-2.5 px-2.5 bg-[#8c745e] hover:bg-[#735d49] text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-95 cursor-pointer border-b-2 border-[#5c4a3a] whitespace-nowrap"
                 >
-                  Watch Game
+                  Exit Game
                 </button>
               </div>
             </div>
@@ -2076,6 +2259,53 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             }}
           />
         </div>
+      </div>
+
+      {/* Floating Emoji Reactions Layer */}
+      <div className="fixed inset-0 pointer-events-none z-40 overflow-hidden">
+        {floatingEmotes.map(emote => (
+          <div
+            key={emote.id}
+            className="absolute flex flex-col items-center animate-bounce-subtle pointer-events-none transition-all duration-700"
+            style={{
+              left: `${emote.x}px`,
+              top: `${emote.y}px`,
+              transform: 'translate(-50%, -50%)',
+            }}
+          >
+            <span className="text-3xl sm:text-4xl filter drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]">
+              {emote.emoji}
+            </span>
+            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-black/80 text-white border border-white/20 whitespace-nowrap mt-1 shadow-md">
+              {emote.senderName}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Emoji Reaction Bar (Online Multiplayer, Challenge Friends & all game modes) */}
+      <div className="w-full flex items-center justify-between px-2 py-1 mb-1 rounded-xl bg-black/40 backdrop-blur-xs border border-white/10 shadow-sm shrink-0">
+        <div className="flex items-center gap-1 text-[10px] sm:text-xs font-black text-amber-300 shrink-0">
+          <span>💬 React:</span>
+        </div>
+        <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto scrollbar-none py-0.5">
+          {CELEBRATORY_EMOTES.map(emoji => (
+            <button
+              key={emoji}
+              type="button"
+              onClick={() => sendEmote(emoji)}
+              className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg bg-white/15 hover:bg-white/30 text-base sm:text-lg transition-transform active:scale-125 cursor-pointer shadow-xs"
+              title={`Send ${emoji} reaction`}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+        {(phase === 'elimination' || tbActive) && (
+          <span className="text-[9px] font-bold text-amber-400 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-400/40 shrink-0 hidden sm:inline-block">
+            🎯 Emote Mission Active
+          </span>
+        )}
       </div>
 
       {/* Bottom Controls Area (Fixed at bottom) */}

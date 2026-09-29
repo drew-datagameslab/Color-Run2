@@ -17,6 +17,20 @@
         "scoreboardUnlocked": { "type": "boolean" },
         "diceColors": { "type": "array" },
         "avatar": { "type": "object" },
+        "xp": { "type": "number" },
+        "totalXp": { "type": "number" },
+        "level": { "type": "number" },
+        "prestige": { "type": "number" },
+        "title": { "type": "string" },
+        "banner": { "type": "string" },
+        "nameColor": { "type": "string" },
+        "unlockedRewards": { "type": "array" },
+        "unlockedEmotes": { "type": "array" },
+        "unlockedTitles": { "type": "array" },
+        "unlockedBanners": { "type": "array" },
+        "lastFirstWinDate": { "type": "string" },
+        "rankedUnlocked": { "type": "boolean" },
+        "matchmakingRating": { "type": "number" },
         "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" }
       }
@@ -106,6 +120,9 @@
         "filledBots": { "type": "array" },
         "slots": { "type": "array" },
         "leftPlayers": { "type": "array" },
+        "isRanked": { "type": "boolean" },
+        "minLevel": { "type": "number" },
+        "maxLevel": { "type": "number" },
         "gameState": { "type": "object" },
         "updatedAt": { "type": "number" }
       }

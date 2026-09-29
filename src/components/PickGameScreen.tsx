@@ -7,7 +7,7 @@ import { joinRoomByCode, GameRoom } from '../lib/matchmaking';
 import { playSfx } from '../lib/audio';
 
 interface PickGameScreenProps {
-  mode: 'online' | 'cpu' | 'pass_and_play' | 'challenge' | 'challenge_friend';
+  mode: 'online' | 'cpu' | 'pass_and_play' | 'challenge' | 'challenge_friend' | 'ranked';
   user: UserAccount;
   coins: number;
   equippedColors: [DiceColor, DiceColor];
@@ -184,6 +184,7 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
         user={user}
         equippedColors={equippedColors}
         initialRoom={matchmakingConfig.initialRoom}
+        isRanked={mode === 'ranked'}
         onMatchReady={settings => {
           setMatchmakingConfig(null);
           onStartGame(settings);
