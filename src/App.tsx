@@ -13,7 +13,16 @@ import {
   markDailyBonusClaimed,
   DEFAULT_AVATARS,
 } from './lib/storage';
-import { getLocalFriends, syncFriendsFromFirestore, removeFriend } from './lib/friends';
+import {
+  getLocalFriends,
+  syncFriendsFromFirestore,
+  removeFriend,
+  getFriendRequests,
+  subscribeToFriendRequests,
+  acceptFriendRequest,
+  dismissFriendRequest,
+} from './lib/friends';
+import { FriendRequest } from './types/game';
 import { initAudio, unlockAudio, playSfx } from './lib/audio';
 import { Header } from './components/Header';
 import { SignInScreen } from './components/SignInScreen';
@@ -28,6 +37,7 @@ import { ShopScreen } from './components/ShopScreen';
 import { ScoreboardScreen } from './components/ScoreboardScreen';
 import { MatchmakingScreen } from './components/MatchmakingScreen';
 import { GameInviteOverlay } from './components/GameInviteOverlay';
+import { FriendRequestBanner } from './components/FriendRequestBanner';
 import { RulesModal } from './components/RulesModal';
 import { MissionsModal } from './components/MissionsModal';
 import { StandingsSheet } from './components/StandingsSheet';
@@ -76,6 +86,8 @@ export default function App() {
 
   const [gameMode, setGameMode] = useState<'online' | 'cpu' | 'pass_and_play' | 'challenge' | 'challenge_friend' | 'ranked'>('online');
   const [friends, setFriends] = useState<Friend[]>(() => getLocalFriends(user.uid));
+  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>(() => getFriendRequests(user.uid));
+  const [incomingFriendRequest, setIncomingFriendRequest] = useState<FriendRequest | null>(null);
   const [isChallengeFriendModalOpen, setIsChallengeFriendModalOpen] = useState(false);
   const [selectedChallengeFriend, setSelectedChallengeFriend] = useState<Friend | null>(null);
   const [incomingInvite, setIncomingInvite] = useState<GameInvite | null>(null);
@@ -201,6 +213,39 @@ export default function App() {
     }
   }, [user]);
 
+  // Subscribe to real-time friend requests for this user
+  useEffect(() => {
+    if (user?.uid) {
+      const unsubscribe = subscribeToFriendRequests(
+        user,
+        reqs => {
+          setFriendRequests(reqs);
+        },
+        bannerReq => {
+          setIncomingFriendRequest(bannerReq);
+        }
+      );
+      return () => unsubscribe();
+    }
+  }, [user]);
+
+  const handleAcceptFriendRequest = async (request: FriendRequest) => {
+    const res = await acceptFriendRequest(user.uid, user.name, request);
+    setFriends(res.friends);
+    setFriendRequests(res.requests);
+    setIncomingFriendRequest(null);
+    triggerToast(`✨ You and ${request.fromName} are now friends!`);
+    playSfx('fanfare');
+  };
+
+  const handleDismissFriendRequest = async (request: FriendRequest) => {
+    const updated = await dismissFriendRequest(user.uid, request.id);
+    setFriendRequests(updated);
+    setIncomingFriendRequest(null);
+    triggerToast('Friend request dismissed');
+    playSfx('add');
+  };
+
   const handleStartChallengeRoom = async (selectedFriends: Friend[], buyIn: number) => {
     try {
       const equippedDice = shopSettings.equippedColors;
@@ -267,9 +312,9 @@ export default function App() {
     }
   };
 
-  // Check 24-hour post-signup Referral Overlay:
-  // "After the user has signed up, after 24 hours, let's create an overlay that says:
-  // Ready to Challenge Your Friends? Send them a link to play the game with you!"
+  // [v6.2.3 NOTE]: Deactivated the "Invite a friend" screen from appearing when a user starts the app for now.
+  // Will be reactivated later with refinements per user instructions.
+  /*
   useEffect(() => {
     if (screen !== 'signin' && user?.uid && !user.isGuest) {
       if (shouldShow24hReferralOverlay(user)) {
@@ -280,6 +325,7 @@ export default function App() {
       }
     }
   }, [screen, user]);
+  */
 
   const handleClaimDailyBonus = (wonCoins: number) => {
     markDailyBonusClaimed(user.uid);
@@ -514,7 +560,7 @@ export default function App() {
       lastFirstWinDate: user.lastFirstWinDate,
     });
 
-    const { updatedState, leveledUp, newRewards, coinsAwarded } = applyXpToUser(
+    const { updatedState, leveledUp, newRewards, coinsAwarded, diceCreditsAwarded } = applyXpToUser(
       {
         xp: user.xp || 0,
         totalXp: user.totalXp || 0,
@@ -545,9 +591,17 @@ export default function App() {
       wonCoins += coinsAwarded;
     }
 
+    if (diceCreditsAwarded > 0) {
+      const nextCredits = (shopSettings.diceColorCredits || 0) + diceCreditsAwarded;
+      const nextShop = { ...shopSettings, diceColorCredits: nextCredits };
+      setShopSettings(nextShop);
+      saveShopSettings(nextShop);
+    }
+
     const mergedUser: UserAccount = {
       ...user,
       ...updatedState,
+      diceColorCredits: (user.diceColorCredits || 0) + (diceCreditsAwarded || 0),
     };
     handleSaveUser(mergedUser);
 
@@ -633,6 +687,13 @@ export default function App() {
           onAcceptAndJoin={handleAcceptInvite}
           onJoinWhenDone={handleWillJoinWhenDone}
           onDismiss={handleDismissInvite}
+        />
+
+        {/* Live Friend Request Banner Overlay */}
+        <FriendRequestBanner
+          request={incomingFriendRequest}
+          onAccept={handleAcceptFriendRequest}
+          onDismiss={handleDismissFriendRequest}
         />
 
         {/* Screen Router */}
@@ -949,10 +1010,13 @@ export default function App() {
         user={user}
         shopSettings={shopSettings}
         coins={coins}
+        friends={friends}
+        onFriendsChange={setFriends}
+        friendRequests={friendRequests}
+        onFriendRequestsChange={setFriendRequests}
         onClose={() => setIsProfileModalOpen(false)}
         onSaveUser={handleSaveUser}
         onUpdateShop={handleUpdateShop}
-        onOpenFiles={() => setIsFilesModalOpen(true)}
         onLogOut={handleLogOut}
         onToast={triggerToast}
         onOpenRules={handleOpenRules}

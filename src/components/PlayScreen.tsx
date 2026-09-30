@@ -5,13 +5,15 @@ import { decideCPUSaves } from '../lib/cpu';
 import { TiebreakerState, findLowestTie, startTiebreaker, tiebreakerRollTotal, currentTiedUnitId, recordTiebreakerRoll, advanceTiebreaker, resolveTiebreakerRound } from '../lib/tiebreaker';
 import { playSfx, playWarning5sSound, stopWarningSound, playEliminatedSound, startBattleMusic, stopBattleMusic } from '../lib/audio';
 import { triggerTurnHaptic, triggerButtonHaptic } from '../lib/haptics';
-import { getLocalFriends, addFriend, removeFriend } from '../lib/friends';
+import { getLocalFriends, addFriend, removeFriend, sendFriendRequest } from '../lib/friends';
 import { CardsStrip } from './CardsStrip';
 import { SavedBoard } from './SavedBoard';
 import { RollArea } from './RollArea';
 import { PlayerProfileModal } from './PlayerProfileModal';
 import { BattleVideoOverlay } from './BattleVideoOverlay';
 import { Loader2, Swords } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { ScoreBubbleAnimation, ScoreBubbleData } from './ScoreBubbleAnimation';
 import { subscribeToRoom, markPlayerLeft, updateRoomGameState, getClientSessionId, RoomGameState } from '../lib/matchmaking';
 import { calculatePayouts } from './PickGameScreen';
 
@@ -216,10 +218,13 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const bankTurnRef = useRef<() => void>(() => {});
 
   const handleAddFriend = async (player: PlayerUnit) => {
-    const res = await addFriend(user.uid, {
+    const res = await sendFriendRequest(user, {
+      id: player.id,
+      uid: player.uid,
       name: player.name,
       color: player.color,
       image: player.image,
+      isCPU: player.isCPU,
     });
     setFriends(res.friends);
     setToastMsg(res.message);
@@ -228,7 +233,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const handleRemoveFriend = async (playerName: string) => {
     const target = friends.find(f => f.name.toLowerCase() === playerName.toLowerCase());
     if (target) {
-      const updated = await removeFriend(user.uid, target.id);
+      const updated = await removeFriend(user.uid, target.id, user.name);
       setFriends(updated);
       setToastMsg(`Removed ${playerName} from friends.`);
     }
@@ -244,10 +249,96 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   >([]);
   const CELEBRATORY_EMOTES = ['🥳', '🔥', '👑', '👏', '🎲', '🎉', '💪', '🏆'];
 
+  // Saved Dice Area Emoji Reactions
+  const [savedBoardEmotes, setSavedBoardEmotes] = useState<
+    Array<{ id: string; emoji: string; senderName: string; timestamp: number }>
+  >([]);
+
+  // React Overlay State (10-second countdown timer per user specification)
+  const [isReactOverlayOpen, setIsReactOverlayOpen] = useState(false);
+  const [reactTimeRemaining, setReactTimeRemaining] = useState(10);
+  const REACT_EMOJI_OPTIONS = ['🥳', '🔥', '👑', '👏', '🎲', '🎉', '💪', '🏆', '❤️', '😂', '🤯', '😎'];
+
+  // Floating Score Bubble Animation State (when user or CPU banks score)
+  const [activeScoreBubble, setActiveScoreBubble] = useState<ScoreBubbleData | null>(null);
+  const [isScoreBanking, setIsScoreBanking] = useState<boolean>(false);
+  const lastHandledBankTimestampRef = useRef<number>(0);
+
+  const triggerScoreBubble = useCallback((points: number, unitId: string) => {
+    // 1. Origin: From the total points (In the Saved Dice bar)
+    const pointsElem = document.getElementById('saved-dice-total-points');
+    const pointsRect = pointsElem?.getBoundingClientRect();
+
+    const startX = pointsRect ? pointsRect.left + pointsRect.width / 2 : window.innerWidth * 0.78;
+    const startY = pointsRect ? pointsRect.top + pointsRect.height / 2 : window.innerHeight * 0.35;
+
+    // 2. Target: To the user or cpu player's scoreboard card
+    const cardElem =
+      document.getElementById(`scoreboard-card-${unitId}`) ||
+      document.querySelector(`[id="scoreboard-card-${unitId}"]`);
+
+    if (cardElem) {
+      cardElem.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+    const cardRect = cardElem?.getBoundingClientRect();
+
+    const targetX = cardRect ? cardRect.left + cardRect.width / 2 : window.innerWidth / 2;
+    const targetY = cardRect ? cardRect.top + cardRect.height / 2 : 110;
+
+    setActiveScoreBubble({
+      id: 'bubble_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      points,
+      startX,
+      startY,
+      targetX,
+      targetY,
+      unitId,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isReactOverlayOpen) return;
+    setReactTimeRemaining(10);
+    const interval = setInterval(() => {
+      setReactTimeRemaining(prev => {
+        if (prev <= 1) {
+          setIsReactOverlayOpen(false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isReactOverlayOpen]);
+
+  const handleOpenReactOverlay = () => {
+    setReactTimeRemaining(10);
+    setIsReactOverlayOpen(true);
+    triggerButtonHaptic();
+  };
+
+  const handleSelectReactEmoji = (emoji: string) => {
+    sendEmote(emoji);
+    setIsReactOverlayOpen(false);
+  };
+
   const sendEmote = (emoji: string) => {
     const emoteId = 'emote_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     const isElim = phase === 'elimination' || tbActive;
 
+    // 1. Appear in the saved dice area of device
+    const newSavedEmote = {
+      id: emoteId,
+      emoji,
+      senderName: user.name,
+      timestamp: Date.now(),
+    };
+    setSavedBoardEmotes(prev => [...prev.slice(-3), newSavedEmote]);
+    setTimeout(() => {
+      setSavedBoardEmotes(prev => prev.filter(e => e.id !== emoteId));
+    }, 4000);
+
+    // 2. Floating animation
     const randomOffsetX = Math.random() * 80 - 40;
     const spawnX = Math.max(50, Math.min(window.innerWidth - 50, window.innerWidth / 2 + randomOffsetX));
     const spawnY = Math.max(100, window.innerHeight * 0.65);
@@ -541,6 +632,19 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         const isSelf = gs.latestEmote.senderUid === user.uid;
         if (!isSelf) {
           const emoteId = gs.latestEmote.id;
+
+          // Appear in saved dice area of all users' devices
+          const newSavedEmote = {
+            id: emoteId,
+            emoji: gs.latestEmote.emoji,
+            senderName: gs.latestEmote.senderName,
+            timestamp: Date.now(),
+          };
+          setSavedBoardEmotes(prev => [...prev.slice(-3), newSavedEmote]);
+          setTimeout(() => {
+            setSavedBoardEmotes(prev => prev.filter(e => e.id !== emoteId));
+          }, 4000);
+
           const randomOffsetX = Math.random() * 80 - 40;
           const spawnX = Math.max(50, Math.min(window.innerWidth - 50, window.innerWidth / 2 + randomOffsetX));
           const spawnY = Math.max(100, window.innerHeight * 0.55);
@@ -680,6 +784,28 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             if (rollAnimTimeoutRef.current) {
               clearTimeout(rollAnimTimeoutRef.current);
               rollAnimTimeoutRef.current = null;
+            }
+            if (
+              gs.lastAction === 'bank' &&
+              !isFromSelf &&
+              gs.scores &&
+              gs.actionTimestamp &&
+              gs.actionTimestamp > lastHandledBankTimestampRef.current
+            ) {
+              lastHandledBankTimestampRef.current = gs.actionTimestamp;
+              const targetUnitId =
+                (gs as any).lastBankedUnitId ||
+                (typeof gs.activeUnitIndex === 'number' && units[gs.activeUnitIndex]?.id) ||
+                units.find(u => gs.scores![u.id] !== undefined && gs.scores![u.id] > u.score)?.id;
+              if (targetUnitId && gs.scores[targetUnitId] !== undefined) {
+                const scoringUnit = units.find(u => u.id === targetUnitId);
+                const addedPts = typeof (gs as any).lastBankedPoints === 'number'
+                  ? (gs as any).lastBankedPoints
+                  : scoringUnit ? gs.scores[targetUnitId] - scoringUnit.score : 0;
+                if (addedPts > 0) {
+                  triggerScoreBubble(addedPts, targetUnitId);
+                }
+              }
             }
             playSfx('add');
             setIsRolling(false);
@@ -856,7 +982,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   // Roll dice action: re-slots active dice and locks final values when animation completes
   const doRoll = () => {
     stopWarningSound();
-    if (rollsUsed >= 3 || isRolling) return;
+    if (rollsUsed >= 3 || isRolling || isScoreBanking) return;
     if (!isHumanOwner && !(isCPU && isTurnAuthority)) return;
     if (joiningCountdown !== null && joiningCountdown > 0) return;
 
@@ -1152,7 +1278,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     const canAct = tbActive
       ? (isTiedLocalHuman || (tiedCurrentUnit?.isCPU && isTiebreakerAuthority) || (isTiedRemoteHuman && isTiebreakerAuthority && turnSecondsLeft <= -15))
       : (isLocalHuman(curUnit) || (curUnit.isCPU && isTurnAuthority) || (isRemoteHuman && isTurnAuthority && turnSecondsLeft <= -15));
-    if (!canAct) return;
+    if (!canAct || isScoreBanking) return;
     if (joiningCountdown !== null && joiningCountdown > 0) return;
     if (tbActive && tiebreaker?.phase !== 'rolling') return;
 
@@ -1194,167 +1320,184 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     }
     playSfx('add');
 
-    // === TIEBREAKER TURN RESOLUTION ===
-    if (tbActive && tiebreaker && tiebreaker.phase === 'rolling' && tiedCurrentUnit) {
-      const tb = tiebreaker;
-      const turnTotal = finalScore.total > 0 ? finalScore.total : curDice.reduce((acc, d) => acc + d.value, 0);
+    // Trigger bubble animation: floats points total to user's scoreboard
+    const pointsToFloat = tbActive
+      ? (finalScore.total > 0 ? finalScore.total : curDice.reduce((acc, d) => acc + d.value, 0))
+      : finalScore.total;
+    setIsScoreBanking(true);
+    triggerScoreBubble(pointsToFloat, activePlayer.id);
 
-      setRollsUsed(0);
-      setAnnouncedChimes({});
-      setShowSixCelebration(false);
+    const executeBankTransition = () => {
+      setIsScoreBanking(false);
 
-      const nextRollScores = {
-        ...tb.rollScores,
-        [tiedCurrentUnit.id]: turnTotal,
-      };
+      // === TIEBREAKER TURN RESOLUTION ===
+      if (tbActive && tiebreaker && tiebreaker.phase === 'rolling' && tiedCurrentUnit) {
+        const tb = tiebreaker;
+        const turnTotal = finalScore.total > 0 ? finalScore.total : curDice.reduce((acc, d) => acc + d.value, 0);
 
-      const nextTiedIdx = tb.activeTiedIndex + 1;
-      if (nextTiedIdx < tb.tiedUnitIds.length) {
-        // Next tied player in this tiebreak round takes their normal turn!
-        const nextTargetUnitId = tb.tiedUnitIds[nextTiedIdx];
-        const nextDiceForTurn = freshDiceFor(nextTargetUnitId) || createInitialDice(settings.colorA, settings.colorB);
-        const nextTb: TiebreakerState = {
-          ...tb,
-          activeTiedIndex: nextTiedIdx,
-          rollScores: nextRollScores,
-          lastRollTotal: turnTotal,
+        setRollsUsed(0);
+        setAnnouncedChimes({});
+        setShowSixCelebration(false);
+
+        const nextRollScores = {
+          ...tb.rollScores,
+          [tiedCurrentUnit.id]: turnTotal,
         };
 
-        setDice(nextDiceForTurn);
-        setTurnSecondsLeft(ROLL_1_TIME);
-        setIsAutoPilotTurn(false);
-        setTiebreaker(nextTb);
-
-        publishTiebreaker('tiebreaker_next', nextTb, nextDiceForTurn);
-      } else {
-        // Final player in the tiebreak hits "SCORE IT"!
-        const resolved = resolveTiebreakerRound(tb, nextRollScores, tbNameOf);
-
-        if (resolved.phase === 'blinking') {
-          // Check if human was tied and survived / won
-          const human = units.find(u => u.isOwner || (!u.isCPU && !isMultiplayer));
-          if (human && tb.tiedUnitIds.includes(human.id) && resolved.eliminatedUnitId !== human.id) {
-            humanWonTiebreakerRef.current = true;
-          }
-
-          // Winner's board (or two advancing boards in 3-player) will blink for 3 seconds!
-          const blinkingTb: TiebreakerState = {
-            ...resolved,
-            phase: 'blinking',
-            rollScores: nextRollScores,
-          };
-          setTiebreaker(blinkingTb);
-          publishTiebreaker('tiebreaker_blink', blinkingTb, null);
-          playSfx('fanfare');
-
-          // Winner's board blinks for 3 seconds, then closing animation appears!
-          const blinkTimer = setTimeout(() => {
-            const outroTb: TiebreakerState = {
-              ...blinkingTb,
-              phase: 'outro',
-            };
-            isTiebreakerDriverRef.current = true;
-            setTiebreaker(outroTb);
-            stopBattleMusic();
-            publishTiebreaker('tiebreaker_outro', outroTb, null);
-          }, 3000);
-          tbTimersRef.current.push(blinkTimer);
-        } else {
-          // If 3-player tiebreak and 1 user scored most while others tied again:
-          // The user who scored most shows "ADVANCE" under the score while the other users roll again.
-          // The score from round one goes back to zero for the two remaining users, who roll again.
-          // Or if all tied again: scores go back to zero and they roll again.
-          const nextTargetUnitId = currentTiedUnitId(resolved);
+        const nextTiedIdx = tb.activeTiedIndex + 1;
+        if (nextTiedIdx < tb.tiedUnitIds.length) {
+          // Next tied player in this tiebreak round takes their normal turn!
+          const nextTargetUnitId = tb.tiedUnitIds[nextTiedIdx];
           const nextDiceForTurn = freshDiceFor(nextTargetUnitId) || createInitialDice(settings.colorA, settings.colorB);
+          const nextTb: TiebreakerState = {
+            ...tb,
+            activeTiedIndex: nextTiedIdx,
+            rollScores: nextRollScores,
+            lastRollTotal: turnTotal,
+          };
 
           setDice(nextDiceForTurn);
           setTurnSecondsLeft(ROLL_1_TIME);
           setIsAutoPilotTurn(false);
-          setTiebreaker(resolved);
-          playSfx('s3');
+          setTiebreaker(nextTb);
 
-          publishTiebreaker('tiebreaker_next', resolved, nextDiceForTurn);
-        }
-      }
-      return;
-    }
+          publishTiebreaker('tiebreaker_next', nextTb, nextDiceForTurn);
+        } else {
+          // Final player in the tiebreak hits "SCORE IT"!
+          const resolved = resolveTiebreakerRound(tb, nextRollScores, tbNameOf);
 
-    // Update player score & history
-    const updatedUnits = units.map(u => {
-      if (u.id === curUnit.id) {
-        if (u.isOwner) {
-          if (finalScore.total >= 70) {
-            humanCenturyClubScoredRef.current = true;
+          if (resolved.phase === 'blinking') {
+            // Check if human was tied and survived / won
+            const human = units.find(u => u.isOwner || (!u.isCPU && !isMultiplayer));
+            if (human && tb.tiedUnitIds.includes(human.id) && resolved.eliminatedUnitId !== human.id) {
+              humanWonTiebreakerRef.current = true;
+            }
+
+            // Winner's board (or two advancing boards in 3-player) will blink for 3 seconds!
+            const blinkingTb: TiebreakerState = {
+              ...resolved,
+              phase: 'blinking',
+              rollScores: nextRollScores,
+            };
+            setTiebreaker(blinkingTb);
+            publishTiebreaker('tiebreaker_blink', blinkingTb, null);
+            playSfx('fanfare');
+
+            // Winner's board blinks for 3 seconds, then closing animation appears!
+            const blinkTimer = setTimeout(() => {
+              const outroTb: TiebreakerState = {
+                ...blinkingTb,
+                phase: 'outro',
+              };
+              isTiebreakerDriverRef.current = true;
+              setTiebreaker(outroTb);
+              stopBattleMusic();
+              publishTiebreaker('tiebreaker_outro', outroTb, null);
+            }, 3000);
+            tbTimersRef.current.push(blinkTimer);
+          } else {
+            // If 3-player tiebreak and 1 user scored most while others tied again:
+            // The user who scored most shows "ADVANCE" under the score while the other users roll again.
+            // The score from round one goes back to zero for the two remaining users, who roll again.
+            // Or if all tied again: scores go back to zero and they roll again.
+            const nextTargetUnitId = currentTiedUnitId(resolved);
+            const nextDiceForTurn = freshDiceFor(nextTargetUnitId) || createInitialDice(settings.colorA, settings.colorB);
+
+            setDice(nextDiceForTurn);
+            setTurnSecondsLeft(ROLL_1_TIME);
+            setIsAutoPilotTurn(false);
+            setTiebreaker(resolved);
+            playSfx('s3');
+
+            publishTiebreaker('tiebreaker_next', resolved, nextDiceForTurn);
           }
-          const has5OfAKind = finalScore.sets.some(s => Object.values(s.byColor).some(cnt => cnt >= 5));
-          if (has5OfAKind) {
-            humanFiveOfAKindScoredRef.current = true;
-          }
         }
-        const nextScore = u.score + finalScore.total;
-        const nextHist = { ...u.history, [round]: finalScore.total };
-        return { ...u, score: nextScore, history: nextHist };
+        return;
       }
-      return u;
-    });
 
-    setUnits(updatedUnits);
-
-    const finishBank = () => {
-      // Reset turn state
-      setRollsUsed(0);
-      setAnnouncedChimes({});
-      setShowSixCelebration(false);
-
-      // Next player or end of round
-      const nextQIdx = qIdx + 1;
-      const stillActive = updatedUnits.filter(u => u.active);
-      const nextTargetUnit = nextQIdx < stillActive.length ? stillActive[nextQIdx] : stillActive[0];
-      const [nextColorA, nextColorB] = getUnitDiceColors(nextTargetUnit, userDiceColors);
-      const nextDiceForTurn = createInitialDice(nextColorA, nextColorB);
-
-      setDice(nextDiceForTurn);
-      setTurnSecondsLeft(ROLL_1_TIME);
-      setIsAutoPilotTurn(false);
-
-      if (nextQIdx < stillActive.length) {
-        setQIdx(nextQIdx);
-
-        if (settings.roomId) {
-          const scoresRecord: Record<string, number> = {};
-          const histRecord: Record<string, Record<number, number>> = {};
-          updatedUnits.forEach(u => {
-            scoresRecord[u.id] = u.score;
-            histRecord[u.id] = u.history;
-          });
-          const unitStatus = buildUnitStatusRecord(updatedUnits);
-
-          updateRoomGameState(settings.roomId, {
-            round,
-            phase,
-            activeUnitIndex: nextQIdx,
-            activeUnitId: nextTargetUnit.id,
-            scores: scoresRecord,
-            unitHistory: histRecord,
-            activeUnitIds: stillActive.map(u => u.id),
-            unitStatus,
-            rollsUsed: 0,
-            dice: nextDiceForTurn,
-            lastAction: 'bank',
-            lastActionBy: user.uid,
-            actionTimestamp: Date.now(),
-          });
+      // Update player score & history
+      const updatedUnits = units.map(u => {
+        if (u.id === curUnit.id) {
+          if (u.isOwner) {
+            if (finalScore.total >= 70) {
+              humanCenturyClubScoredRef.current = true;
+            }
+            const has5OfAKind = finalScore.sets.some(s => Object.values(s.byColor).some(cnt => cnt >= 5));
+            if (has5OfAKind) {
+              humanFiveOfAKindScoredRef.current = true;
+            }
+          }
+          const nextScore = u.score + finalScore.total;
+          const nextHist = { ...u.history, [round]: finalScore.total };
+          return { ...u, score: nextScore, history: nextHist };
         }
+        return u;
+      });
+
+      setUnits(updatedUnits);
+
+      const finishBank = () => {
+        // Reset turn state
+        setRollsUsed(0);
+        setAnnouncedChimes({});
+        setShowSixCelebration(false);
+
+        // Next player or end of round
+        const nextQIdx = qIdx + 1;
+        const stillActive = updatedUnits.filter(u => u.active);
+        const nextTargetUnit = nextQIdx < stillActive.length ? stillActive[nextQIdx] : stillActive[0];
+        const [nextColorA, nextColorB] = getUnitDiceColors(nextTargetUnit, userDiceColors);
+        const nextDiceForTurn = createInitialDice(nextColorA, nextColorB);
+
+        setDice(nextDiceForTurn);
+        setTurnSecondsLeft(ROLL_1_TIME);
+        setIsAutoPilotTurn(false);
+
+        if (nextQIdx < stillActive.length) {
+          setQIdx(nextQIdx);
+
+          if (settings.roomId) {
+            const scoresRecord: Record<string, number> = {};
+            const histRecord: Record<string, Record<number, number>> = {};
+            updatedUnits.forEach(u => {
+              scoresRecord[u.id] = u.score;
+              histRecord[u.id] = u.history;
+            });
+            const unitStatus = buildUnitStatusRecord(updatedUnits);
+
+            updateRoomGameState(settings.roomId, {
+              round,
+              phase,
+              activeUnitIndex: nextQIdx,
+              activeUnitId: nextTargetUnit.id,
+              scores: scoresRecord,
+              unitHistory: histRecord,
+              activeUnitIds: stillActive.map(u => u.id),
+              unitStatus,
+              rollsUsed: 0,
+              dice: nextDiceForTurn,
+              lastAction: 'bank',
+              lastActionBy: user.uid,
+              actionTimestamp: Date.now(),
+            });
+          }
+        } else {
+          // Completed full round!
+          resolveRound(updatedUnits);
+        }
+      };
+
+      if (hasSixCelebration) {
+        setTimeout(finishBank, 3100);
       } else {
-        // Completed full round!
-        resolveRound(updatedUnits);
+        finishBank();
       }
     };
 
-    if (hasSixCelebration) {
-      setTimeout(finishBank, 3100);
+    if (spectatorFastForward) {
+      executeBankTransition();
     } else {
-      finishBank();
+      setTimeout(executeBankTransition, 820);
     }
   }, [
     curUnit,
@@ -1727,6 +1870,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       isRolling ||
       elimModalMsg ||
       showSixCelebration ||
+      isScoreBanking ||
       (joiningCountdown !== null && joiningCountdown > 0) ||
       (tbActive && tiebreaker?.phase !== 'rolling')
     )
@@ -1833,6 +1977,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     (!tbActive || tiebreaker?.phase === 'rolling');
 
   const canScore =
+    !isScoreBanking &&
     (rollsUsed === 3 || dice.filter(d => d.zone === 'active').length === 0) &&
     rollsUsed > 0 &&
     isEffectiveHuman &&
@@ -1977,18 +2122,18 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
       {/* Top Anchored Section (Logos, Round Bar, Scorecards Strip, Toast) - Fixed in place under user bar */}
       <div className="w-full flex flex-col shrink-0">
-        {/* Logos Row (reduced by 15%) */}
+        {/* Logos Row (reduced by 20% per user specification) */}
         <div className="flex items-center justify-between px-2 py-0 mb-0.5">
           <img
             src="/assets/img/cr-logo.png"
             alt="Color Run"
-            className="h-[66px] sm:h-[75px] object-contain drop-shadow-md select-none"
+            className="h-[53px] sm:h-[60px] object-contain drop-shadow-md select-none"
             draggable={false}
           />
           <img
             src="/assets/img/dg-logo.png"
             alt="Data Games Lab"
-            className="h-[75px] sm:h-[83px] object-contain drop-shadow-md select-none"
+            className="h-[60px] sm:h-[66px] object-contain drop-shadow-md select-none"
             draggable={false}
           />
         </div>
@@ -2122,6 +2267,34 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             onTouchScreen={handleScreenTouchAction}
             eliminationBanner={eliminationBannerUnderLabels}
           />
+
+          {/* Reaction Overlay in the Saved Dice Area (Appears on all users' devices) */}
+          <div className="absolute inset-0 pointer-events-none z-20 flex items-center justify-center overflow-hidden">
+            <AnimatePresence>
+              {savedBoardEmotes.map((item, idx) => (
+                <motion.div
+                  key={item.id}
+                  initial={{ scale: 0.2, y: 25, opacity: 0 }}
+                  animate={{ scale: [0.3, 1.2, 1], y: 0, opacity: 1 }}
+                  exit={{ scale: 1.3, y: -35, opacity: 0 }}
+                  transition={{ duration: 0.45, ease: 'easeOut' }}
+                  className="absolute flex flex-col items-center justify-center pointer-events-none"
+                  style={{
+                    zIndex: 25 + idx,
+                    transform: `translateX(${(idx - (savedBoardEmotes.length - 1) / 2) * 60}px)`,
+                  }}
+                >
+                  <div className="text-4xl sm:text-5xl md:text-6xl filter drop-shadow-[0_4px_16px_rgba(0,0,0,0.85)] animate-bounce-subtle">
+                    {item.emoji}
+                  </div>
+                  <div className="text-[10px] sm:text-xs font-black px-2.5 py-0.5 rounded-full bg-black/85 text-yellow-300 border border-yellow-400/50 shadow-xl whitespace-nowrap mt-1 flex items-center gap-1 backdrop-blur-xs">
+                    <span>💬</span>
+                    <span>{item.senderName}</span>
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
 
           {/* Elimination Overlay over the Saved Dice Area for Multiplayer Online & Friends Challenge */}
           {showMultiplayerElimOverlay && (
@@ -2283,31 +2456,6 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         ))}
       </div>
 
-      {/* Emoji Reaction Bar (Online Multiplayer, Challenge Friends & all game modes) */}
-      <div className="w-full flex items-center justify-between px-2 py-1 mb-1 rounded-xl bg-black/40 backdrop-blur-xs border border-white/10 shadow-sm shrink-0">
-        <div className="flex items-center gap-1 text-[10px] sm:text-xs font-black text-amber-300 shrink-0">
-          <span>💬 React:</span>
-        </div>
-        <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto scrollbar-none py-0.5">
-          {CELEBRATORY_EMOTES.map(emoji => (
-            <button
-              key={emoji}
-              type="button"
-              onClick={() => sendEmote(emoji)}
-              className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg bg-white/15 hover:bg-white/30 text-base sm:text-lg transition-transform active:scale-125 cursor-pointer shadow-xs"
-              title={`Send ${emoji} reaction`}
-            >
-              {emoji}
-            </button>
-          ))}
-        </div>
-        {(phase === 'elimination' || tbActive) && (
-          <span className="text-[9px] font-bold text-amber-400 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-400/40 shrink-0 hidden sm:inline-block">
-            🎯 Emote Mission Active
-          </span>
-        )}
-      </div>
-
       {/* Bottom Controls Area (Fixed at bottom) */}
       <div className="shrink-0 flex flex-col gap-0.5 sm:gap-1 pt-0.5 pb-1">
         {tiebreaker?.phase === 'blinking' ? (
@@ -2316,7 +2464,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             <span>Advancing boards blinking! Preparing results…</span>
           </div>
         ) : (
-          /* Normal Action Buttons: ROLL, SCORE IT!, and INFO */
+          /* Normal Action Buttons: ROLL, SCORE IT!, and REACT */
           <div className="flex gap-1.5 sm:gap-2 py-0.5">
             <button
               onClick={doRoll}
@@ -2359,6 +2507,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
             </button>
 
             <button
+              id="score-it-button"
               onClick={bankTurn}
               disabled={!canScore}
               className="flex-1 min-h-[42px] sm:min-h-[46px] py-1 sm:py-1.5 px-2 bg-[#e58a1f] hover:bg-[#cb7512] disabled:opacity-40 disabled:pointer-events-none text-white rounded-xl shadow-md transition-transform active:scale-98 flex flex-col items-center justify-center leading-tight border-b-2 border-[#a65d0a]"
@@ -2371,12 +2520,14 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
               </span>
             </button>
 
+            {/* React Button replacing Info button */}
             <button
-              onClick={() => setShowInfoModal(true)}
-              className="py-2 sm:py-2.5 px-3 sm:px-4 bg-[#e8dec0] hover:bg-[#ded1af] text-[#3e2e1e] font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center justify-center border-b-2 border-[#c8bc9a]"
-              title="Game Rules & Scoring Info"
+              id="react-button"
+              onClick={handleOpenReactOverlay}
+              className="py-2 sm:py-2.5 px-3 sm:px-4 bg-[#e8dec0] hover:bg-[#ded1af] text-[#3e2e1e] font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform active:scale-98 flex items-center justify-center border-b-2 border-[#c8bc9a] tracking-wider"
+              title="React with emojis"
             >
-              INFO
+              React
             </button>
           </div>
         )}
@@ -2414,6 +2565,84 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           </button>
         </div>
       </div>
+
+      {/* React Emoji Reaction Overlay (10s timer per user specification) */}
+      <AnimatePresence>
+        {isReactOverlayOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs select-none"
+            onClick={() => setIsReactOverlayOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.88, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.88, y: 20 }}
+              transition={{ type: 'spring', damping: 24, stiffness: 350 }}
+              className="bg-[#182030] border-2 border-[#f2c14e] rounded-3xl p-4 sm:p-5 max-w-xs sm:max-w-sm w-full text-white shadow-2xl relative"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header with Title, 10s Timer Pill, and Close Button */}
+              <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">💬</span>
+                  <h3 className="text-sm sm:text-base font-black text-[#f2c14e] uppercase tracking-wider">
+                    React
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`font-mono font-black text-xs px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                      reactTimeRemaining <= 3
+                        ? 'bg-red-500/30 text-red-300 border-red-400 animate-pulse'
+                        : 'bg-amber-500/20 text-amber-300 border-amber-400/50'
+                    }`}
+                  >
+                    <span>⏱️</span>
+                    <span>{reactTimeRemaining}s</span>
+                  </span>
+                  <button
+                    onClick={() => setIsReactOverlayOpen(false)}
+                    className="w-7 h-7 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-colors cursor-pointer text-sm font-bold"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              {/* Subtitle instructions */}
+              <p className="text-[11px] sm:text-xs text-stone-300 text-center mb-3">
+                Select an emoji to send to the saved dice area:
+              </p>
+
+              {/* Emoji Options Grid */}
+              <div className="grid grid-cols-4 gap-2 sm:gap-2.5">
+                {REACT_EMOJI_OPTIONS.map(emoji => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => handleSelectReactEmoji(emoji)}
+                    className="aspect-square flex items-center justify-center rounded-2xl bg-white/10 hover:bg-[#f2c14e]/25 hover:border-[#f2c14e] border border-white/15 text-2xl sm:text-3xl transition-all active:scale-125 cursor-pointer shadow-md"
+                    title={`Send ${emoji}`}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+
+              {/* 10-second Countdown Progress Bar */}
+              <div className="w-full bg-black/40 h-1.5 rounded-full mt-4 overflow-hidden border border-white/10">
+                <div
+                  className="h-full bg-gradient-to-r from-amber-400 to-yellow-300 transition-all duration-1000 ease-linear rounded-full"
+                  style={{ width: `${(reactTimeRemaining / 10) * 100}%` }}
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Info / Scoring Rules Modal */}
       {showInfoModal && (
@@ -2506,6 +2735,12 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         eliminatedPlayerName={tiebreaker?.eliminatedUnitId ? tbNameOf(tiebreaker.eliminatedUnitId) : undefined}
         onIntroComplete={handleTiebreakerIntroComplete}
         onOutroComplete={handleTiebreakerOutroComplete}
+      />
+
+      {/* Floating Score Bubble Animation (when user or CPU banks score) */}
+      <ScoreBubbleAnimation
+        bubble={activeScoreBubble}
+        onPop={() => setActiveScoreBubble(null)}
       />
     </div>
   );

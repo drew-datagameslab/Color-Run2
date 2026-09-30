@@ -148,6 +148,14 @@ export function mergeFriendsWithPresence(
 
   // Create working copy of friends
   const updatedFriends = friends.map(f => {
+    // If not accepted or removed by the other player, they ALWAYS appear offline
+    if (f.accepted === false || f.removedByThem === true) {
+      return {
+        ...f,
+        status: 'offline' as const,
+      };
+    }
+
     // Look up by id, uid, or normalized name
     const match =
       presenceMap.get(f.id) ||

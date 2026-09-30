@@ -137,6 +137,8 @@ export function runLevelXpTests() {
   const lvl10 = LEVEL_REWARDS.find(r => r.level === 10);
   assert(lvl10?.type === 'ranked_unlock', 'Level 10 reward is ranked mode unlock');
   const lvl50 = LEVEL_REWARDS.find(r => r.level === 50);
-  assert(lvl50?.type === 'animated_dice', 'Level 50 reward is animated dice & prestige access');
+  assert(lvl50?.type === 'dice_credit', 'Level 50 reward is dice color credit & prestige access');
+  const lvl2 = LEVEL_REWARDS.find(r => r.level === 2);
+  assert(lvl2?.type === 'dice_credit', 'Level 2 reward is dice color credit');
   console.log('✓ Master rewards catalog verified');
 }

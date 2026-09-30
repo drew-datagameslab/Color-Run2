@@ -15,7 +15,7 @@ export interface LevelReward {
   level: number;
   title: string;
   description: string;
-  type: 'dice_skin' | 'emote' | 'name_color' | 'ranked_unlock' | 'board_theme' | 'banner_title' | 'roll_effect' | 'animated_dice' | 'coins';
+  type: 'dice_skin' | 'dice_credit' | 'emote' | 'name_color' | 'ranked_unlock' | 'board_theme' | 'banner_title' | 'roll_effect' | 'animated_dice' | 'coins';
   rewardId: string;
   coinsAmount?: number;
   icon: string;
@@ -103,9 +103,9 @@ export function calculateLevelFromTotalXp(totalXp: number): {
  * Master catalog of rewards for levels 2 to 50
  */
 export const LEVEL_REWARDS: LevelReward[] = [
-  { level: 2, title: 'Golden Ember Dice', description: 'Free Dice Skin for reaching Level 2!', type: 'dice_skin', rewardId: 'dice_golden_ember', icon: '🎲' },
-  { level: 3, title: 'Emerald Spark Dice', description: 'Free Dice Skin for reaching Level 3!', type: 'dice_skin', rewardId: 'dice_emerald_spark', icon: '✨' },
-  { level: 4, title: 'Frozen Frost Dice', description: 'Free Dice Skin for reaching Level 4!', type: 'dice_skin', rewardId: 'dice_frozen_frost', icon: '❄️' },
+  { level: 2, title: 'Dice Color Credit', description: 'Credit to unlock any current dice color in the shop for free!', type: 'dice_credit', rewardId: 'credit_dice_color_lvl2', icon: '🎨' },
+  { level: 3, title: 'Dice Color Credit', description: 'Credit to unlock any current dice color in the shop for free!', type: 'dice_credit', rewardId: 'credit_dice_color_lvl3', icon: '🎨' },
+  { level: 4, title: 'Dice Color Credit', description: 'Credit to unlock any current dice color in the shop for free!', type: 'dice_credit', rewardId: 'credit_dice_color_lvl4', icon: '🎨' },
   { level: 5, title: 'Custom Name Color', description: 'Unlock custom player name colors across the entire game!', type: 'name_color', rewardId: 'feature_custom_name_color', icon: '🎨' },
   { level: 6, title: '50 Bonus Coins', description: 'Coins for reaching Level 6', type: 'coins', rewardId: 'coins_50', coinsAmount: 50, icon: '🪙' },
   { level: 7, title: '75 Bonus Coins', description: 'Coins for reaching Level 7', type: 'coins', rewardId: 'coins_75', coinsAmount: 75, icon: '🪙' },
@@ -116,7 +116,7 @@ export const LEVEL_REWARDS: LevelReward[] = [
   { level: 12, title: 'Celebration Emote', description: 'Party Popper emote for wins', type: 'emote', rewardId: 'emote_celebration', icon: '🎉' },
   { level: 13, title: '150 Bonus Coins', description: 'Coins for reaching Level 13', type: 'coins', rewardId: 'coins_150', coinsAmount: 150, icon: '🪙' },
   { level: 14, title: '150 Bonus Coins', description: 'Coins for reaching Level 14', type: 'coins', rewardId: 'coins_150_b', coinsAmount: 150, icon: '🪙' },
-  { level: 15, title: 'Cyber Neon Dice', description: 'Premium futuristic neon dice skin', type: 'dice_skin', rewardId: 'dice_cyber_neon', icon: '🟣' },
+  { level: 15, title: 'Dice Color Credit', description: 'Credit to unlock any current dice color in the shop for free!', type: 'dice_credit', rewardId: 'credit_dice_color_lvl15', icon: '🎨' },
   { level: 16, title: '175 Bonus Coins', description: 'Coins for reaching Level 16', type: 'coins', rewardId: 'coins_175', coinsAmount: 175, icon: '🪙' },
   { level: 17, title: 'Fire Emote', description: 'On Fire roll emote', type: 'emote', rewardId: 'emote_fire', icon: '🔥' },
   { level: 18, title: '200 Bonus Coins', description: 'Coins for reaching Level 18', type: 'coins', rewardId: 'coins_200', coinsAmount: 200, icon: '🪙' },
@@ -136,7 +136,7 @@ export const LEVEL_REWARDS: LevelReward[] = [
   { level: 32, title: 'Crown Emote', description: 'Golden crown flex emote', type: 'emote', rewardId: 'emote_crown', icon: '👑' },
   { level: 33, title: '400 Bonus Coins', description: 'Coins for reaching Level 33', type: 'coins', rewardId: 'coins_400', coinsAmount: 400, icon: '🪙' },
   { level: 34, title: '400 Bonus Coins', description: 'Coins for reaching Level 34', type: 'coins', rewardId: 'coins_400_b', coinsAmount: 400, icon: '🪙' },
-  { level: 35, title: 'Midnight Obsidian Dice', description: 'Glossy dark obsidian dice skin', type: 'dice_skin', rewardId: 'dice_obsidian', icon: '🖤' },
+  { level: 35, title: 'Dice Color Credit', description: 'Credit to unlock any current dice color in the shop for free!', type: 'dice_credit', rewardId: 'credit_dice_color_lvl35', icon: '🎨' },
   { level: 36, title: '450 Bonus Coins', description: 'Coins for reaching Level 36', type: 'coins', rewardId: 'coins_450', coinsAmount: 450, icon: '🪙' },
   { level: 37, title: 'Swords Clash Emote', description: 'Battle to survive duel emote', type: 'emote', rewardId: 'emote_swords', icon: '⚔️' },
   { level: 38, title: '500 Bonus Coins', description: 'Coins for reaching Level 38', type: 'coins', rewardId: 'coins_500', coinsAmount: 500, icon: '🪙' },
@@ -151,7 +151,7 @@ export const LEVEL_REWARDS: LevelReward[] = [
   { level: 47, title: 'Champion Flex Emote', description: 'Ultimate roll champion emote', type: 'emote', rewardId: 'emote_muscle', icon: '💪' },
   { level: 48, title: '800 Bonus Coins', description: 'Coins for reaching Level 48', type: 'coins', rewardId: 'coins_800', coinsAmount: 800, icon: '🪙' },
   { level: 49, title: '1,000 Bonus Coins', description: 'Coins for reaching Level 49', type: 'coins', rewardId: 'coins_1000', coinsAmount: 1000, icon: '🪙' },
-  { level: 50, title: 'Animated Prismatic Dice & Prestige Access', description: 'Exclusive animated color-shifting dice skin + access to Prestige Reset with permanent badge & border!', type: 'animated_dice', rewardId: 'dice_animated_prismatic', icon: '🌈' },
+  { level: 50, title: 'Prestige Master & Dice Color Credit', description: 'Credit to unlock any current dice color in the shop + access to Prestige Reset with permanent badge & border!', type: 'dice_credit', rewardId: 'credit_dice_color_lvl50', icon: '👑' },
 ];
 
 export interface XpBreakdownItem {
@@ -265,6 +265,7 @@ export function applyXpToUser(
   leveledUp: boolean;
   newRewards: LevelReward[];
   coinsAwarded: number;
+  diceCreditsAwarded: number;
 } {
   if (earnedXp <= 0) {
     return {
@@ -272,6 +273,7 @@ export function applyXpToUser(
       leveledUp: false,
       newRewards: [],
       coinsAwarded: 0,
+      diceCreditsAwarded: 0,
     };
   }
 
@@ -284,6 +286,7 @@ export function applyXpToUser(
   const leveledUp = newCalc.level > prevCalc.level;
   const newRewards: LevelReward[] = [];
   let coinsAwarded = 0;
+  let diceCreditsAwarded = 0;
 
   const currentUnlocked = new Set(currentLevelState.unlockedRewards || []);
   const currentEmotes = new Set(currentLevelState.unlockedEmotes || []);
@@ -299,6 +302,8 @@ export function applyXpToUser(
 
         if (reward.type === 'coins' && reward.coinsAmount) {
           coinsAwarded += reward.coinsAmount;
+        } else if (reward.type === 'dice_credit') {
+          diceCreditsAwarded += 1;
         } else if (reward.type === 'emote') {
           currentEmotes.add(reward.rewardId);
         } else if (reward.type === 'banner_title') {
@@ -332,6 +337,7 @@ export function applyXpToUser(
     leveledUp,
     newRewards,
     coinsAwarded,
+    diceCreditsAwarded,
   };
 }
 

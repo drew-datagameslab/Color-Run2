@@ -67,6 +67,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Friend requests
+    match /friend_requests/{requestId} {
+      allow read, write: if true;
+    }
+
     // Live presence tracking for active online friends and challenge matchmaking
     match /presence/{userId} {
       allow read, write: if true;

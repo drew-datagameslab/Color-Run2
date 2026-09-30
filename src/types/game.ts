@@ -31,6 +31,21 @@ export interface Friend {
   status: 'online' | 'in-game' | 'offline';
   addedAt: string;
   gamesPlayed?: number;
+  accepted?: boolean; // true if accepted as friend, false if pending / dismissed
+  dismissed?: boolean; // true if invitee dismissed
+  removedByThem?: boolean; // true if former friend removed them (so they cannot see when online)
+}
+
+export interface FriendRequest {
+  id: string;
+  fromUid: string;
+  fromName: string;
+  fromColor?: string;
+  fromImage?: string;
+  toUid?: string;
+  toName: string;
+  status: 'pending' | 'accepted' | 'dismissed' | 'deleted';
+  createdAt: number;
 }
 
 export interface PlayerUnit {
@@ -122,6 +137,7 @@ export interface UserAccount {
   missions?: any[];
   rankedUnlocked?: boolean;
   matchmakingRating?: number;
+  diceColorCredits?: number;
 }
 
 export interface UserFileRecord {
@@ -141,6 +157,7 @@ export interface ShopSettings {
   equippedBg: string;
   unlockedBgs: string[];
   volume: number; // 0 to 100
+  diceColorCredits?: number;
 }
 
 export interface ScoreboardPlayer {

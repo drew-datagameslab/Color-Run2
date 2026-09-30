@@ -147,6 +147,24 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
     });
   };
 
+  const handleUnlockWithCredit = (colorId: DiceColor) => {
+    const credits = shopSettings.diceColorCredits || 0;
+    if (credits <= 0) {
+      showToast('No dice color credits available!');
+      return;
+    }
+    const colorDef = ALL_COLORS.find(c => c.id === colorId);
+    const nextUnlocked = [...shopSettings.unlockedColors, colorId];
+    const nextCredits = credits - 1;
+    onUpdateShop({
+      ...shopSettings,
+      unlockedColors: nextUnlocked,
+      diceColorCredits: nextCredits,
+    });
+    showToast(`🎨 Unlocked ${colorDef?.name || colorId} using 1 Dice Color Credit!`);
+    playWinCoinsSound();
+  };
+
   const handleOpenAdFreeCheckout = (plan: 'monthly' | 'yearly') => {
     setCheckoutModalPlan(plan);
   };
@@ -778,12 +796,33 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
                 </span>
               </div>
 
+              {/* Dice Color Credit notification banner */}
+              {(shopSettings.diceColorCredits || 0) > 0 && (
+                <div className="p-2.5 rounded-xl bg-gradient-to-r from-amber-500/20 via-yellow-400/25 to-amber-500/20 border-2 border-amber-500/70 flex items-center justify-between shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🎨</span>
+                    <div>
+                      <div className="text-xs font-black text-amber-900">
+                        {shopSettings.diceColorCredits} Dice Color Credit{shopSettings.diceColorCredits === 1 ? '' : 's'} Available!
+                      </div>
+                      <div className="text-[10px] text-amber-800 font-medium">
+                        Redeem on any locked color below for FREE!
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-black bg-amber-500 text-stone-950 px-2.5 py-0.5 rounded-full shadow-2xs">
+                    Free Unlock
+                  </span>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
                 {ALL_COLORS.map(color => {
                   const isUnlocked = shopSettings.unlockedColors.includes(color.id);
                   const isEquippedSlot0 = shopSettings.equippedColors[0] === color.id;
                   const isEquippedSlot1 = shopSettings.equippedColors[1] === color.id;
                   const isEquipped = isEquippedSlot0 || isEquippedSlot1;
+                  const hasCredits = (shopSettings.diceColorCredits || 0) > 0;
 
                   return (
                     <div
@@ -808,12 +847,23 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
                       </div>
 
                       {!isUnlocked ? (
-                        <button
-                          onClick={() => handleEquipColor(color.id, 0)}
-                          className="w-full py-1 text-xs font-bold bg-[#e58a1f] hover:bg-[#cb7512] text-white rounded-lg transition-transform active:scale-95 cursor-pointer shadow-2xs"
-                        >
-                          Unlock ({color.price} 🪙)
-                        </button>
+                        <div className="flex flex-col gap-1 w-full">
+                          {hasCredits && (
+                            <button
+                              onClick={() => handleUnlockWithCredit(color.id)}
+                              className="w-full py-1 text-xs font-black bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-stone-950 rounded-lg shadow-xs transition-transform active:scale-95 cursor-pointer flex items-center justify-center gap-1"
+                            >
+                              <span>🎨</span>
+                              <span>Use Credit (Free)</span>
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleEquipColor(color.id, 0)}
+                            className="w-full py-1 text-xs font-bold bg-[#e58a1f] hover:bg-[#cb7512] text-white rounded-lg transition-transform active:scale-95 cursor-pointer shadow-2xs"
+                          >
+                            {hasCredits ? `Or Buy (${color.price} 🪙)` : `Unlock (${color.price} 🪙)`}
+                          </button>
+                        </div>
                       ) : (
                         <div className="flex gap-1">
                           <button

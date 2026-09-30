@@ -290,7 +290,10 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
           <span className="text-[10.5px] sm:text-[12px] md:text-[13px] font-extrabold uppercase tracking-wider text-white/80">
             POINTS
           </span>
-          <span className="font-mono font-black text-base sm:text-lg md:text-xl bg-black/60 text-[#54e38e] px-2 md:px-3 py-0.5 md:py-1 rounded-md md:rounded-lg border border-[#54e38e]/50 shadow-xs">
+          <span
+            id="saved-dice-total-points"
+            className="font-mono font-black text-base sm:text-lg md:text-xl bg-black/60 text-[#54e38e] px-2 md:px-3 py-0.5 md:py-1 rounded-md md:rounded-lg border border-[#54e38e]/50 shadow-xs"
+          >
             {scoreResult.total}
           </span>
         </div>

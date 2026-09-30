@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ArrowLeft, UserPlus, Trash2, RotateCcw, Lock, CheckCircle2, AlertCircle, ShieldCheck, Undo2, Award, Info, X, History, Swords } from 'lucide-react';
 import { Die, PlayerUnit, ScoreResult } from '../types/game';
 import { CardsStrip } from './CardsStrip';
@@ -10,6 +10,7 @@ import { triggerDieTapHaptic, triggerDieRemoveHaptic, triggerCelebrationHaptic }
 import { BattleVideoOverlay } from './BattleVideoOverlay';
 import { findLowestTie, startTiebreaker, resolveTiebreakerRound } from '../lib/tiebreaker';
 import { BattleToSurviveGraphic } from './BattleToSurviveGraphic';
+import { ScoreBubbleAnimation, ScoreBubbleData } from './ScoreBubbleAnimation';
 
 interface ScoreboardScreenProps {
   isUnlocked: boolean;
@@ -70,6 +71,40 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
   const [winner, setWinner] = useState<PlayerUnit | null>(null);
   const [showHistory, setShowHistory] = useState<boolean>(false);
   const [eliminationBannerUnderLabels, setEliminationBannerUnderLabels] = useState<string | null>(null);
+  const [activeScoreBubble, setActiveScoreBubble] = useState<ScoreBubbleData | null>(null);
+  const [isScoreBanking, setIsScoreBanking] = useState<boolean>(false);
+
+  const triggerScoreBubble = useCallback((points: number, unitId: string) => {
+    // 1. Origin: From the total points (In the Saved Dice bar)
+    const pointsElem = document.getElementById('saved-dice-total-points');
+    const pointsRect = pointsElem?.getBoundingClientRect();
+
+    const startX = pointsRect ? pointsRect.left + pointsRect.width / 2 : window.innerWidth * 0.78;
+    const startY = pointsRect ? pointsRect.top + pointsRect.height / 2 : window.innerHeight * 0.35;
+
+    // 2. Target: To the user or cpu player's scoreboard card
+    const cardElem =
+      document.getElementById(`scoreboard-card-${unitId}`) ||
+      document.querySelector(`[id="scoreboard-card-${unitId}"]`);
+
+    if (cardElem) {
+      cardElem.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+    const cardRect = cardElem?.getBoundingClientRect();
+
+    const targetX = cardRect ? cardRect.left + cardRect.width / 2 : window.innerWidth / 2;
+    const targetY = cardRect ? cardRect.top + cardRect.height / 2 : 110;
+
+    setActiveScoreBubble({
+      id: 'bubble_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      points,
+      startX,
+      startY,
+      targetX,
+      targetY,
+      unitId,
+    });
+  }, []);
 
   // Tiebreaker State for Companion Scoreboard
   const [tiebreaker, setTiebreaker] = useState<{
@@ -461,158 +496,171 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
   // Score It: commit the turn
   const handleScoreIt = () => {
     setShowSixCelebration(false);
-    if (!activeUnit || hasColorLimitError) return;
+    if (!activeUnit || hasColorLimitError || isScoreBanking) return;
     const playerIdx = units.findIndex(u => u.id === activeUnit.id);
     if (playerIdx === -1) return;
 
     const addedScore = currentScoreResult.total;
+    const currentActiveUnitId = activeUnit.id;
 
-    // Record history snapshot for undo capability
-    const turnRecord: RollTurnRecord = {
-      playerIndex: playerIdx,
-      playerName: activeUnit.name,
-      round: currentRound,
-      addedScore,
-      savedDice: [...savedDice],
-      scoreResult: { ...currentScoreResult },
-      prevUnits: units.map(u => ({ ...u, history: { ...u.history } })),
-      prevEliminationPhase: isEliminationPhase,
-      prevActiveUnitId: activeUnitId,
-      prevRound: currentRound,
-    };
+    // Trigger floating points bubble to the active unit's scoreboard card
+    setIsScoreBanking(true);
+    triggerScoreBubble(addedScore, currentActiveUnitId);
 
-    const updatedUnits = units.map(u => {
-      if (u.id === activeUnit.id) {
-        const nextScore = u.score + addedScore;
-        const nextHist = { ...u.history, [currentRound]: addedScore };
-        return {
-          ...u,
-          score: nextScore,
-          history: nextHist,
-        };
+    // After the bubble floats and pops (~820ms), add the points to their total and transition
+    setTimeout(() => {
+      // Record history snapshot for undo capability
+      const turnRecord: RollTurnRecord = {
+        playerIndex: playerIdx,
+        playerName: activeUnit.name,
+        round: currentRound,
+        addedScore,
+        savedDice: [...savedDice],
+        scoreResult: { ...currentScoreResult },
+        prevUnits: units.map(u => ({ ...u, history: { ...u.history } })),
+        prevEliminationPhase: isEliminationPhase,
+        prevActiveUnitId: activeUnitId,
+        prevRound: currentRound,
+      };
+
+      const updatedUnits = units.map(u => {
+        if (u.id === currentActiveUnitId) {
+          const nextScore = u.score + addedScore;
+          const nextHist = { ...u.history, [currentRound]: addedScore };
+          return {
+            ...u,
+            score: nextScore,
+            history: nextHist,
+          };
+        }
+        return u;
+      });
+
+      setHistoryLog(prev => [...prev, turnRecord]);
+      setSavedDice([]);
+
+      // Usual scoring sounds based on banked turn points
+      if (addedScore >= 100) {
+        playSfx('fanfare');
+      } else if (addedScore >= 40) {
+        playSfx('s5');
+      } else if (addedScore >= 25) {
+        playSfx('s4');
+      } else if (addedScore > 0) {
+        playSfx('s3');
+      } else {
+        playSfx('add');
       }
-      return u;
-    });
 
-    setHistoryLog(prev => [...prev, turnRecord]);
-    setSavedDice([]);
+      const activeUnits = updatedUnits.filter(u => u.active);
+      const curActiveIndex = activeUnits.findIndex(u => u.id === currentActiveUnitId);
 
-    // Usual scoring sounds based on banked turn points
-    if (addedScore >= 100) {
-      playSfx('fanfare');
-    } else if (addedScore >= 40) {
-      playSfx('s5');
-    } else if (addedScore >= 25) {
-      playSfx('s4');
-    } else if (addedScore > 0) {
-      playSfx('s3');
-    } else {
-      playSfx('add');
-    }
+      // CRITICAL: Ensure ALL active players finish the round before checking
+      // if a player achieved the 250 threshold and starting an elimination round.
+      const allFinishedRound = activeUnits.every(u => u.history[currentRound] !== undefined);
 
-    const activeUnits = updatedUnits.filter(u => u.active);
-    const curActiveIndex = activeUnits.findIndex(u => u.id === activeUnit.id);
+      if (!allFinishedRound) {
+        // The round is NOT finished yet. Other players still need to take their turn this round.
+        // Do NOT check threshold, do NOT enter elimination mode, do NOT eliminate anyone.
+        // Advance to the next active player who hasn't played this round yet.
+        let nextUnit: PlayerUnit | undefined;
+        for (let offset = 1; offset < activeUnits.length; offset++) {
+          const candidate = activeUnits[(curActiveIndex + offset) % activeUnits.length];
+          if (candidate && candidate.history[currentRound] === undefined) {
+            nextUnit = candidate;
+            break;
+          }
+        }
+        if (!nextUnit) {
+          nextUnit = activeUnits.find(u => u.history[currentRound] === undefined);
+        }
 
-    // CRITICAL: Ensure ALL active players finish the round before checking
-    // if a player achieved the 250 threshold and starting an elimination round.
-    const allFinishedRound = activeUnits.every(u => u.history[currentRound] !== undefined);
+        setUnits(updatedUnits);
+        if (nextUnit) {
+          setActiveUnitId(nextUnit.id);
+        }
+        setIsScoreBanking(false);
+        return;
+      }
 
-    if (!allFinishedRound) {
-      // The round is NOT finished yet. Other players still need to take their turn this round.
-      // Do NOT check threshold, do NOT enter elimination mode, do NOT eliminate anyone.
-      // Advance to the next active player who hasn't played this round yet.
-      let nextUnit: PlayerUnit | undefined;
-      for (let offset = 1; offset < activeUnits.length; offset++) {
-        const candidate = activeUnits[(curActiveIndex + offset) % activeUnits.length];
-        if (candidate && candidate.history[currentRound] === undefined) {
-          nextUnit = candidate;
-          break;
+      // =========================================================================
+      // ALL ACTIVE PLAYERS HAVE COMPLETED THE ROUND!
+      // =========================================================================
+
+      if (isEliminationPhase) {
+        // Players tied for the lowest total (in seating order) battle to survive
+        const participating = findLowestTie(activeUnits);
+        const minScore = Math.min(...activeUnits.map(u => u.score));
+        const tiedForLowest = activeUnits.filter(u => u.score === minScore);
+
+        if (participating.length > 0) {
+          const tiedIds = participating.map(u => u.id);
+          setUnits(updatedUnits);
+          setTiebreaker({
+            isActive: true,
+            phase: 'intro',
+            initialTiedUnitIds: tiedIds,
+            tiedUnitIds: tiedIds,
+            currentRollScores: {},
+            advancedUnitIds: [],
+            blinkingUnitIds: [],
+            eliminatedUnit: null,
+            roundNumber: 1,
+            noticeMsg: null,
+          });
+          startBattleMusic();
+          setIsScoreBanking(false);
+          return;
+        }
+
+        // No tie: single lowest player is eliminated
+        if (activeUnits.length > 2) {
+          const lowestUnit = tiedForLowest[0];
+          const place = activeUnits.length;
+          const finalizedUnits = updatedUnits.map(u =>
+            u.id === lowestUnit.id ? { ...u, active: false, place } : u
+          );
+          setUnits(finalizedUnits);
+          setCurrentRound(r => r + 1);
+          triggerEliminatedBanner(lowestUnit.name);
+
+          const remaining = finalizedUnits.filter(u => u.active);
+          setActiveUnitId(remaining[0]?.id || '');
+          setIsScoreBanking(false);
+          return;
+        } else if (activeUnits.length === 2) {
+          const sorted = [...activeUnits].sort((a, b) => b.score - a.score);
+          const champ = sorted[0];
+          const runnerUp = sorted[1];
+          const finalizedUnits = updatedUnits.map(u => {
+            if (u.id === champ.id) return { ...u, place: 1 };
+            if (u.id === runnerUp.id) return { ...u, active: false, place: 2 };
+            return u;
+          });
+          setUnits(finalizedUnits);
+          setWinner(champ);
+          triggerEliminatedBanner(runnerUp.name);
+          playSfx('fanfare');
+          setIsScoreBanking(false);
+          return;
+        }
+      } else {
+        // Regular Phase: now that ALL players finished the round, check if any reached threshold!
+        const thresholdReached = updatedUnits.some(u => u.score >= threshold);
+        if (thresholdReached) {
+          setIsEliminationPhase(true);
+          playSfx('fanfare');
+          setEliminationBanner(`Threshold of ${threshold} pts reached! Elimination Round begins!`);
+          setTimeout(() => setEliminationBanner(null), 5000);
         }
       }
-      if (!nextUnit) {
-        nextUnit = activeUnits.find(u => u.history[currentRound] === undefined);
-      }
 
+      // Advance to the next round with all remaining active players starting with player 0
       setUnits(updatedUnits);
-      if (nextUnit) {
-        setActiveUnitId(nextUnit.id);
-      }
-      return;
-    }
-
-    // =========================================================================
-    // ALL ACTIVE PLAYERS HAVE COMPLETED THE ROUND!
-    // =========================================================================
-
-    if (isEliminationPhase) {
-      // Players tied for the lowest total (in seating order) battle to survive
-      const participating = findLowestTie(activeUnits);
-      const minScore = Math.min(...activeUnits.map(u => u.score));
-      const tiedForLowest = activeUnits.filter(u => u.score === minScore);
-
-      if (participating.length > 0) {
-        const tiedIds = participating.map(u => u.id);
-        setUnits(updatedUnits);
-        setTiebreaker({
-          isActive: true,
-          phase: 'intro',
-          initialTiedUnitIds: tiedIds,
-          tiedUnitIds: tiedIds,
-          currentRollScores: {},
-          advancedUnitIds: [],
-          blinkingUnitIds: [],
-          eliminatedUnit: null,
-          roundNumber: 1,
-          noticeMsg: null,
-        });
-        startBattleMusic();
-        return;
-      }
-
-      // No tie: single lowest player is eliminated
-      if (activeUnits.length > 2) {
-        const lowestUnit = tiedForLowest[0];
-        const place = activeUnits.length;
-        const finalizedUnits = updatedUnits.map(u =>
-          u.id === lowestUnit.id ? { ...u, active: false, place } : u
-        );
-        setUnits(finalizedUnits);
-        setCurrentRound(r => r + 1);
-        triggerEliminatedBanner(lowestUnit.name);
-
-        const remaining = finalizedUnits.filter(u => u.active);
-        setActiveUnitId(remaining[0]?.id || '');
-        return;
-      } else if (activeUnits.length === 2) {
-        const sorted = [...activeUnits].sort((a, b) => b.score - a.score);
-        const champ = sorted[0];
-        const runnerUp = sorted[1];
-        const finalizedUnits = updatedUnits.map(u => {
-          if (u.id === champ.id) return { ...u, place: 1 };
-          if (u.id === runnerUp.id) return { ...u, active: false, place: 2 };
-          return u;
-        });
-        setUnits(finalizedUnits);
-        setWinner(champ);
-        triggerEliminatedBanner(runnerUp.name);
-        playSfx('fanfare');
-        return;
-      }
-    } else {
-      // Regular Phase: now that ALL players finished the round, check if any reached threshold!
-      const thresholdReached = updatedUnits.some(u => u.score >= threshold);
-      if (thresholdReached) {
-        setIsEliminationPhase(true);
-        playSfx('fanfare');
-        setEliminationBanner(`Threshold of ${threshold} pts reached! Elimination Round begins!`);
-        setTimeout(() => setEliminationBanner(null), 5000);
-      }
-    }
-
-    // Advance to the next round with all remaining active players starting with player 0
-    setUnits(updatedUnits);
-    setCurrentRound(r => r + 1);
-    setActiveUnitId(activeUnits[0].id);
+      setCurrentRound(r => r + 1);
+      setActiveUnitId(activeUnits[0].id);
+      setIsScoreBanking(false);
+    }, 820);
   };
 
   const handleTiebreakerIntroComplete = () => {
@@ -969,8 +1017,9 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
           <div className="flex items-center gap-1.5 sm:gap-2 w-full max-w-lg mx-auto shrink-0">
             {/* Score It Button */}
             <button
+              id="score-it-button"
               onClick={handleScoreIt}
-              disabled={!activeUnit || !activeUnit.active || hasColorLimitError}
+              disabled={!activeUnit || !activeUnit.active || hasColorLimitError || isScoreBanking}
               className={`flex-1 min-h-[44px] sm:min-h-[48px] py-1.5 px-3 ${
                 hasColorLimitError
                   ? 'bg-stone-600/90 border-stone-700 opacity-50 cursor-not-allowed'
@@ -1123,6 +1172,12 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
           </div>
         </div>
       )}
+
+      {/* Floating Score Bubble Animation */}
+      <ScoreBubbleAnimation
+        bubble={activeScoreBubble}
+        onPop={() => setActiveScoreBubble(null)}
+      />
     </div>
   );
 };

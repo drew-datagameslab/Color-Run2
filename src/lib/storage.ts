@@ -456,6 +456,7 @@ export const DEFAULT_SHOP: ShopSettings = {
   equippedBg: 'wood',
   unlockedBgs: ['wood', 'bg-wood'],
   volume: 70,
+  diceColorCredits: 0,
 };
 
 export function getShopSettings(): ShopSettings {

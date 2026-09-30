@@ -534,30 +534,11 @@ export async function redeemReferralCode(
 /**
  * 24-Hour overlay check:
  * Checks if 24 hours have elapsed since account creation.
+ * [v6.2.3 NOTE]: Deactivated from appearing when a user starts the app for now per user request.
+ * Will be reactivated later with refinements.
  */
-export function shouldShow24hReferralOverlay(user: UserAccount): boolean {
-  if (!user || user.isGuest || !user.uid) return false;
-
-  // Check if dismissed in the last 24h
-  try {
-    const dismissedAt = localStorage.getItem(DISMISSED_24H_PREFIX + user.uid);
-    if (dismissedAt) {
-      const diffDismiss = Date.now() - parseInt(dismissedAt, 10);
-      if (diffDismiss < 24 * 60 * 60 * 1000) {
-        return false;
-      }
-    }
-  } catch {}
-
-  // Check user creation time
-  if (user.createdAt) {
-    const createdTime = new Date(user.createdAt).getTime();
-    if (!isNaN(createdTime)) {
-      const ageHours = (Date.now() - createdTime) / (1000 * 60 * 60);
-      return ageHours >= 24;
-    }
-  }
-
+export function shouldShow24hReferralOverlay(_user: UserAccount): boolean {
+  // Deactivated for now per user request (v6.2.3); will reactivate later with refinements
   return false;
 }
 

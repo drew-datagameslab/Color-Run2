@@ -8,8 +8,6 @@ import {
   User,
   Palette,
   Dices,
-  HardDrive,
-  ShieldCheck,
   LogOut,
   Mail,
   Fingerprint,
@@ -21,12 +19,25 @@ import {
   Award,
   Lock,
   BookOpen,
+  Users,
+  UserMinus,
+  UserPlus,
+  UserCheck,
+  Trash2,
+  ShieldCheck,
 } from 'lucide-react';
-import { UserAccount, DiceColor, ShopSettings } from '../types/game';
+import { UserAccount, DiceColor, ShopSettings, Friend, FriendRequest } from '../types/game';
 import { DEFAULT_AVATARS } from '../lib/storage';
 import { DieComponent } from './DieComponent';
 import { getSoundVolume, setSoundVolume, playSfx } from '../lib/audio';
 import { registerUserPhoneNumber } from '../lib/referrals';
+import {
+  getLocalFriends,
+  getFriendRequests,
+  removeFriend,
+  acceptFriendRequest,
+  deleteFriendRequest,
+} from '../lib/friends';
 import {
   LEVEL_REWARDS,
   calculateLevelFromTotalXp,
@@ -41,6 +52,10 @@ interface ProfileModalProps {
   user: UserAccount;
   shopSettings: ShopSettings;
   coins: number;
+  friends?: Friend[];
+  onFriendsChange?: (friends: Friend[]) => void;
+  friendRequests?: FriendRequest[];
+  onFriendRequestsChange?: (requests: FriendRequest[]) => void;
   onClose: () => void;
   onSaveUser: (updatedUser: UserAccount) => void;
   onUpdateShop: (updatedShop: ShopSettings) => void;
@@ -77,6 +92,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   user,
   shopSettings,
   coins,
+  friends,
+  onFriendsChange,
+  friendRequests,
+  onFriendRequestsChange,
   onClose,
   onSaveUser,
   onUpdateShop,
@@ -103,6 +122,14 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   );
   const photoInputRef = useRef<HTMLInputElement>(null);
 
+  // Friends & Requests state
+  const [localFriends, setLocalFriends] = useState<Friend[]>(() =>
+    friends && friends.length > 0 ? friends : getLocalFriends(user.uid)
+  );
+  const [localRequests, setLocalRequests] = useState<FriendRequest[]>(() =>
+    friendRequests || getFriendRequests(user.uid)
+  );
+
   // Sync state whenever modal is opened or user/shopSettings change
   useEffect(() => {
     if (isOpen) {
@@ -125,8 +152,51 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       );
       setEquippedBg(shopSettings.equippedBg || 'bg-wood');
       setVolPct(Math.round((getSoundVolume() / 0.7) * 100));
+
+      const currentFl = friends && friends.length > 0 ? friends : getLocalFriends(user.uid);
+      setLocalFriends(currentFl);
+      const currentRq = friendRequests || getFriendRequests(user.uid);
+      setLocalRequests(currentRq);
     }
-  }, [isOpen, user, shopSettings]);
+  }, [isOpen, user, shopSettings, friends, friendRequests]);
+
+  const handleRemoveFriendInAccount = async (friendId: string, friendName: string) => {
+    const updated = await removeFriend(user.uid, friendId, user.name);
+    setLocalFriends(updated);
+    onFriendsChange?.(updated);
+    onToast(`Removed ${friendName} from friends`);
+    playSfx('add');
+  };
+
+  const handleAcceptRequestInAccount = async (req: FriendRequest) => {
+    const res = await acceptFriendRequest(user.uid, user.name, req);
+    setLocalFriends(res.friends);
+    setLocalRequests(res.requests);
+    onFriendsChange?.(res.friends);
+    onFriendRequestsChange?.(res.requests);
+    onToast(`✨ Added ${req.fromName} as a friend!`);
+    playSfx('fanfare');
+  };
+
+  const handleDeleteRequestInAccount = async (req: FriendRequest) => {
+    const remaining = await deleteFriendRequest(user.uid, req.id);
+    setLocalRequests(remaining);
+    onFriendRequestsChange?.(remaining);
+    onToast(`Deleted friend request from ${req.fromName}`);
+    playSfx('add');
+  };
+
+  const sortedFriends = [...localFriends].sort((a, b) => {
+    const aAccepted = a.accepted !== false && !a.removedByThem;
+    const bAccepted = b.accepted !== false && !b.removedByThem;
+    if (aAccepted !== bAccepted) return aAccepted ? -1 : 1;
+
+    const aOnline = a.status === 'online';
+    const bOnline = b.status === 'online';
+    if (aOnline !== bOnline) return aOnline ? -1 : 1;
+
+    return a.name.localeCompare(b.name);
+  });
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1256,51 +1326,170 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 </p>
               </div>
 
-              {/* Cloud Files & Storage Section */}
-              <div className="bg-[#fcfaf5] border border-[#d8c89f] rounded-2xl p-3 shadow-xs flex flex-col gap-2">
-                <div className="flex items-center justify-between">
+              {/* Friends & Requests Section (Under Phone Number) */}
+              <div className="bg-[#fcfaf5] border border-[#d8c89f] rounded-2xl p-3 shadow-xs flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-[#ebdcb9] pb-2">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-xl bg-[#2f9a4f]/15 flex items-center justify-center text-[#1c6a35]">
-                      <HardDrive className="w-4 h-4" />
+                      <Users className="w-4 h-4" />
                     </div>
                     <div>
                       <h4 className="text-xs font-black text-[#2e2316]">
-                        Firebase Cloud Files
+                        Friends &amp; Requests
                       </h4>
                       <p className="text-[10px] text-[#785b3f]">
-                        Upload, view, download &amp; delete files
+                        Manage active friends and incoming requests
                       </p>
                     </div>
                   </div>
+                  <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-[#f3ecda] text-[#785b3f] border border-[#d8c89f]">
+                    {sortedFriends.filter(f => f.accepted !== false).length} Active
+                  </span>
                 </div>
 
-                <p className="text-[11px] text-[#6d5138] leading-relaxed">
-                  Your files and metadata are securely stored in your personal Firebase Firestore storage space.
-                </p>
+                {/* Accepted Friends List (Sorted to the top) */}
+                <div className="flex flex-col gap-1.5">
+                  <div className="text-[11px] font-black text-[#4a3b2c] flex items-center justify-between">
+                    <span>Active Friends</span>
+                    <span className="text-[10px] text-[#8e7660] font-normal">
+                      {sortedFriends.filter(f => f.accepted !== false).length} accepted
+                    </span>
+                  </div>
 
-                {onOpenFiles && (
-                  <button
-                    onClick={() => {
-                      onClose();
-                      onOpenFiles();
-                    }}
-                    className="w-full py-2.5 px-3 bg-[#1c6a35] hover:bg-[#15542a] text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer"
-                  >
-                    <HardDrive className="w-4 h-4" />
-                    <span>Open My Cloud File Manager</span>
-                  </button>
-                )}
-              </div>
+                  {sortedFriends.filter(f => f.accepted !== false).length === 0 ? (
+                    <div className="text-[11px] text-[#8e7660] italic py-2 text-center bg-white/60 rounded-xl border border-[#d8c89f]/60">
+                      No active friends yet. Add friends during matches!
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto pr-0.5">
+                      {sortedFriends
+                        .filter(f => f.accepted !== false)
+                        .map(friend => {
+                          const isOnline = friend.status === 'online' && !friend.removedByThem;
+                          return (
+                            <div
+                              key={friend.id}
+                              className="flex items-center justify-between p-2 bg-white rounded-xl border border-[#e4d6b6] shadow-xs"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="relative">
+                                  <div
+                                    className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-black shrink-0 border border-black/10"
+                                    style={{
+                                      backgroundColor: friend.color || '#2f9a4f',
+                                      backgroundImage: friend.image ? `url(${friend.image})` : undefined,
+                                      backgroundSize: 'cover',
+                                    }}
+                                  >
+                                    {!friend.image && friend.name.slice(0, 2).toUpperCase()}
+                                  </div>
+                                  <span
+                                    className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white ${
+                                      isOnline ? 'bg-emerald-500' : 'bg-stone-400'
+                                    }`}
+                                  />
+                                </div>
+                                <div className="min-w-0 flex flex-col">
+                                  <span className="text-xs font-black text-[#2e2316] truncate">
+                                    {friend.name}
+                                  </span>
+                                  <span className="text-[9px] font-bold text-[#8e7660] flex items-center gap-1">
+                                    <span
+                                      className={`inline-block w-1.5 h-1.5 rounded-full ${
+                                        isOnline ? 'bg-emerald-500' : 'bg-stone-400'
+                                      }`}
+                                    />
+                                    {isOnline ? 'Online' : 'Offline'}
+                                  </span>
+                                </div>
+                              </div>
 
-              {/* Security & Firestore Integration Card */}
-              <div className="bg-[#f5fbf7] border border-[#b2e2c0] rounded-2xl p-3 flex items-start gap-2.5 text-xs text-[#1c6a35]">
-                <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />
-                <div className="flex flex-col gap-0.5">
-                  <span className="font-bold">Firestore Security Active</span>
-                  <span className="text-[10px] text-[#2c7744] leading-normal">
-                    Database path: <code className="bg-white/80 px-1 py-0.5 rounded font-mono">/users/{user.uid}/files</code>.
-                    Firestore security rules enforce that only your authenticated account can access this data.
-                  </span>
+                              {/* Remove Friend Button */}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveFriendInAccount(friend.id, friend.name)}
+                                className="py-1 px-2 text-[10px] font-bold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-1 transition-all active:scale-95 cursor-pointer shrink-0"
+                                title="Remove as friend"
+                              >
+                                <UserMinus className="w-3 h-3" />
+                                <span>Remove</span>
+                              </button>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Friend Requests List (Under active friends) */}
+                <div className="flex flex-col gap-1.5 pt-2 border-t border-[#ebdcb9]">
+                  <div className="text-[11px] font-black text-[#4a3b2c] flex items-center justify-between">
+                    <span>Friend Requests</span>
+                    {localRequests.filter(r => r.status === 'pending' || r.status === 'dismissed').length > 0 && (
+                      <span className="text-[9px] font-black px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                        {localRequests.filter(r => r.status === 'pending' || r.status === 'dismissed').length} Pending
+                      </span>
+                    )}
+                  </div>
+
+                  {localRequests.filter(r => r.status === 'pending' || r.status === 'dismissed').length === 0 ? (
+                    <div className="text-[11px] text-[#8e7660] italic py-2 text-center bg-white/60 rounded-xl border border-[#d8c89f]/60">
+                      No pending friend requests
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-0.5">
+                      {localRequests
+                        .filter(r => r.status === 'pending' || r.status === 'dismissed')
+                        .map(req => (
+                          <div
+                            key={req.id}
+                            className="flex flex-col sm:flex-row sm:items-center justify-between p-2 bg-amber-50/70 rounded-xl border border-amber-200/80 gap-2 shadow-xs"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div
+                                className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-black shrink-0 border border-black/10"
+                                style={{
+                                  backgroundColor: req.fromColor || '#e58a1f',
+                                  backgroundImage: req.fromImage ? `url(${req.fromImage})` : undefined,
+                                  backgroundSize: 'cover',
+                                }}
+                              >
+                                {!req.fromImage && req.fromName.slice(0, 2).toUpperCase()}
+                              </div>
+                              <div className="min-w-0 flex flex-col">
+                                <span className="text-xs font-black text-[#2e2316] truncate">
+                                  {req.fromName}
+                                </span>
+                                <span className="text-[9px] text-[#8e7660]">
+                                  sent you a friend request
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Two buttons: Add Friend and Delete */}
+                            <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                              <button
+                                type="button"
+                                onClick={() => handleAcceptRequestInAccount(req)}
+                                className="py-1 px-2.5 bg-[#2f9a4f] hover:bg-[#258241] text-white font-black text-[10px] rounded-lg shadow-2xs flex items-center gap-1 transition-transform active:scale-95 cursor-pointer"
+                              >
+                                <UserPlus className="w-3 h-3" />
+                                <span>Add Friend</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteRequestInAccount(req)}
+                                className="py-1 px-2 text-[10px] font-bold text-red-700 bg-red-100/70 hover:bg-red-200 border border-red-300 rounded-lg flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Delete</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               </div>
 

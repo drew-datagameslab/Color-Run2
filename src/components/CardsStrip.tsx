@@ -93,6 +93,7 @@ export const CardsStrip: React.FC<CardsStripProps> = ({
           return (
             <div
               key={unit.id}
+              id={`scoreboard-card-${unit.id}`}
               onClick={() => {
                 triggerButtonHaptic();
                 onSelectUnit?.(unit);
