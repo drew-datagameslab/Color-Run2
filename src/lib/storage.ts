@@ -320,6 +320,8 @@ export function loginOAuthUser(
   return user;
 }
 
+import { fetchServerCoins, updateServerCoins } from './serverAuthoritative';
+
 export function getUserCoins(uid: string): number {
   try {
     const raw = localStorage.getItem(COINS_PREFIX + uid);
@@ -331,18 +333,43 @@ export function getUserCoins(uid: string): number {
   return 200;
 }
 
+export async function syncUserCoinsFromServer(uid: string): Promise<number> {
+  const serverBalance = await fetchServerCoins(uid);
+  if (serverBalance !== null) {
+    try {
+      localStorage.setItem(COINS_PREFIX + uid, String(serverBalance));
+    } catch {}
+    return serverBalance;
+  }
+  return getUserCoins(uid);
+}
+
 export function setUserCoins(uid: string, amount: number): void {
+  const sanitized = Math.max(0, amount);
   try {
-    localStorage.setItem(COINS_PREFIX + uid, String(Math.max(0, amount)));
+    localStorage.setItem(COINS_PREFIX + uid, String(sanitized));
   } catch {
     // Ignore
   }
+  // Sync to server asynchronously
+  fetch('/api/coins/set', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uid, amount: sanitized }),
+  }).catch(() => {});
 }
 
-export function addCoins(uid: string, delta: number): number {
+export function addCoins(uid: string, delta: number, reason: string = 'gameplay'): number {
   const cur = getUserCoins(uid);
   const next = Math.max(0, cur + delta);
-  setUserCoins(uid, next);
+  try {
+    localStorage.setItem(COINS_PREFIX + uid, String(next));
+  } catch {}
+  
+  // Authoritative server balance update
+  if (delta !== 0) {
+    updateServerCoins(uid, delta, reason).catch(() => {});
+  }
   return next;
 }
 

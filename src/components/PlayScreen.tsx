@@ -16,6 +16,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ScoreBubbleAnimation, ScoreBubbleData } from './ScoreBubbleAnimation';
 import { subscribeToRoom, markPlayerLeft, updateRoomGameState, getClientSessionId, RoomGameState } from '../lib/matchmaking';
 import { calculatePayouts } from './PickGameScreen';
+import { rollDiceOnServer } from '../lib/serverAuthoritative';
 
 export interface MatchSummaryStats {
   survivedRounds: number;
@@ -48,7 +49,7 @@ function createInitialDice(colorA: DiceColor, colorB: DiceColor): Die[] {
     dice.push({
       id: i,
       color: colorA,
-      value: Math.floor(Math.random() * 6) + 1,
+      value: ((i - 1) % 6) + 1,
       zone: 'active',
       selected: false,
       slotIndex: dice.length,
@@ -59,7 +60,7 @@ function createInitialDice(colorA: DiceColor, colorB: DiceColor): Die[] {
     dice.push({
       id: i,
       color: colorB,
-      value: Math.floor(Math.random() * 6) + 1,
+      value: ((i - 1) % 6) + 1,
       zone: 'active',
       selected: false,
       slotIndex: dice.length,
@@ -263,36 +264,54 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   const [activeScoreBubble, setActiveScoreBubble] = useState<ScoreBubbleData | null>(null);
   const [isScoreBanking, setIsScoreBanking] = useState<boolean>(false);
   const lastHandledBankTimestampRef = useRef<number>(0);
+  const lastAnimatedBankKeyRef = useRef<string>('');
 
   const triggerScoreBubble = useCallback((points: number, unitId: string) => {
-    // 1. Origin: From the total points (In the Saved Dice bar)
-    const pointsElem = document.getElementById('saved-dice-total-points');
-    const pointsRect = pointsElem?.getBoundingClientRect();
+    if (points <= 0 || !unitId) return;
 
-    const startX = pointsRect ? pointsRect.left + pointsRect.width / 2 : window.innerWidth * 0.78;
-    const startY = pointsRect ? pointsRect.top + pointsRect.height / 2 : window.innerHeight * 0.35;
+    setActiveScoreBubble(prev => {
+      // Prevent duplicate re-trigger of an active bubble
+      if (prev && prev.unitId === unitId && prev.points === points) {
+        return prev;
+      }
 
-    // 2. Target: To the user or cpu player's scoreboard card
-    const cardElem =
-      document.getElementById(`scoreboard-card-${unitId}`) ||
-      document.querySelector(`[id="scoreboard-card-${unitId}"]`);
+      // 1. Origin: From the total points (In the Saved Dice bar)
+      const pointsElem = document.getElementById('saved-dice-total-points');
+      const pointsRect = pointsElem?.getBoundingClientRect();
 
-    if (cardElem) {
-      cardElem.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-    }
-    const cardRect = cardElem?.getBoundingClientRect();
+      const startX = pointsRect && pointsRect.width > 0
+        ? pointsRect.left + pointsRect.width / 2
+        : window.innerWidth * 0.78;
+      const startY = pointsRect && pointsRect.height > 0
+        ? pointsRect.top + pointsRect.height / 2
+        : window.innerHeight * 0.35;
 
-    const targetX = cardRect ? cardRect.left + cardRect.width / 2 : window.innerWidth / 2;
-    const targetY = cardRect ? cardRect.top + cardRect.height / 2 : 110;
+      // 2. Target: To the user or cpu player's scoreboard card
+      const cardElem =
+        document.getElementById(`scoreboard-card-${unitId}`) ||
+        document.querySelector(`[id="scoreboard-card-${unitId}"]`);
 
-    setActiveScoreBubble({
-      id: 'bubble_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      points,
-      startX,
-      startY,
-      targetX,
-      targetY,
-      unitId,
+      let targetX = window.innerWidth / 2;
+      let targetY = 110;
+
+      if (cardElem) {
+        cardElem.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        const cardRect = cardElem.getBoundingClientRect();
+        if (cardRect && cardRect.width > 0) {
+          targetX = cardRect.left + cardRect.width / 2;
+          targetY = cardRect.top + cardRect.height / 2;
+        }
+      }
+
+      return {
+        id: `bubble_${unitId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        points,
+        startX,
+        startY,
+        targetX,
+        targetY,
+        unitId,
+      };
     });
   }, []);
 
@@ -795,14 +814,15 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
               lastHandledBankTimestampRef.current = gs.actionTimestamp;
               const targetUnitId =
                 (gs as any).lastBankedUnitId ||
-                (typeof gs.activeUnitIndex === 'number' && units[gs.activeUnitIndex]?.id) ||
                 units.find(u => gs.scores![u.id] !== undefined && gs.scores![u.id] > u.score)?.id;
               if (targetUnitId && gs.scores[targetUnitId] !== undefined) {
                 const scoringUnit = units.find(u => u.id === targetUnitId);
                 const addedPts = typeof (gs as any).lastBankedPoints === 'number'
                   ? (gs as any).lastBankedPoints
                   : scoringUnit ? gs.scores[targetUnitId] - scoringUnit.score : 0;
-                if (addedPts > 0) {
+                const bankKey = `${targetUnitId}_ts${gs.actionTimestamp}_pts${addedPts}`;
+                if (addedPts > 0 && lastAnimatedBankKeyRef.current !== bankKey) {
+                  lastAnimatedBankKeyRef.current = bankKey;
                   triggerScoreBubble(addedPts, targetUnitId);
                 }
               }
@@ -980,7 +1000,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   }, []);
 
   // Roll dice action: re-slots active dice and locks final values when animation completes
-  const doRoll = () => {
+  const doRoll = async () => {
     stopWarningSound();
     if (rollsUsed >= 3 || isRolling || isScoreBanking) return;
     if (!isHumanOwner && !(isCPU && isTurnAuthority)) return;
@@ -1023,13 +1043,18 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       });
     });
 
-    // Generate final random values for this roll
-    const finalValuesMap = new Map<number, number>();
-    active.forEach(d => {
-      finalValuesMap.set(d.id, Math.floor(Math.random() * 6) + 1);
-    });
-
     const nextRoll = rollsUsed + 1;
+
+    // Generate final random values for this roll using the server-authoritative backend
+    const finalValuesMap = await rollDiceOnServer(
+      active.map(d => d.id),
+      {
+        roomId: settings.roomId,
+        round,
+        rollNumber: nextRoll,
+        playerUid: curUnit.id,
+      }
+    );
     let nextSlot = 0;
     const finalDice = workingDice.map(d => {
       if (d.zone === 'active') {
@@ -1324,8 +1349,12 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     const pointsToFloat = tbActive
       ? (finalScore.total > 0 ? finalScore.total : curDice.reduce((acc, d) => acc + d.value, 0))
       : finalScore.total;
-    setIsScoreBanking(true);
-    triggerScoreBubble(pointsToFloat, activePlayer.id);
+    const localBankKey = `${activePlayer.id}_round${round}_pts${pointsToFloat}`;
+    if (pointsToFloat > 0 && lastAnimatedBankKeyRef.current !== localBankKey) {
+      lastAnimatedBankKeyRef.current = localBankKey;
+      setIsScoreBanking(true);
+      triggerScoreBubble(pointsToFloat, activePlayer.id);
+    }
 
     const executeBankTransition = () => {
       setIsScoreBanking(false);
@@ -1478,12 +1507,15 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
               dice: nextDiceForTurn,
               lastAction: 'bank',
               lastActionBy: user.uid,
+              lastActionSessionId: getClientSessionId(),
+              lastBankedUnitId: activePlayer.id,
+              lastBankedPoints: pointsToFloat,
               actionTimestamp: Date.now(),
             });
           }
         } else {
           // Completed full round!
-          resolveRound(updatedUnits);
+          resolveRound(updatedUnits, activePlayer.id, pointsToFloat);
         }
       };
 
@@ -1529,7 +1561,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   bankTurnRef.current = bankTurn;
 
   // Round resolution (checking threshold or doing elimination)
-  const resolveRound = (currentUnits: PlayerUnit[]) => {
+  const resolveRound = (currentUnits: PlayerUnit[], bankedUnitId?: string, bankedPoints?: number) => {
     const liveUnits = currentUnits.filter(u => u.active);
 
     if (phase === 'regular') {
@@ -1625,6 +1657,9 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
           dice: nextDice,
           lastAction: 'bank',
           lastActionBy: user.uid,
+          lastActionSessionId: getClientSessionId(),
+          lastBankedUnitId: bankedUnitId || liveUnits[0].id,
+          lastBankedPoints: bankedPoints ?? 0,
           actionTimestamp: Date.now(),
         });
       }

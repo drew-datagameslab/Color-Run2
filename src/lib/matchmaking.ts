@@ -57,6 +57,8 @@ export interface RoomGameState {
     | 'tiebreaker_outro';
   lastActionBy: string; // unitId or uid
   lastActionSessionId?: string; // unique persistent device/browser session ID
+  lastBankedUnitId?: string; // Player unit ID whose score was banked
+  lastBankedPoints?: number; // Total points banked in the turn
   lastActionId?: string;
   actionTimestamp: number;
   turnAuthorityUid?: string;

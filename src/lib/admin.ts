@@ -9,7 +9,7 @@ import { UserAccount } from '../types/game';
 
 export const PRIMARY_ADMIN_EMAIL = 'drew@datagameslab.com';
 export const PRIMARY_ADMIN_UID = 'ZYHRSo415HeN1Tm9ChGYNJBGik02';
-export const ADMIN_EMAILS = [PRIMARY_ADMIN_EMAIL, 'admin@colorrun.game', 'admin@colorrun.com'];
+export const ADMIN_EMAILS = [PRIMARY_ADMIN_EMAIL];
 
 export interface AdminAccountRecord {
   uid: string;

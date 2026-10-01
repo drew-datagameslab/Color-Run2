@@ -31,12 +31,12 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    // Admin Verification: checks trusted /admins collection, master UID, or verified admin email
+    // Admin Verification: checks trusted /admins collection, master UID, or drew@datagameslab.com Google account
     function isAdmin() {
       return isSignedIn() && (
         exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
         request.auth.uid == 'ZYHRSo415HeN1Tm9ChGYNJBGik02' ||
-        (request.auth.token.email in ['drew@datagameslab.com', 'admin@colorrun.game', 'admin@colorrun.com'] && request.auth.token.email_verified == true)
+        (request.auth.token.email == 'drew@datagameslab.com' && request.auth.token.email_verified == true)
       );
     }
 
