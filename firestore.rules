@@ -1,91 +1,241 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper function to check auth
-    function isAuthenticated() {
+    // -------------------------------------------------------------
+    // Global Deny Catch-All (Pillar 1)
+    // -------------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------
+    // Security Primitives & Helpers
+    // -------------------------------------------------------------
+    function isSignedIn() {
       return request.auth != null;
     }
 
     function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+      return isSignedIn() && request.auth.uid == userId;
     }
 
-    // User profile and account info
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Admin Verification: checks trusted /admins collection, master UID, or verified admin email
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.uid == 'ZYHRSo415HeN1Tm9ChGYNJBGik02' ||
+        (request.auth.token.email in ['drew@datagameslab.com', 'admin@colorrun.game', 'admin@colorrun.com'] && request.auth.token.email_verified == true)
+      );
+    }
+
+    // Economy & Role Guard: restricts sensitive fields from client self-writing
+    function isRestrictedUserField() {
+      return incoming().diff(existing()).affectedKeys().hasAny([
+        'coins',
+        'isAdFree',
+        'adFreePlan',
+        'scoreboardUnlocked',
+        'role',
+        'isAdmin'
+      ]);
+    }
+
+    // -------------------------------------------------------------
+    // Admins Collection: Elevated administrative accounts
+    // -------------------------------------------------------------
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // -------------------------------------------------------------
+    // Users Collection: Private user profile and progression
+    // -------------------------------------------------------------
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isOwner(userId);
+      // PII Protection: only the owner or an admin can read the user's document
+      allow get: if isOwner(userId) || isAdmin();
+      // List disabled for non-admins to prevent email and phone harvesting
+      allow list: if isAdmin();
 
-      // User-specific files and file metadata
+      // Create: Users can register their account with default safe initial balances
+      allow create: if isOwner(userId) && (
+        isAdmin() || (
+          (!('isAdFree' in incoming()) || incoming().isAdFree == false) &&
+          (!('role' in incoming())) &&
+          (!('isAdmin' in incoming())) &&
+          (!('coins' in incoming()) || incoming().coins <= 500)
+        )
+      );
+
+      // Update: Regular users cannot self-assign coins, isAdFree, or admin roles
+      allow update: if (isAdmin() || (isOwner(userId) && !isRestrictedUserField()));
+
+      // Delete: Owner or admin
+      allow delete: if isOwner(userId) || isAdmin();
+
+      // Subcollection: User files & board backups
       match /files/{fileId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isAdmin();
       }
 
-      // User-specific saved boards or preferences
+      // Subcollection: Saved boards
       match /savedBoards/{boardId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isAdmin();
       }
 
-      // User-specific friends (allow owner or authenticated user adding mutual friendship)
+      // Subcollection: Private friend roster (restricted strictly to owner)
       match /friends/{friendId} {
-        allow read: if isOwner(userId);
-        allow write: if isOwner(userId) || isAuthenticated();
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      // Subcollection: User-specific incoming friend request references
+      match /friendRequests/{requestId} {
+        allow read, write: if isOwner(userId) || isAdmin();
       }
     }
 
-    // Phone index for friend invites and player discovery
+    // -------------------------------------------------------------
+    // Phone Index: Protected phone lookup index
+    // -------------------------------------------------------------
     match /phoneIndex/{phoneId} {
-      allow read: if true;
-      allow write: if true;
+      // Single phone exact lookup permitted for authenticated players
+      allow get: if isSignedIn();
+      // Directory listing forbidden to non-admins to prevent bulk harvesting
+      allow list: if isAdmin();
+      // Only the authenticated owner of the phone entry can create/update
+      allow create, update: if isSignedIn() && (incoming().userId == request.auth.uid || isAdmin());
+      allow delete: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
     }
 
-    // Referral codes for friend invites and challenge links
-    match /referralCodes/{codeId} {
-      // Any user (or new registrant) can check a referral code
-      allow read: if true;
-      // Authenticated users can create or update codes (e.g. mark as used, set reminder)
-      allow write: if true;
-    }
-
-    // Promotional email subscribers
+    // -------------------------------------------------------------
+    // Email Subscribers: Promotional subscriber directory
+    // -------------------------------------------------------------
     match /emailSubscribers/{subscriberId} {
-      // Anyone can submit their email subscription for free coins
-      allow create: if request.resource.data.email is string && request.resource.data.email.size() > 3;
-      // Users can view or update verification status of their own subscription
-      allow read, update: if true;
+      // Reading/listing restricted to Admins to prevent marketing email harvesting
+      allow get: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
+      allow list: if isAdmin();
+      // Anyone can submit their subscription for promotional bonuses
+      allow create: if incoming().email is string && incoming().email.size() >= 3 && incoming().email.size() <= 256;
+      allow update, delete: if isAdmin();
     }
 
-    // Multiplayer matchmaking and game rooms
+    // -------------------------------------------------------------
+    // Referral Codes: Invite codes with scoped queries
+    // -------------------------------------------------------------
+    match /referralCodes/{codeId} {
+      allow get: if isSignedIn();
+      // Scoped listing: users can only list the codes they created
+      allow list: if isSignedIn() && (resource.data.inviterId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && incoming().inviterId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        existing().inviterId == request.auth.uid ||
+        incoming().usedBy == request.auth.uid ||
+        isAdmin()
+      );
+      allow delete: if isSignedIn() && (existing().inviterId == request.auth.uid || isAdmin());
+    }
+
+    // -------------------------------------------------------------
+    // Matchmaking Rooms & Lobbies: Multiplayer game state
+    // -------------------------------------------------------------
     match /rooms/{roomId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn() && isAdmin();
+
       match /{allPaths=**} {
-        allow read, write: if true;
+        allow read, write: if isSignedIn();
       }
     }
 
-    // Game challenge invites for direct player-to-player challenges
-    match /game_invites/{inviteId} {
-      allow read, write: if true;
-    }
-
-    // Friend requests
-    match /friend_requests/{requestId} {
-      allow read, write: if true;
-    }
-
-    // Live presence tracking for active online friends and challenge matchmaking
-    match /presence/{userId} {
-      allow read, write: if true;
-    }
-
-    // Multiplayer active lobby pointers
     match /lobbies/{lobbyId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
+
       match /{allPaths=**} {
-        allow read, write: if true;
+        allow read, write: if isSignedIn();
       }
     }
 
-    // Health check and connection validation
+    // -------------------------------------------------------------
+    // Live Presence Heartbeats
+    // -------------------------------------------------------------
+    match /presence/{userId} {
+      allow read: if isSignedIn();
+      // Players can ONLY write their own live heartbeat record
+      allow create, update: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+
+    // -------------------------------------------------------------
+    // Game Challenges & Direct Invites
+    // -------------------------------------------------------------
+    match /game_invites/{inviteId} {
+      allow get: if isSignedIn() && (
+        resource.data.fromUid == request.auth.uid ||
+        resource.data.toUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.fromUid == request.auth.uid ||
+        resource.data.toUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isSignedIn() && incoming().fromUid == request.auth.uid;
+      allow update: if isSignedIn() && (
+        existing().toUid == request.auth.uid ||
+        existing().fromUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow delete: if isSignedIn() && (
+        existing().fromUid == request.auth.uid ||
+        existing().toUid == request.auth.uid ||
+        isAdmin()
+      );
+    }
+
+    // -------------------------------------------------------------
+    // Friend Requests
+    // -------------------------------------------------------------
+    match /friend_requests/{requestId} {
+      allow get: if isSignedIn() && (
+        resource.data.fromUid == request.auth.uid ||
+        resource.data.toUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.fromUid == request.auth.uid ||
+        resource.data.toUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isSignedIn() && incoming().fromUid == request.auth.uid;
+      allow update: if isSignedIn() && (
+        existing().toUid == request.auth.uid ||
+        existing().fromUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow delete: if isSignedIn() && (
+        existing().fromUid == request.auth.uid ||
+        existing().toUid == request.auth.uid ||
+        isAdmin()
+      );
+    }
+
+    // -------------------------------------------------------------
+    // Health Check & Connection Testing
+    // -------------------------------------------------------------
     match /test/{docId} {
       allow read: if true;
     }

@@ -369,6 +369,54 @@ export function subscribeToAuth(
   });
 }
 
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+  const currentAuth = auth.currentUser;
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: currentAuth?.uid,
+      email: currentAuth?.email,
+      emailVerified: currentAuth?.emailVerified,
+      isAnonymous: currentAuth?.isAnonymous,
+      tenantId: currentAuth?.tenantId,
+      providerInfo: currentAuth?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || [],
+    },
+    operationType,
+    path,
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
 // -------------------------------------------------------------
 // Firestore Database Functions for User Profile & Account Data
 // -------------------------------------------------------------
@@ -385,11 +433,6 @@ export async function syncUserProfileToFirestore(
       email: user.email,
       provider: user.provider,
       isGuest: !!user.isGuest,
-      scoreboardUnlocked: !!user.scoreboardUnlocked,
-      isAdFree: !!user.isAdFree,
-      adFreePlan: user.adFreePlan || null,
-      adFreeBillingDate: user.adFreeBillingDate || null,
-      adFreeRecurring: user.adFreeRecurring ?? null,
       phoneNumber: user.phoneNumber || null,
       avatar: user.avatar,
       diceColors: user.diceColors || ['blue', 'red'],
@@ -410,12 +453,36 @@ export async function syncUserProfileToFirestore(
       matchmakingRating: user.matchmakingRating || ((user.level || 1) * 100),
       updatedAt: new Date().toISOString(),
     };
-    if (coins !== undefined) {
-      data.coins = coins;
-    }
+
     if (user.createdAt) {
       data.createdAt = user.createdAt;
     }
+
+    // Role and permission boundary:
+    // Non-admin players cannot self-assign coins, isAdFree, or scoreboardUnlocked.
+    const isAdminUser = !!(user.email && ['admin@colorrun.game', 'admin@colorrun.com'].includes(user.email.toLowerCase()));
+
+    let isNewDoc = false;
+    try {
+      const snap = await getDoc(userRef);
+      isNewDoc = !snap.exists();
+    } catch {
+      isNewDoc = false;
+    }
+
+    if (isNewDoc) {
+      data.coins = Math.min(coins !== undefined ? coins : 200, 500);
+      data.isAdFree = false;
+      data.scoreboardUnlocked = true;
+    } else if (isAdminUser) {
+      if (coins !== undefined) data.coins = coins;
+      data.isAdFree = !!user.isAdFree;
+      data.scoreboardUnlocked = !!user.scoreboardUnlocked;
+      if (user.adFreePlan) data.adFreePlan = user.adFreePlan;
+      if (user.adFreeBillingDate) data.adFreeBillingDate = user.adFreeBillingDate;
+      if (user.adFreeRecurring !== undefined) data.adFreeRecurring = user.adFreeRecurring;
+    }
+
     await setDoc(userRef, data, { merge: true });
   } catch (err) {
     console.warn('Could not sync user profile to Firestore:', err);

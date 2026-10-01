@@ -10,6 +10,7 @@ import {
   Volume2,
   VolumeX,
   ShieldCheck,
+  Shield,
   Trophy,
   AlertTriangle,
   Maximize,
@@ -32,6 +33,7 @@ interface MenuModalProps {
   onOpenRules: () => void;
   onOpenScoreboard: () => void;
   onOpenChallengeFriends?: () => void;
+  onOpenAdmin?: () => void;
   onLogOut?: () => void;
   onUpdateShop: (shop: ShopSettings) => void;
   onToast: (msg: string) => void;
@@ -51,6 +53,7 @@ export const MenuModal: React.FC<MenuModalProps> = ({
   onOpenRules,
   onOpenScoreboard,
   onOpenChallengeFriends,
+  onOpenAdmin,
   onLogOut,
   onUpdateShop,
   onToast,
@@ -300,6 +303,30 @@ export const MenuModal: React.FC<MenuModalProps> = ({
             <ClipboardList className="w-4 h-4 text-[#1f7fd6]" />
             <span>Companion Scoreboard</span>
           </button>
+
+          {/* Admin Backend */}
+          {onOpenAdmin && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenAdmin();
+              }}
+              className="w-full py-2 px-3 bg-gradient-to-r from-[#1e293b] to-[#0f172a] hover:from-[#334155] hover:to-[#1e293b] text-blue-200 rounded-xl font-bold text-xs flex items-center gap-2.5 border border-blue-500/40 active:scale-98 transition-all cursor-pointer shadow-xs"
+            >
+              <Shield className="w-4 h-4 text-blue-400" />
+              <div className="flex flex-col text-left">
+                <span className="flex items-center gap-1.5">
+                  <span>Admin Backend</span>
+                  <span className="text-[9px] bg-blue-500/30 text-blue-300 px-1 py-0.2 rounded font-semibold uppercase">
+                    Secured
+                  </span>
+                </span>
+                <span className="text-[10px] text-gray-400 font-normal">
+                  Database audit, players &amp; economy
+                </span>
+              </div>
+            </button>
+          )}
 
           {/* Full Screen Toggle */}
           <button

@@ -1,18 +1,33 @@
 {
   "entities": {
+    "Admin": {
+      "title": "Admin",
+      "description": "Authorized administrator account with elevated privileges for managing users, economy, subscribers, and rooms.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "role": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "grantedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["uid", "role"]
+    },
     "User": {
-      "collection": "users",
-      "fields": {
-        "uid": { "type": "string" },
-        "name": { "type": "string" },
-        "email": { "type": "string" },
-        "phoneNumber": { "type": "string" },
-        "provider": { "type": "string" },
+      "title": "User",
+      "description": "Player account profile with game progression and private account settings.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 64 },
+        "email": { "type": "string", "maxLength": 256 },
+        "phoneNumber": { "type": "string", "maxLength": 32 },
+        "provider": { "type": "string", "maxLength": 32 },
         "isGuest": { "type": "boolean" },
         "coins": { "type": "number" },
         "isAdFree": { "type": "boolean" },
-        "adFreePlan": { "type": "string" },
-        "adFreeBillingDate": { "type": "string" },
+        "adFreePlan": { "type": "string", "maxLength": 32 },
+        "adFreeBillingDate": { "type": "string", "maxLength": 64 },
         "adFreeRecurring": { "type": "boolean" },
         "scoreboardUnlocked": { "type": "boolean" },
         "diceColors": { "type": "array" },
@@ -21,101 +36,119 @@
         "totalXp": { "type": "number" },
         "level": { "type": "number" },
         "prestige": { "type": "number" },
-        "title": { "type": "string" },
-        "banner": { "type": "string" },
-        "nameColor": { "type": "string" },
+        "title": { "type": "string", "maxLength": 64 },
+        "banner": { "type": "string", "maxLength": 64 },
+        "nameColor": { "type": "string", "maxLength": 32 },
         "unlockedRewards": { "type": "array" },
         "unlockedEmotes": { "type": "array" },
         "unlockedTitles": { "type": "array" },
         "unlockedBanners": { "type": "array" },
-        "lastFirstWinDate": { "type": "string" },
+        "lastFirstWinDate": { "type": "string", "maxLength": 64 },
         "rankedUnlocked": { "type": "boolean" },
         "matchmakingRating": { "type": "number" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
-      }
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["uid", "name"]
     },
     "UserFile": {
-      "collection": "users/{userId}/files",
-      "fields": {
-        "id": { "type": "string" },
-        "userId": { "type": "string" },
-        "name": { "type": "string" },
+      "title": "UserFile",
+      "description": "User uploaded file metadata and preview content.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
         "size": { "type": "number" },
-        "type": { "type": "string" },
-        "uploadDate": { "type": "string" },
+        "type": { "type": "string", "maxLength": 64 },
+        "uploadDate": { "type": "string", "maxLength": 64 },
         "dataUrl": { "type": "string" },
-        "notes": { "type": "string" }
-      }
+        "notes": { "type": "string", "maxLength": 512 }
+      },
+      "required": ["id", "userId", "name"]
     },
     "EmailSubscriber": {
-      "collection": "emailSubscribers",
-      "fields": {
-        "id": { "type": "string" },
-        "email": { "type": "string" },
-        "userId": { "type": "string" },
-        "country": { "type": "string" },
-        "agreedAt": { "type": "string" },
+      "title": "EmailSubscriber",
+      "description": "Promotional email subscriber record secured against unauthorized listing or harvesting.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "country": { "type": "string", "maxLength": 64 },
+        "agreedAt": { "type": "string", "maxLength": 64 },
         "verified": { "type": "boolean" },
-        "verifiedAt": { "type": "string" },
-        "consentVersion": { "type": "string" },
-        "source": { "type": "string" }
-      }
+        "verifiedAt": { "type": "string", "maxLength": 64 },
+        "consentVersion": { "type": "string", "maxLength": 32 },
+        "source": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["email"]
     },
     "Friend": {
-      "collection": "users/{userId}/friends",
-      "fields": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "color": { "type": "string" },
+      "title": "Friend",
+      "description": "Subcollection entry for a player's private friend roster.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 64 },
+        "color": { "type": "string", "maxLength": 32 },
         "image": { "type": "string" },
-        "status": { "type": "string" },
-        "addedAt": { "type": "string" },
-        "userId": { "type": "string" }
-      }
+        "status": { "type": "string", "maxLength": 32 },
+        "addedAt": { "type": "string", "maxLength": 64 },
+        "userId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "name"]
     },
     "ReferralCode": {
-      "collection": "referralCodes",
-      "fields": {
-        "code": { "type": "string" },
-        "inviterId": { "type": "string" },
-        "inviterName": { "type": "string" },
-        "inviterColor": { "type": "string" },
+      "title": "ReferralCode",
+      "description": "Unique invite code for friend invitations and onboarding bonuses.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 32 },
+        "inviterId": { "type": "string", "maxLength": 128 },
+        "inviterName": { "type": "string", "maxLength": 64 },
+        "inviterColor": { "type": "string", "maxLength": 32 },
         "inviterImage": { "type": "string" },
-        "phoneNumber": { "type": "string" },
-        "preferredStore": { "type": "string" },
-        "messageText": { "type": "string" },
-        "createdAt": { "type": "string" },
+        "phoneNumber": { "type": "string", "maxLength": 32 },
+        "preferredStore": { "type": "string", "maxLength": 32 },
+        "messageText": { "type": "string", "maxLength": 512 },
+        "createdAt": { "type": "string", "maxLength": 64 },
         "used": { "type": "boolean" },
-        "usedBy": { "type": "string" },
-        "usedByName": { "type": "string" },
-        "usedAt": { "type": "string" },
+        "usedBy": { "type": "string", "maxLength": 128 },
+        "usedByName": { "type": "string", "maxLength": 64 },
+        "usedAt": { "type": "string", "maxLength": 64 },
         "reminderSent": { "type": "boolean" },
-        "lastReminderAt": { "type": "string" }
-      }
+        "lastReminderAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["code", "inviterId"]
     },
     "PhoneIndex": {
-      "collection": "phoneIndex",
-      "fields": {
-        "phoneNumber": { "type": "string" },
-        "userId": { "type": "string" },
-        "name": { "type": "string" },
-        "color": { "type": "string" },
+      "title": "PhoneIndex",
+      "description": "Protected phone lookup index to verify registered users while preventing enumeration attacks.",
+      "type": "object",
+      "properties": {
+        "phoneNumber": { "type": "string", "maxLength": 32 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 64 },
+        "color": { "type": "string", "maxLength": 32 },
         "image": { "type": "string" },
-        "updatedAt": { "type": "string" }
-      }
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["userId"]
     },
     "Room": {
-      "collection": "rooms",
-      "fields": {
-        "id": { "type": "string" },
-        "gameKey": { "type": "string" },
-        "tier": { "type": "string" },
+      "title": "Room",
+      "description": "Multiplayer game room containing round state, live players, and turn data.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "gameKey": { "type": "string", "maxLength": 64 },
+        "tier": { "type": "string", "maxLength": 32 },
         "playerCount": { "type": "number" },
         "buyIn": { "type": "number" },
         "createdAt": { "type": "number" },
         "expiresAt": { "type": "number" },
-        "status": { "type": "string" },
+        "status": { "type": "string", "maxLength": 32 },
         "players": { "type": "array" },
         "filledBots": { "type": "array" },
         "slots": { "type": "array" },
@@ -125,20 +158,66 @@
         "maxLevel": { "type": "number" },
         "gameState": { "type": "object" },
         "updatedAt": { "type": "number" }
-      }
+      },
+      "required": ["id", "gameKey", "players"]
     },
     "Presence": {
-      "collection": "presence",
-      "fields": {
-        "uid": { "type": "string" },
-        "name": { "type": "string" },
-        "color": { "type": "string" },
+      "title": "Presence",
+      "description": "Live online heartbeat and presence status for players.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 64 },
+        "color": { "type": "string", "maxLength": 32 },
         "image": { "type": "string" },
-        "status": { "type": "string" },
+        "status": { "type": "string", "maxLength": 32 },
         "inGame": { "type": "boolean" },
         "lastSeen": { "type": "number" },
         "updatedAt": { "type": "number" }
-      }
+      },
+      "required": ["uid"]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/Admin" },
+      "description": "Collection of authorized administrative accounts with access to backend management."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User account documents. Read is restricted to the account owner or admin. Profile updates cannot self-assign coins, isAdFree, or scoreboardUnlocked."
+    },
+    "/users/{userId}/files/{fileId}": {
+      "schema": { "$ref": "#/entities/UserFile" },
+      "description": "User uploaded game files and boards, accessible only by owner or admin."
+    },
+    "/users/{userId}/friends/{friendId}": {
+      "schema": { "$ref": "#/entities/Friend" },
+      "description": "User private friends roster, writeable and readable strictly by the document owner."
+    },
+    "/phoneIndex/{phoneId}": {
+      "schema": { "$ref": "#/entities/PhoneIndex" },
+      "description": "Phone index with list disabled to prevent telephone number harvesting."
+    },
+    "/emailSubscribers/{subscriberId}": {
+      "schema": { "$ref": "#/entities/EmailSubscriber" },
+      "description": "Promotional email subscriber directory. Read/list strictly restricted to Admin."
+    },
+    "/referralCodes/{codeId}": {
+      "schema": { "$ref": "#/entities/ReferralCode" },
+      "description": "Referral codes for player invites with owner-scoped listing."
+    },
+    "/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/Room" },
+      "description": "Multiplayer match rooms restricted to authenticated players."
+    },
+    "/lobbies/{lobbyId}": {
+      "schema": { "$ref": "#/entities/Room" },
+      "description": "Active matchmaking lobby records."
+    },
+    "/presence/{userId}": {
+      "schema": { "$ref": "#/entities/Presence" },
+      "description": "Live presence heartbeats writeable only by the owning authenticated player."
     }
   }
 }

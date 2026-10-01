@@ -47,6 +47,8 @@ import { RedeemCodeModal } from './components/RedeemCodeModal';
 import { ProfileModal } from './components/ProfileModal';
 import { MenuModal } from './components/MenuModal';
 import { UserFilesModal } from './components/UserFilesModal';
+import { AdminBackendModal } from './components/AdminBackendModal';
+import { checkIsAdmin } from './lib/admin';
 import { DailyBonusOverlay } from './components/DailyBonusOverlay';
 import { ChallengeFriendsOverlay } from './components/ChallengeFriendsOverlay';
 import { PortraitLockOverlay } from './components/PortraitLockOverlay';
@@ -114,6 +116,8 @@ export default function App() {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isMenuModalOpen, setIsMenuModalOpen] = useState(false);
   const [isFilesModalOpen, setIsFilesModalOpen] = useState(false);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isDailyBonusOpen, setIsDailyBonusOpen] = useState(false);
   const [isChallengeFriendsOpen, setIsChallengeFriendsOpen] = useState(false);
   const [toastNotice, setToastNotice] = useState('');
@@ -135,6 +139,25 @@ export default function App() {
       setMissionsData(getMissionsData(user.uid));
     }
   }, [user?.uid]);
+
+  // Sync administrator authorization status
+  useEffect(() => {
+    let isMounted = true;
+    if (!user || user.isGuest) {
+      setIsAdmin(false);
+      return;
+    }
+    checkIsAdmin(user)
+      .then(adminStatus => {
+        if (isMounted) setIsAdmin(adminStatus);
+      })
+      .catch(() => {
+        if (isMounted) setIsAdmin(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
 
   const triggerToast = (msg: string) => {
     setToastNotice(msg);
@@ -1037,9 +1060,23 @@ export default function App() {
         onOpenRules={() => handleOpenRules('rules')}
         onOpenScoreboard={() => setScreen('scoreboard')}
         onOpenChallengeFriends={() => setIsChallengeFriendsOpen(true)}
+        onOpenAdmin={isAdmin ? () => setIsAdminModalOpen(true) : undefined}
         onLogOut={handleLogOut}
         onUpdateShop={handleUpdateShop}
         onToast={triggerToast}
+      />
+
+      {/* Backend Administration Modal */}
+      <AdminBackendModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        currentUser={user}
+        onUserUpdated={u => {
+          handleSaveUser(u);
+          if ((u as any).coins !== undefined) {
+            setCoins((u as any).coins);
+          }
+        }}
       />
 
       {/* Firebase Cloud User Files & Storage Modal */}
