@@ -150,7 +150,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose, initial
                       Player Levels &amp; Prestige
                     </h3>
                     <p className="text-[11px] text-[#6b533d] font-semibold">
-                      Climb from Level 1 to 50 to unlock exclusive dice skins, themes, and Ranked Mode!
+                      Climb from Level 1 to 50 to unlock exclusive dice skins, themes, and prestige rewards!
                     </p>
                   </div>
                 </div>
@@ -264,18 +264,6 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose, initial
                 </h3>
 
                 <div className="space-y-2 text-xs">
-                  <div className="p-2.5 rounded-xl bg-blue-50/90 border border-blue-200 flex items-start gap-2.5">
-                    <div className="bg-blue-600 text-white font-black text-xs px-2 py-1 rounded-md shrink-0">
-                      Lv. 10
-                    </div>
-                    <div>
-                      <div className="font-black text-blue-950 text-xs">🏆 RANKED MATCHMAKING UNLOCKED</div>
-                      <p className="text-[11px] text-blue-800 mt-0.5">
-                        Compete in verified matchmaking against higher-skilled players with strict level filters.
-                      </p>
-                    </div>
-                  </div>
-
                   <div className="p-2 rounded-lg bg-[#faf4e6] border border-[#ebdcb9] flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-[#1c6a35]">Lv. 2–4</span>
@@ -372,7 +360,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose, initial
         {/* Footer */}
         <div className="p-4 pt-3 border-t border-[#ebdcb9] bg-[#f3ecda]/70 flex flex-col sm:flex-row items-center justify-between gap-2">
           <div className="text-[10px] text-[#7d654c] font-medium">
-            Color Run • Version 6.2.9
+            Color Run • Version 6.3.1
           </div>
           <button
             onClick={onClose}

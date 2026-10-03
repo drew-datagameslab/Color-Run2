@@ -190,20 +190,21 @@ export function generateBots(countNeeded: number, existingCount: number = 0): Ro
 
 /**
  * Finds an open room within the entry window with available spots,
- * or creates a brand-new game room. Uses an active lobby pointer so that all
- * devices selecting the same option join the exact same room.
+ * or creates a brand-new game room.
+ *
+ * Matchmaking priority:
+ * - First 5 seconds of a room's life: players within ±5 levels of the room's host/creator are admitted first.
+ * - After 5 seconds (or while continuing to scan as the timer runs down): any player of any level is admitted so rooms fill with human testers rather than bots.
  */
 export async function findOrCreateRoom(
   tier: 'standard' | 'double' | 'high_roller',
   playerCount: 2 | 4 | 6 | 8,
   buyIn: number,
   user: UserAccount,
-  equippedColors: [DiceColor, DiceColor],
-  isRanked?: boolean
+  equippedColors: [DiceColor, DiceColor]
 ): Promise<{ room: GameRoom; isNew: boolean }> {
   const userLevel = user.level || 1;
-  const bracket = isRanked ? 'ranked' : (userLevel < 10 ? 'beginner' : 'open');
-  const gameKey = isRanked ? `ranked_${tier}_${playerCount}` : `${tier}_${playerCount}_${bracket}`;
+  const gameKey = `${tier}_${playerCount}`;
   const now = Date.now();
   const userDiceColors: [DiceColor, DiceColor] = user.diceColors || equippedColors;
   const sessionId = getClientSessionId();
@@ -217,13 +218,27 @@ export async function findOrCreateRoom(
     diceColors: userDiceColors,
     type: 'human',
     joinedAt: now,
-    level: user.level || 1,
+    level: userLevel,
     prestige: user.prestige || 0,
   };
 
   const lobbyRef = doc(db, 'lobbies', gameKey);
 
-  // 1. Atomic transaction on the lobby & room so devices joining simultaneously (e.g. iPad, Android, iPhone) converge into the same room
+  const isEligibleForRoom = (roomData: GameRoom, currentTime: number): boolean => {
+    const roomCreatedAt = roomData.createdAt || currentTime;
+    const roomAgeMs = Math.max(0, currentTime - roomCreatedAt);
+    const hostPlayer = roomData.players?.[0];
+    const hostLevel = hostPlayer?.level ?? roomData.minLevel ?? 1;
+    const levelDiff = Math.abs(userLevel - hostLevel);
+    // During the first 5 seconds of a room, only admit players within 5 levels of the host
+    if (roomAgeMs < 5000) {
+      return levelDiff <= 5;
+    }
+    // After 5 seconds, admit any player of any level
+    return true;
+  };
+
+  // 1. Atomic transaction on the lobby & room so devices joining simultaneously converge into the same room
   try {
     const result = await runTransaction(db, async transaction => {
       const lobbySnap = await transaction.get(lobbyRef);
@@ -251,7 +266,7 @@ export async function findOrCreateRoom(
             const isFull = currentPlayers.length >= playerCount;
             const isOpen = roomData.status === 'waiting';
 
-            if (isOpen && !isFull) {
+            if (isOpen && !isFull && isEligibleForRoom(roomData, currentTime)) {
               const alreadyThisSession = currentPlayers.some(p => p.sessionId && p.sessionId === sessionId);
               if (alreadyThisSession) {
                 return {
@@ -291,39 +306,7 @@ export async function findOrCreateRoom(
         }
       }
 
-      // No suitable existing room found in transaction - create one atomically!
-      const newRoomId = `room_${currentTime}_${Math.random().toString(36).substring(2, 7)}`;
-      const newRoomCode = generateRoomCode();
-      const newRoom: GameRoom = {
-        id: newRoomId,
-        roomCode: newRoomCode,
-        gameKey,
-        tier,
-        playerCount,
-        buyIn,
-        createdAt: currentTime,
-        expiresAt: currentTime + 45000,
-        status: 'waiting',
-        players: [currentPlayer],
-        filledBots: [],
-        isRanked: !!isRanked,
-        minLevel: isRanked ? 10 : (bracket === 'open' ? 10 : 1),
-        updatedAt: currentTime,
-      };
-
-      const newRoomRef = doc(db, 'rooms', newRoomId);
-      transaction.set(newRoomRef, sanitizeForFirestore(newRoom));
-      transaction.set(lobbyRef, sanitizeForFirestore({
-        roomId: newRoomId,
-        roomCode: newRoomCode,
-        createdAt: currentTime,
-        playerCount: 1,
-        maxPlayers: playerCount,
-        status: 'waiting',
-        updatedAt: currentTime,
-      }));
-
-      return { room: newRoom, isNew: true };
+      return null;
     });
 
     if (result) {
@@ -333,21 +316,24 @@ export async function findOrCreateRoom(
     console.warn('Matchmaking transaction error, falling back to query scan:', txErr);
   }
 
-  // 2. Search for waiting rooms with the same game version from the rooms collection
+  // 2. Search for waiting rooms with the same tier & playerCount from the rooms collection
   try {
     const roomsCol = collection(db, 'rooms');
     const q = query(
       roomsCol,
-      where('gameKey', '==', gameKey),
+      where('tier', '==', tier),
+      where('playerCount', '==', playerCount),
       where('status', '==', 'waiting')
     );
 
     const snapshot = await getDocs(q);
+    const scanTime = Date.now();
 
     // 2a. If user is ALREADY waiting in an active room on this session, reuse it!
     for (const docSnap of snapshot.docs) {
       const data = docSnap.data() as GameRoom;
-      const elapsed = now - data.createdAt;
+      if (data.isChallenge) continue;
+      const elapsed = scanTime - data.createdAt;
       if (elapsed > -90000 && elapsed < 90000 && data.status === 'waiting') {
         if (data.players && data.players.some(p => p.sessionId === sessionId)) {
           return { room: { ...data, id: docSnap.id }, isNew: false };
@@ -356,23 +342,32 @@ export async function findOrCreateRoom(
     }
 
     // 2b. Look for open candidate rooms created within window with space available
-    const candidateRooms: Array<GameRoom & { id: string }> = [];
+    const candidateRooms: Array<GameRoom & { id: string; levelDiff: number }> = [];
     snapshot.forEach(docSnap => {
       const data = docSnap.data() as GameRoom;
-      const elapsed = now - data.createdAt;
+      if (data.isChallenge) return;
+      const elapsed = scanTime - data.createdAt;
       if (
         elapsed > -90000 &&
         elapsed < 90000 &&
         data.status === 'waiting' &&
         data.players &&
-        data.players.length < playerCount
+        data.players.length < playerCount &&
+        isEligibleForRoom(data, scanTime)
       ) {
-        candidateRooms.push({ ...data, id: docSnap.id });
+        const hostLevel = data.players[0]?.level ?? 1;
+        const levelDiff = Math.abs(userLevel - hostLevel);
+        candidateRooms.push({ ...data, id: docSnap.id, levelDiff });
       }
     });
 
-    // Sort by earliest created first (FIFO room filling)
-    candidateRooms.sort((a, b) => a.createdAt - b.createdAt);
+    // Prioritize rooms where host is within ±5 levels first, then earliest created (FIFO)
+    candidateRooms.sort((a, b) => {
+      const aWithin5 = a.levelDiff <= 5 ? 0 : 1;
+      const bWithin5 = b.levelDiff <= 5 ? 0 : 1;
+      if (aWithin5 !== bWithin5) return aWithin5 - bWithin5;
+      return a.createdAt - b.createdAt;
+    });
 
     // Try joining candidate rooms reliably via getDoc & updateDoc
     for (const targetRoom of candidateRooms) {
@@ -383,6 +378,7 @@ export async function findOrCreateRoom(
         const freshData = freshSnap.data() as GameRoom;
         if (freshData.status !== 'waiting') continue;
         if (freshData.players && freshData.players.length >= playerCount) continue;
+        if (!isEligibleForRoom(freshData, Date.now())) continue;
 
         const currentPlayers = freshData.players || [];
         const alreadyThisSession = currentPlayers.some(p => p.sessionId && p.sessionId === sessionId);
@@ -427,7 +423,8 @@ export async function findOrCreateRoom(
   }
 
   // 3. No open room with time and space available — create a brand-new room!
-  const newRoomId = `room_${now}_${Math.random().toString(36).substring(2, 7)}`;
+  const createTime = Date.now();
+  const newRoomId = `room_${createTime}_${Math.random().toString(36).substring(2, 7)}`;
   const newRoomCode = generateRoomCode();
   const newRoom: GameRoom = {
     id: newRoomId,
@@ -436,12 +433,14 @@ export async function findOrCreateRoom(
     tier,
     playerCount,
     buyIn,
-    createdAt: now,
-    expiresAt: now + 45000,
+    createdAt: createTime,
+    expiresAt: createTime + 45000,
     status: 'waiting',
     players: [currentPlayer],
     filledBots: [],
-    updatedAt: now,
+    minLevel: Math.max(1, userLevel - 5),
+    maxLevel: userLevel + 5,
+    updatedAt: createTime,
   };
 
   try {
@@ -452,17 +451,135 @@ export async function findOrCreateRoom(
     await setDoc(lobbyRef, sanitizeForFirestore({
       roomId: newRoomId,
       roomCode: newRoomCode,
-      createdAt: now,
+      createdAt: createTime,
       playerCount: 1,
       maxPlayers: playerCount,
       status: 'waiting',
-      updatedAt: now,
+      updatedAt: createTime,
     })).catch(() => {});
   } catch (err) {
     console.warn('Could not persist new room to Firestore (local fallback):', err);
   }
 
   return { room: newRoom, isNew: true };
+}
+
+/**
+ * Continues scanning for other waiting rooms of the same tier and playerCount so that
+ * players waiting in separate rooms (e.g. after the initial 5s ±5 level window) can merge
+ * into the earliest waiting room instead of playing alone with bots.
+ */
+export async function scanAndMergeWaitingRooms(
+  currentRoom: GameRoom,
+  user: UserAccount,
+  equippedColors: [DiceColor, DiceColor],
+  allowAnyLevel: boolean
+): Promise<GameRoom | null> {
+  if (!db || !currentRoom || currentRoom.isChallenge || currentRoom.status !== 'waiting') {
+    return null;
+  }
+  const sessionId = getClientSessionId();
+  const userLevel = user.level || 1;
+  const now = Date.now();
+
+  try {
+    const roomsCol = collection(db, 'rooms');
+    const q = query(
+      roomsCol,
+      where('tier', '==', currentRoom.tier),
+      where('playerCount', '==', currentRoom.playerCount),
+      where('status', '==', 'waiting')
+    );
+    const snap = await getDocs(q);
+    const candidates: GameRoom[] = [];
+
+    snap.forEach(docSnap => {
+      if (docSnap.id === currentRoom.id) return;
+      const data = docSnap.data() as GameRoom;
+      if (data.isChallenge) return;
+      const elapsed = now - (data.createdAt || 0);
+      if (elapsed <= -90000 || elapsed >= 90000) return;
+      if (data.status !== 'waiting') return;
+      const players = data.players || [];
+      if (players.length === 0 || players.length >= currentRoom.playerCount) return;
+
+      const hostLevel = players[0]?.level ?? 1;
+      const levelDiff = Math.abs(userLevel - hostLevel);
+      const targetAgeMs = Math.max(0, now - (data.createdAt || now));
+
+      // Check level compatibility: within 5 levels if in first 5s, or any level once expanded
+      if (!allowAnyLevel && levelDiff > 5) return;
+      if (targetAgeMs < 5000 && levelDiff > 5) return;
+
+      // Merge into a room that either has more players or was created earlier
+      const curCount = currentRoom.players?.length || 1;
+      if (
+        players.length > curCount ||
+        (players.length === curCount && (data.createdAt < currentRoom.createdAt || (data.createdAt === currentRoom.createdAt && docSnap.id < currentRoom.id)))
+      ) {
+        candidates.push({ ...data, id: docSnap.id });
+      }
+    });
+
+    if (candidates.length === 0) return null;
+
+    // Sort candidates: prefer rooms with players within ±5 levels first, then most players, then earliest created
+    candidates.sort((a, b) => {
+      const aHostLvl = a.players?.[0]?.level ?? 1;
+      const bHostLvl = b.players?.[0]?.level ?? 1;
+      const aClose = Math.abs(userLevel - aHostLvl) <= 5 ? 0 : 1;
+      const bClose = Math.abs(userLevel - bHostLvl) <= 5 ? 0 : 1;
+      if (aClose !== bClose) return aClose - bClose;
+      if ((b.players?.length || 0) !== (a.players?.length || 0)) {
+        return (b.players?.length || 0) - (a.players?.length || 0);
+      }
+      return a.createdAt - b.createdAt;
+    });
+
+    const target = candidates[0];
+    const targetRef = doc(db, 'rooms', target.id);
+    const freshSnap = await getDoc(targetRef);
+    if (!freshSnap.exists()) return null;
+    const freshData = freshSnap.data() as GameRoom;
+    if (freshData.status !== 'waiting') return null;
+    const currentPlayers = freshData.players || [];
+    if (currentPlayers.length >= currentRoom.playerCount) return null;
+
+    const alreadyIn = currentPlayers.some(p => p.sessionId && p.sessionId === sessionId);
+    if (alreadyIn) {
+      await leaveRoom(currentRoom.id, user.uid);
+      return { ...freshData, id: target.id };
+    }
+
+    const userDiceColors: [DiceColor, DiceColor] = user.diceColors || equippedColors;
+    const sameUidCount = currentPlayers.filter(p => p.uid === user.uid).length;
+    const playerToAdd: RoomPlayer = {
+      uid: user.uid,
+      sessionId,
+      name: sameUidCount > 0 ? `${user.name || 'Player'} (${sameUidCount + 1})` : (user.name || 'Player'),
+      color: sameUidCount === 1 ? '#1f7fd6' : sameUidCount === 2 ? '#e58a1f' : (user.avatar?.color || '#e5352f'),
+      image: user.avatar?.image || null,
+      diceColors: userDiceColors,
+      type: 'human',
+      joinedAt: Date.now(),
+      level: userLevel,
+      prestige: user.prestige || 0,
+    };
+
+    const updatedPlayers = [...currentPlayers, playerToAdd];
+    await updateDoc(targetRef, sanitizeForFirestore({
+      players: updatedPlayers,
+      updatedAt: Date.now(),
+    }));
+
+    // Leave old room cleanly
+    await leaveRoom(currentRoom.id, user.uid);
+
+    return { ...freshData, id: target.id, players: updatedPlayers };
+  } catch (err) {
+    console.warn('Error scanning/merging waiting rooms:', err);
+    return null;
+  }
 }
 
 /**

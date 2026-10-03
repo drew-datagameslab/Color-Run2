@@ -1,7 +1,7 @@
 {
   "name": "Color_Run",
   "private": true,
-  "version": "6.2.9",
+  "version": "6.3.1",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",

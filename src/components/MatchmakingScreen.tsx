@@ -13,6 +13,7 @@ import {
 import { sendChallengeInvites } from '../lib/invites';
 import {
   findOrCreateRoom,
+  scanAndMergeWaitingRooms,
   subscribeToRoom,
   finalizeAndStartRoom,
   generateBots,
@@ -31,7 +32,6 @@ interface MatchmakingScreenProps {
   initialRoom?: GameRoom;
   friends?: Friend[];
   isChallengeMode?: boolean;
-  isRanked?: boolean;
   onMatchReady: (settings: GameSettings) => void;
   onCancel: () => void;
   onToast?: (msg: string) => void;
@@ -46,7 +46,6 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   initialRoom,
   friends = [],
   isChallengeMode = false,
-  isRanked = false,
   onMatchReady,
   onCancel,
   onToast,
@@ -195,26 +194,50 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
     let unsubscribe: (() => void) | undefined;
     let isCancelled = false;
 
+    const attachRoomListener = (targetRoomId: string) => {
+      if (unsubscribe) unsubscribe();
+      unsubscribe = subscribeToRoom(targetRoomId, updatedRoom => {
+        if (isCancelled) return;
+        setRoom(prev => {
+          if (prev && updatedRoom.players.length > prev.players.length) {
+            playSfx('add');
+          }
+          return updatedRoom;
+        });
+
+        // When the room is marked in_progress with final slots, launch immediately!
+        if (updatedRoom.status === 'in_progress' && updatedRoom.finalSlots && !matchLaunchedRef.current) {
+          launchMatchWithSlots(updatedRoom.finalSlots, updatedRoom.id, updatedRoom.finalPayouts);
+          return;
+        }
+
+        // When room reaches target player count, transition into quick launch!
+        if (updatedRoom.players.length >= playerCount && !matchLaunchedRef.current) {
+          setStatusText('All players joined! Preparing game…');
+          setIsStarting(true);
+          setStartCountdown(c => (c === null ? 2 : Math.min(c, 2)));
+        }
+      });
+    };
+
     async function initRoom() {
       try {
         let activeRoom = initialRoom || null;
 
         if (!activeRoom) {
-          setStatusText('Searching for open room…');
+          setStatusText('Scanning for players within 5 levels…');
           const { room: foundRoom } = await findOrCreateRoom(
             tier,
-            playerCount,
+            playerCount as 2 | 4 | 6 | 8,
             buyIn,
             user,
-            equippedColors,
-            isRanked
+            equippedColors
           );
           activeRoom = foundRoom;
         }
 
         if (isCancelled) return;
         setRoom(activeRoom);
-        setStatusText('Connected to room. Waiting for players…');
 
         // Check if room was already finalized
         if (activeRoom.status === 'in_progress' && activeRoom.finalSlots) {
@@ -230,28 +253,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
         }
 
         // Subscribe to real-time room updates from Firestore
-        unsubscribe = subscribeToRoom(activeRoom.id, updatedRoom => {
-          if (isCancelled) return;
-          setRoom(prev => {
-            if (prev && updatedRoom.players.length > prev.players.length) {
-              playSfx('add');
-            }
-            return updatedRoom;
-          });
-
-          // When the room is marked in_progress with final slots, launch immediately!
-          if (updatedRoom.status === 'in_progress' && updatedRoom.finalSlots && !matchLaunchedRef.current) {
-            launchMatchWithSlots(updatedRoom.finalSlots, updatedRoom.id, updatedRoom.finalPayouts);
-            return;
-          }
-
-          // When room reaches target player count, transition into quick launch!
-          if (updatedRoom.players.length >= playerCount && !matchLaunchedRef.current) {
-            setStatusText('All players joined! Preparing game…');
-            setIsStarting(true);
-            setStartCountdown(c => (c === null ? 2 : Math.min(c, 2)));
-          }
-        });
+        attachRoomListener(activeRoom.id);
       } catch (err) {
         console.warn('Matchmaking init error:', err);
         setStatusText('Searching for online players…');
@@ -260,11 +262,39 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
 
     initRoom();
 
+    // Periodic scan so waiting players in separate rooms merge as the timer runs down
+    const scanInterval = setInterval(async () => {
+      if (isCancelled || matchLaunchedRef.current || isChallengeMode) return;
+      const curRoom = roomRef.current;
+      if (!curRoom || curRoom.status !== 'waiting') return;
+      if (curRoom.players && curRoom.players.length >= playerCount) return;
+
+      const elapsedMs = Date.now() - (curRoom.createdAt || Date.now());
+      const allowAnyLevel = elapsedMs >= 5000;
+      const mergedRoom = await scanAndMergeWaitingRooms(
+        curRoom,
+        user,
+        equippedColors,
+        allowAnyLevel
+      );
+      if (mergedRoom && !isCancelled && !matchLaunchedRef.current) {
+        playSfx('add');
+        setRoom(mergedRoom);
+        attachRoomListener(mergedRoom.id);
+        if (mergedRoom.players.length >= playerCount) {
+          setStatusText('All players joined! Preparing game…');
+          setIsStarting(true);
+          setStartCountdown(c => (c === null ? 2 : Math.min(c, 2)));
+        }
+      }
+    }, 2000);
+
     return () => {
       isCancelled = true;
+      clearInterval(scanInterval);
       if (unsubscribe) unsubscribe();
     };
-  }, [tier, playerCount, buyIn, user, equippedColors, initialRoom]);
+  }, [tier, playerCount, buyIn, user, equippedColors, initialRoom, isChallengeMode]);
 
   // 2. Countdown timer: starts immediately on mount with 30s search window
   useEffect(() => {
@@ -292,6 +322,12 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
 
       if (remainingSec <= 3 && remainingSec > 0) {
         setStatusText('Filling remaining spots with computer players…');
+      } else if (!isChallengeMode && remainingSec > 3) {
+        if (elapsed < 5000) {
+          setStatusText('Scanning for players within 5 levels…');
+        } else {
+          setStatusText('Scanning for players of any level…');
+        }
       }
 
       // Time expired! Launch the game
@@ -304,7 +340,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
     }, 250);
 
     return () => clearInterval(interval);
-  }, [playerCount, extraSeconds]);
+  }, [playerCount, extraSeconds, isChallengeMode]);
 
   // 3. Launch the game when countdown finishes
   useEffect(() => {

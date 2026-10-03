@@ -87,7 +87,7 @@ export default function App() {
     'signin' | 'avatar' | 'mainmenu' | 'modeselect' | 'pickgame' | 'play' | 'winner' | 'shop' | 'scoreboard' | 'challenge_lobby'
   >('signin');
 
-  const [gameMode, setGameMode] = useState<'online' | 'cpu' | 'pass_and_play' | 'challenge' | 'challenge_friend' | 'ranked'>('online');
+  const [gameMode, setGameMode] = useState<'online' | 'cpu' | 'pass_and_play' | 'challenge' | 'challenge_friend'>('online');
   const [friends, setFriends] = useState<Friend[]>(() => getLocalFriends(user.uid));
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>(() => getFriendRequests(user.uid));
   const [incomingFriendRequest, setIncomingFriendRequest] = useState<FriendRequest | null>(null);
@@ -810,9 +810,6 @@ export default function App() {
                 });
               } else if (mode === 'cpu') {
                 setGameMode('cpu');
-                setScreen('pickgame');
-              } else if (mode === 'ranked') {
-                setGameMode('ranked');
                 setScreen('pickgame');
               } else {
                 setGameMode('online');
