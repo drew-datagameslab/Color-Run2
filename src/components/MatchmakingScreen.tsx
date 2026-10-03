@@ -13,7 +13,6 @@ import {
 import { sendChallengeInvites } from '../lib/invites';
 import {
   findOrCreateRoom,
-  scanAndMergeWaitingRooms,
   subscribeToRoom,
   finalizeAndStartRoom,
   generateBots,
@@ -22,6 +21,88 @@ import {
   GameRoom,
   RoomPlayer,
 } from '../lib/matchmaking';
+
+const FLOOR_TABLES = [
+  {
+    id: 1,
+    label: 'Table 1 · 4P',
+    pot: 40,
+    maxSeats: 4,
+    players: [
+      { name: 'Maya', color: '#e5352f', angle: 45 },
+      { name: 'Liam', color: '#1f7fd6', angle: 135 },
+      { name: 'Zoe', color: '#8e44c9', angle: 225 },
+      { name: 'Noah', color: '#e58a1f', angle: 315 },
+    ],
+    dice: [6, 6, 4],
+  },
+  {
+    id: 2,
+    label: 'Table 2 · 6P',
+    pot: 60,
+    maxSeats: 6,
+    players: [
+      { name: 'Chloe', color: '#00b894', angle: 0 },
+      { name: 'Ethan', color: '#d61f7a', angle: 60 },
+      { name: 'Aria', color: '#0984e3', angle: 120 },
+      { name: 'Lucas', color: '#e58a1f', angle: 180 },
+      { name: 'Mia', color: '#8e44c9', angle: 240 },
+    ],
+    dice: [5, 5, 2],
+    hasOpenSeat: true,
+  },
+  {
+    id: 3,
+    label: 'Table 3 · 2P',
+    pot: 20,
+    maxSeats: 2,
+    players: [
+      { name: 'Jack', color: '#1f7fd6', angle: 90 },
+      { name: 'Ruby', color: '#e5352f', angle: 270 },
+    ],
+    dice: [3, 6, 3],
+  },
+  {
+    id: 4,
+    label: 'Table 4 · 4P',
+    pot: 80,
+    maxSeats: 4,
+    players: [
+      { name: 'Leo', color: '#0d4d23', angle: 45 },
+      { name: 'Nora', color: '#d61f7a', angle: 135 },
+      { name: 'Kai', color: '#e58a1f', angle: 225 },
+    ],
+    dice: [6, 1, 6],
+    hasOpenSeat: true,
+  },
+  {
+    id: 5,
+    label: 'Table 5 · 6P',
+    pot: 120,
+    maxSeats: 6,
+    players: [
+      { name: 'Sam', color: '#8e44c9', angle: 30 },
+      { name: 'Eva', color: '#1f7fd6', angle: 90 },
+      { name: 'Max', color: '#e5352f', angle: 150 },
+      { name: 'Ivy', color: '#00b894', angle: 210 },
+      { name: 'Ben', color: '#e58a1f', angle: 270 },
+      { name: 'Gia', color: '#0984e3', angle: 330 },
+    ],
+    dice: [4, 4, 4],
+  },
+  {
+    id: 6,
+    label: 'Table 6 · 4P',
+    pot: 40,
+    maxSeats: 4,
+    players: [
+      { name: 'Owen', color: '#e5352f', angle: 45 },
+      { name: 'Lily', color: '#00b894', angle: 135 },
+    ],
+    dice: [2, 5, 5],
+    hasOpenSeat: true,
+  },
+];
 
 interface MatchmakingScreenProps {
   playerCount: 2 | 3 | 4 | 5 | 6 | 8;
@@ -51,9 +132,11 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   onToast,
 }) => {
   const [room, setRoom] = useState<GameRoom | null>(initialRoom || null);
+  const [isFindingTable, setIsFindingTable] = useState<boolean>(() => !initialRoom && !isChallengeMode);
+  const [highlightedTableIdx, setHighlightedTableIdx] = useState<number>(0);
   const [secondsLeft, setSecondsLeft] = useState(30);
   const [extraSeconds, setExtraSeconds] = useState(0);
-  const [statusText, setStatusText] = useState(initialRoom ? 'Connected to room. Waiting for players…' : 'Searching for open room…');
+  const [statusText, setStatusText] = useState(initialRoom ? 'Connected to room. Waiting for players…' : 'Finding a table for you.');
   const [isStarting, setIsStarting] = useState(false);
   const [startCountdown, setStartCountdown] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
@@ -186,13 +269,21 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
     });
   };
 
-  // 1. Enter or create the multiplayer room for this game version
-  useEffect(() => {
-    if (initRanRef.current) return;
-    initRanRef.current = true;
+  // Keep latest user & equippedColors in refs so background updates (like presence or auth sync)
+  // never cancel the 3-second floor hold timer!
+  const userRef = useRef(user);
+  userRef.current = user;
+  const equippedColorsRef = useRef(equippedColors);
+  equippedColorsRef.current = equippedColors;
 
+  // 1. Enter or create the multiplayer room for this game version
+  // When a user clicks on a multiplayer online game, hold the player for 3 seconds on the game floor screen
+  // before placing them in a room so they are placed directly into the best room and never pulled out into another room.
+  useEffect(() => {
     let unsubscribe: (() => void) | undefined;
     let isCancelled = false;
+    let holdTimer: ReturnType<typeof setTimeout> | undefined;
+    let tableCycleInterval: ReturnType<typeof setInterval> | undefined;
 
     const attachRoomListener = (targetRoomId: string) => {
       if (unsubscribe) unsubscribe();
@@ -221,17 +312,20 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
     };
 
     async function initRoom() {
+      // Transition to the table lobby screen immediately after the 3s floor hold
+      setIsFindingTable(false);
+      setStatusText('Connected to table. Waiting for players…');
+
       try {
         let activeRoom = initialRoom || null;
 
         if (!activeRoom) {
-          setStatusText('Scanning for players within 5 levels…');
           const { room: foundRoom } = await findOrCreateRoom(
             tier,
             playerCount as 2 | 4 | 6 | 8,
             buyIn,
-            user,
-            equippedColors
+            userRef.current,
+            equippedColorsRef.current
           );
           activeRoom = foundRoom;
         }
@@ -256,54 +350,45 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
         attachRoomListener(activeRoom.id);
       } catch (err) {
         console.warn('Matchmaking init error:', err);
+        setIsFindingTable(false);
         setStatusText('Searching for online players…');
       }
     }
 
-    initRoom();
-
-    // Periodic scan so waiting players in separate rooms merge as the timer runs down
-    const scanInterval = setInterval(async () => {
-      if (isCancelled || matchLaunchedRef.current || isChallengeMode) return;
-      const curRoom = roomRef.current;
-      if (!curRoom || curRoom.status !== 'waiting') return;
-      if (curRoom.players && curRoom.players.length >= playerCount) return;
-
-      const elapsedMs = Date.now() - (curRoom.createdAt || Date.now());
-      const allowAnyLevel = elapsedMs >= 5000;
-      const mergedRoom = await scanAndMergeWaitingRooms(
-        curRoom,
-        user,
-        equippedColors,
-        allowAnyLevel
-      );
-      if (mergedRoom && !isCancelled && !matchLaunchedRef.current) {
-        playSfx('add');
-        setRoom(mergedRoom);
-        attachRoomListener(mergedRoom.id);
-        if (mergedRoom.players.length >= playerCount) {
-          setStatusText('All players joined! Preparing game…');
-          setIsStarting(true);
-          setStartCountdown(c => (c === null ? 2 : Math.min(c, 2)));
+    if (!initialRoom && !isChallengeMode) {
+      setIsFindingTable(true);
+      setStatusText('Finding a table for you.');
+      tableCycleInterval = setInterval(() => {
+        setHighlightedTableIdx(prev => (prev + 1) % FLOOR_TABLES.length);
+      }, 550);
+      holdTimer = setTimeout(() => {
+        if (tableCycleInterval) clearInterval(tableCycleInterval);
+        if (!isCancelled) {
+          initRoom();
         }
-      }
-    }, 2000);
+      }, 3000);
+    } else {
+      setIsFindingTable(false);
+      initRoom();
+    }
 
     return () => {
       isCancelled = true;
-      clearInterval(scanInterval);
+      if (holdTimer) clearTimeout(holdTimer);
+      if (tableCycleInterval) clearInterval(tableCycleInterval);
       if (unsubscribe) unsubscribe();
     };
-  }, [tier, playerCount, buyIn, user, equippedColors, initialRoom, isChallengeMode]);
+  }, [tier, playerCount, buyIn, initialRoom, isChallengeMode]);
 
-  // 2. Countdown timer: starts immediately on mount with 30s search window
+  // 2. Countdown timer: starts once the player is placed at the table with a 30s search window
   useEffect(() => {
-    const mountTime = Date.now();
+    if (isFindingTable) return;
+    const placedTime = Date.now();
 
     const interval = setInterval(() => {
       const curRoom = roomRef.current;
       const now = Date.now();
-      const baseTime = curRoom ? curRoom.createdAt : mountTime;
+      const baseTime = curRoom ? curRoom.createdAt : placedTime;
       const elapsed = now - baseTime;
       const totalAllowedMs = 30000 + extraSeconds * 1000;
       const remainingMs = Math.max(0, totalAllowedMs - elapsed);
@@ -340,7 +425,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
     }, 250);
 
     return () => clearInterval(interval);
-  }, [playerCount, extraSeconds, isChallengeMode]);
+  }, [playerCount, extraSeconds, isChallengeMode, isFindingTable]);
 
   // 3. Launch the game when countdown finishes
   useEffect(() => {
@@ -474,6 +559,168 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
 
   const filledCount = displaySlots.filter(Boolean).length;
   const humanCount = currentHumans.length;
+
+  // Render the 3-second Game Hall Floor screen with lots of tables and people at the tables before placing in a room
+  if (isFindingTable) {
+    return (
+      <div className="w-full max-w-lg sm:max-w-xl md:max-w-2xl mx-auto flex flex-col items-center justify-between max-h-[calc(100dvh-65px)] overflow-y-auto custom-scrollbar py-2 sm:py-3 px-3 select-none animate-fade-in">
+        {/* Top Header */}
+        <div className="flex flex-col items-center w-full mt-1">
+          <ColorRunLogo size="sm" />
+          <div className="mt-1.5 bg-[#faf4e6]/95 border-2 border-[#c9b877] rounded-2xl px-4 py-2.5 shadow-xl flex items-center gap-2.5">
+            <Loader2 className="w-5 h-5 text-[#2f9a4f] animate-spin shrink-0" />
+            <div className="text-left">
+              <div className="text-sm sm:text-base font-black text-[#1c6a35] leading-tight">
+                Finding a table for you.
+              </div>
+              <div className="text-[10.5px] font-bold text-[#6d5138]">
+                {playerCount} Players · 🪙 {buyIn > 0 ? `${buyIn} Buy-In` : 'Casual'} · Scanning active game hall…
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Large Game Floor with Lots of Tables and People at the Tables */}
+        <div
+          className="w-full my-2.5 rounded-3xl border-4 border-[#6b4423] shadow-2xl p-3 sm:p-4 relative overflow-hidden"
+          style={{
+            background:
+              'radial-gradient(circle at 50% 45%, #1f6b39 0%, #124724 65%, #0b2e16 100%)',
+          }}
+        >
+          {/* Decorative Floor Carpet Tile Pattern Overlay */}
+          <div
+            className="absolute inset-0 opacity-15 pointer-events-none"
+            style={{
+              backgroundImage:
+                'radial-gradient(#f2c14e 1.25px, transparent 1.25px), radial-gradient(#f2c14e 1.25px, #124724 1.25px)',
+              backgroundSize: '28px 28px',
+              backgroundPosition: '0 0, 14px 14px',
+            }}
+          />
+
+          <div className="relative z-10 flex items-center justify-between mb-2.5 px-1">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[#f2c14e] drop-shadow">
+              🎲 Live Multiplayer Game Floor
+            </span>
+            <span className="text-[10px] font-bold text-[#d9f2e1] bg-black/30 px-2 py-0.5 rounded-full border border-white/15">
+              24 Players Active Across Floor
+            </span>
+          </div>
+
+          {/* Grid of 6 Tables on the Floor */}
+          <div className="relative z-10 grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 py-1">
+            {FLOOR_TABLES.map((tbl, idx) => {
+              const isHighlighted = highlightedTableIdx === idx;
+              return (
+                <div
+                  key={tbl.id}
+                  className={`relative flex flex-col items-center justify-center p-2.5 rounded-2xl transition-all duration-300 ${
+                    isHighlighted
+                      ? 'bg-[#f2c14e]/20 ring-2 ring-[#f2c14e] scale-[1.03] shadow-lg'
+                      : 'bg-black/20 border border-white/10'
+                  }`}
+                >
+                  {/* Table Header Label */}
+                  <div className="w-full flex items-center justify-between text-[9px] font-black text-[#faf4e6] mb-2 px-0.5">
+                    <span className="truncate">{tbl.label}</span>
+                    <span className="text-[#f2c14e]">🪙 {tbl.pot}</span>
+                  </div>
+
+                  {/* Round Wood & Felt Table with Seated Players */}
+                  <div className="relative w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center my-0.5">
+                    {/* Seated People around the table */}
+                    {tbl.players.map((person, pIdx) => {
+                      const rad = (person.angle * Math.PI) / 180;
+                      const radius = 42; // % offset from center
+                      const left = 50 + radius * Math.cos(rad);
+                      const top = 50 + radius * Math.sin(rad);
+                      return (
+                        <div
+                          key={pIdx}
+                          className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-20"
+                          style={{ left: `${left}%`, top: `${top}%` }}
+                        >
+                          <div
+                            className="w-6 h-6 sm:w-6.5 sm:h-6.5 rounded-full border-2 border-[#faf4e6] shadow-md flex items-center justify-center text-[8px] font-black text-white"
+                            style={{ backgroundColor: person.color }}
+                            title={person.name}
+                          >
+                            {person.name.slice(0, 2).toUpperCase()}
+                          </div>
+                          <span className="text-[7px] font-extrabold text-white bg-black/65 px-1 rounded mt-0.5 leading-tight shadow-xs">
+                            {person.name}
+                          </span>
+                        </div>
+                      );
+                    })}
+
+                    {/* Open Seat Indicator if available */}
+                    {tbl.hasOpenSeat && (
+                      <div
+                        className="absolute -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center"
+                        style={{ left: '15%', top: '82%' }}
+                      >
+                        <div className="w-6 h-6 rounded-full border-2 border-dashed border-[#f2c14e] bg-[#f2c14e]/25 flex items-center justify-center text-[9px] font-black text-[#f2c14e] animate-pulse">
+                          +
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Outer Wooden Table Rim & Inner Green Felt */}
+                    <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-full bg-gradient-to-br from-[#2a8f4a] to-[#17562b] border-4 border-[#8c5828] shadow-[inset_0_2px_6px_rgba(0,0,0,0.6),0_4px_10px_rgba(0,0,0,0.5)] flex flex-col items-center justify-center p-1">
+                      {/* Mini Dice on the Table */}
+                      <div className="flex items-center gap-0.5">
+                        {tbl.dice.map((dVal, dIdx) => (
+                          <div
+                            key={dIdx}
+                            className={`w-3.5 h-3.5 rounded-[3px] flex items-center justify-center text-[8px] font-black text-white shadow-xs ${
+                              dIdx % 2 === 0 ? 'bg-[#e5352f]' : 'bg-[#1f7fd6]'
+                            }`}
+                          >
+                            {dVal}
+                          </div>
+                        ))}
+                      </div>
+                      <span className="text-[7px] font-bold text-[#f2c14e] mt-0.5 uppercase tracking-tighter">
+                        {tbl.hasOpenSeat ? 'Open Seat' : 'In Play'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Table Status Footer */}
+                  <div className="mt-1.5 text-[8.5px] font-bold">
+                    {isHighlighted ? (
+                      <span className="text-[#f2c14e] font-black animate-pulse">
+                        Checking table…
+                      </span>
+                    ) : tbl.hasOpenSeat ? (
+                      <span className="text-[#9ef0b6]">
+                        {tbl.players.length}/{tbl.maxSeats} Seated
+                      </span>
+                    ) : (
+                      <span className="text-white/60">
+                        {tbl.players.length}/{tbl.maxSeats} Full
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Cancel Button */}
+        <button
+          onClick={handleCancel}
+          className="flex items-center justify-center gap-1.5 text-xs font-bold text-white bg-black/40 hover:bg-black/60 px-4 py-2 rounded-xl backdrop-blur-xs transition-colors cursor-pointer"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span>Cancel &amp; Refund Buy-In</span>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-sm sm:max-w-md md:max-w-lg mx-auto flex flex-col items-center justify-start max-h-[calc(100dvh-65px)] overflow-y-auto custom-scrollbar py-2 sm:py-3 px-3 select-none animate-fade-in">
