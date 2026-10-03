@@ -168,7 +168,7 @@ export const WinnerScreen: React.FC<WinnerScreenProps> = ({
         {/* Standings List */}
         <div className="w-full bg-white/80 border border-[#ebdcb9] rounded-2xl p-2 mb-2.5 max-h-40 overflow-y-auto space-y-1.5 custom-scrollbar">
           {ranked.map((p, idx) => {
-            const isMe = !p.isCPU;
+            const isMe = !!p.isOwner;
             return (
               <div
                 key={p.id}
@@ -176,7 +176,7 @@ export const WinnerScreen: React.FC<WinnerScreenProps> = ({
                 className={`relative flex items-center justify-between py-1.5 px-2 rounded-xl text-xs font-bold transition-colors ${
                   idx === 0
                     ? 'bg-[#2f9a4f]/15 text-[#1c6a35]'
-                    : !p.isCPU
+                    : isMe
                     ? 'bg-[#fef8d8] text-[#4a3622] border border-[#d3bb71]/60'
                     : 'bg-[#faf6eb] text-[#4a3622]'
                 }`}
@@ -188,7 +188,7 @@ export const WinnerScreen: React.FC<WinnerScreenProps> = ({
                   <span className="truncate max-w-[130px]">
                     {p.isCPU ? '🤖 ' : ''}
                     {p.name}
-                    {!p.isCPU ? ' (You)' : ''}
+                    {isMe ? ' (You)' : ''}
                   </span>
                 </div>
                 <div className="font-mono text-xs font-black shrink-0">

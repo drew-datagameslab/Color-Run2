@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
+  UserCheck,
 } from 'lucide-react';
 import { UserAccount, UserFileRecord } from '../types/game';
 import {
@@ -28,6 +29,7 @@ interface UserFilesModalProps {
   user: UserAccount;
   onClose: () => void;
   onToast: (msg: string) => void;
+  onSaveUser?: (updated: UserAccount) => void;
 }
 
 export const UserFilesModal: React.FC<UserFilesModalProps> = ({
@@ -35,6 +37,7 @@ export const UserFilesModal: React.FC<UserFilesModalProps> = ({
   user,
   onClose,
   onToast,
+  onSaveUser,
 }) => {
   const [files, setFiles] = useState<UserFileRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -155,6 +158,54 @@ export const UserFilesModal: React.FC<UserFilesModalProps> = ({
     a.click();
     document.body.removeChild(a);
     onToast(`Downloading "${fileRecord.name}"`);
+  };
+
+  const handleSetAsAvatar = (fileRecord: UserFileRecord) => {
+    if (!fileRecord.dataUrl || !fileRecord.type.startsWith('image/')) return;
+    try {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 192;
+        canvas.height = 192;
+        const ctx = canvas.getContext('2d');
+        let finalImage = fileRecord.dataUrl!;
+        if (ctx) {
+          const minSide = Math.min(img.width, img.height);
+          const sx = (img.width - minSide) / 2;
+          const sy = (img.height - minSide) / 2;
+          ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, 192, 192);
+          finalImage = canvas.toDataURL('image/jpeg', 0.82);
+        }
+        const updated: UserAccount = {
+          ...user,
+          avatar: {
+            ...user.avatar,
+            image: finalImage,
+          },
+        };
+        if (onSaveUser) {
+          onSaveUser(updated);
+        }
+        onToast(`✨ Set "${fileRecord.name}" as your profile avatar!`);
+      };
+      img.onerror = () => {
+        const updated: UserAccount = {
+          ...user,
+          avatar: {
+            ...user.avatar,
+            image: fileRecord.dataUrl,
+          },
+        };
+        if (onSaveUser) {
+          onSaveUser(updated);
+        }
+        onToast(`✨ Set "${fileRecord.name}" as your profile avatar!`);
+      };
+      img.src = fileRecord.dataUrl;
+    } catch (err: any) {
+      onToast('Error setting avatar image: ' + err.message);
+    }
   };
 
   const getFileIcon = (type: string) => {
@@ -341,6 +392,17 @@ export const UserFilesModal: React.FC<UserFilesModalProps> = ({
                     <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0">
                       {file.dataUrl && (
                         <>
+                          {file.type.startsWith('image/') && (
+                            <button
+                              onClick={() => handleSetAsAvatar(file)}
+                              className="px-2 py-1.5 bg-[#2f9a4f]/15 hover:bg-[#2f9a4f]/25 text-[#1c6a35] rounded-lg border border-[#2f9a4f]/35 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1"
+                              title="Set as Profile Avatar"
+                            >
+                              <UserCheck className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Use as Avatar</span>
+                            </button>
+                          )}
+
                           <button
                             onClick={() => setPreviewFile(file)}
                             className="p-1.5 bg-[#faf4e6] hover:bg-[#ebdcb9] text-[#523d2a] rounded-lg border border-[#d8c89f] transition-colors cursor-pointer"
@@ -426,6 +488,18 @@ export const UserFilesModal: React.FC<UserFilesModalProps> = ({
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-200">
+              {previewFile.type.startsWith('image/') && (
+                <button
+                  onClick={() => {
+                    handleSetAsAvatar(previewFile);
+                    setPreviewFile(null);
+                  }}
+                  className="px-4 py-2 bg-[#2f9a4f] hover:bg-[#258241] text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                >
+                  <UserCheck className="w-4 h-4" />
+                  <span>Use as Avatar</span>
+                </button>
+              )}
               <button
                 onClick={() => handleDownload(previewFile)}
                 className="px-4 py-2 bg-[#1c6a35] hover:bg-[#155328] text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer"

@@ -40,10 +40,9 @@ service cloud.firestore {
       );
     }
 
-    // Economy & Role Guard: restricts sensitive fields from client self-writing
+    // Economy & Role Guard: restricts administrative and subscription fields from client self-writing
     function isRestrictedUserField() {
       return incoming().diff(existing()).affectedKeys().hasAny([
-        'coins',
         'isAdFree',
         'adFreePlan',
         'scoreboardUnlocked',

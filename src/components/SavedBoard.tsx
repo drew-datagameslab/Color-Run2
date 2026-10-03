@@ -9,7 +9,7 @@ import { bonusFor } from '../lib/scoring';
 interface SavedBoardProps {
   savedDice: Die[];
   scoreResult: ScoreResult;
-  onTapSavedDie: (id: string) => void;
+  onTapSavedDie: (id: number) => void;
   isCPU?: boolean;
   showSixCelebration?: boolean;
   onDismissSixCelebration?: () => void;

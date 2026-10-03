@@ -4,6 +4,7 @@ import {
   getInitialUser,
   saveUser,
   getUserCoins,
+  setUserCoins,
   addCoins,
   getShopSettings,
   saveShopSettings,
@@ -80,7 +81,7 @@ import { triggerButtonHaptic } from './lib/haptics';
 
 export default function App() {
   const [user, setUser] = useState<UserAccount>(() => getInitialUser());
-  const [coins, setCoins] = useState<number>(() => getUserCoins(user.uid));
+  const [coins, setCoins] = useState<number>(() => user?.coins ?? getUserCoins(user.uid));
   const [shopSettings, setShopSettings] = useState<ShopSettings>(() => getShopSettings());
   const [screen, setScreen] = useState<
     'signin' | 'avatar' | 'mainmenu' | 'modeselect' | 'pickgame' | 'play' | 'winner' | 'shop' | 'scoreboard' | 'challenge_lobby'
@@ -375,16 +376,21 @@ export default function App() {
                 : effective?.name || authedUser.name,
             avatar: {
               ...authedUser.avatar,
-              color: effective?.avatar?.color || authedUser.avatar?.color || DEFAULT_AVATARS[0],
-              image: effective?.avatar?.image !== undefined ? effective.avatar.image : authedUser.avatar?.image,
+              color: authedUser.avatar?.color || effective?.avatar?.color || DEFAULT_AVATARS[0],
+              image: authedUser.avatar?.image || effective?.avatar?.image,
             },
             diceColors: effective?.diceColors || authedUser.diceColors || ['blue', 'red'],
           };
           saveUser(merged);
           return merged;
         });
-        const storedCoins = getUserCoins(authedUser.uid);
-        setCoins(storedCoins);
+        if (authedUser.coins !== undefined && typeof authedUser.coins === 'number') {
+          setUserCoins(authedUser.uid, authedUser.coins);
+          setCoins(authedUser.coins);
+        } else {
+          const storedCoins = getUserCoins(authedUser.uid);
+          setCoins(storedCoins);
+        }
         setScreen(prev => (prev === 'signin' ? 'mainmenu' : prev));
         syncFriendsFromFirestore(authedUser.uid).then(f => setFriends(f));
       }
@@ -435,15 +441,19 @@ export default function App() {
     const updated = addCoins(user.uid, delta);
     setCoins(updated);
     if (user.uid) {
-      syncUserProfileToFirestore(user, updated).catch(() => {});
+      const updatedUser = { ...user, coins: updated };
+      setUser(updatedUser);
+      saveUser(updatedUser);
+      syncUserProfileToFirestore(updatedUser, updated).catch(() => {});
     }
   };
 
   const handleSaveUser = (updatedUser: UserAccount) => {
-    setUser(updatedUser);
-    saveUser(updatedUser);
-    if (updatedUser.uid) {
-      syncUserProfileToFirestore(updatedUser, coins).catch(() => {});
+    const withCoins = { ...updatedUser, coins: coins !== undefined ? coins : updatedUser.coins };
+    setUser(withCoins);
+    saveUser(withCoins);
+    if (withCoins.uid) {
+      syncUserProfileToFirestore(withCoins, coins).catch(() => {});
     }
     if (updatedUser.diceColors) {
       const nextShop = {
@@ -553,10 +563,10 @@ export default function App() {
     setGameWinner(winner);
     setFinalUnits(units);
 
-    // Calculate coins won by the human player
+    // Calculate coins won by the local player
     let wonCoins = 0;
+    const human = units.find(u => u.isOwner);
     if (currentGameSettings?.payouts && currentGameSettings.payouts.length > 0) {
-      const human = units.find(u => !u.isCPU);
       if (human && human.place) {
         const placeIdx = human.place - 1;
         const payout = currentGameSettings.payouts[placeIdx] || 0;
@@ -564,12 +574,12 @@ export default function App() {
           wonCoins = payout;
         }
       }
-    } else if (!winner.isCPU) {
+    } else if (winner && human && winner.id === human.id) {
       wonCoins = 150; // Winner bonus!
     }
 
     // Calculate match XP earned
-    const humanUnit = units.find(u => !u.isCPU);
+    const humanUnit = human;
     const placement = stats?.placement || humanUnit?.place || (winner.id === humanUnit?.id ? 1 : 2);
     const totalP = currentGameSettings?.playersCount || units.length;
     const survivedRounds = stats?.survivedRounds ?? Math.max(0, totalP - placement);
@@ -1085,6 +1095,7 @@ export default function App() {
         user={user}
         onClose={() => setIsFilesModalOpen(false)}
         onToast={triggerToast}
+        onSaveUser={handleSaveUser}
       />
 
       {/* Challenge A Friend Modal */}

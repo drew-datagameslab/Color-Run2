@@ -129,14 +129,18 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [localRequests, setLocalRequests] = useState<FriendRequest[]>(() =>
     friendRequests || getFriendRequests(user.uid)
   );
+  const wasOpenRef = useRef(false);
+  const prevUidRef = useRef(user.uid);
 
-  // Sync state whenever modal is opened or user/shopSettings change
+  // Sync profile form fields only when the modal opens or the signed-in user changes
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && (!wasOpenRef.current || prevUidRef.current !== user.uid)) {
+      wasOpenRef.current = true;
+      prevUidRef.current = user.uid;
       setName(user.name);
       setPhoneNumber(user.phoneNumber || '');
       setSelectedColor(user.avatar.color || DEFAULT_AVATARS[0]);
-      setSelectedImage(user.avatar.image);
+      setSelectedImage(user.avatar.image || undefined);
       setSelectedNameColor(user.nameColor || '');
       setSelectedTitle(user.title || '');
       setSelectedBanner(user.banner || '');
@@ -152,13 +156,20 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       );
       setEquippedBg(shopSettings.equippedBg || 'bg-wood');
       setVolPct(Math.round((getSoundVolume() / 0.7) * 100));
+    } else if (!isOpen) {
+      wasOpenRef.current = false;
+    }
+  }, [isOpen, user, shopSettings]);
 
+  // Keep friends and friend requests synced independently so live presence heartbeats never reset form edits
+  useEffect(() => {
+    if (isOpen) {
       const currentFl = friends && friends.length > 0 ? friends : getLocalFriends(user.uid);
       setLocalFriends(currentFl);
       const currentRq = friendRequests || getFriendRequests(user.uid);
       setLocalRequests(currentRq);
     }
-  }, [isOpen, user, shopSettings, friends, friendRequests]);
+  }, [isOpen, user.uid, friends, friendRequests]);
 
   const handleRemoveFriendInAccount = async (friendId: string, friendName: string) => {
     const updated = await removeFriend(user.uid, friendId, user.name);
@@ -206,6 +217,24 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       return;
     }
 
+    const applyUploadedAvatar = (finalImgUrl: string) => {
+      setSelectedImage(finalImgUrl);
+      setAvatarSubTab('upload');
+      const trimmed = name.trim() || user.name || 'Player';
+      const updatedUser: UserAccount = {
+        ...user,
+        name: trimmed,
+        avatar: {
+          color: selectedColor,
+          name: trimmed.slice(0, 2).toUpperCase(),
+          image: finalImgUrl,
+        },
+      };
+      onSaveUser(updatedUser);
+      playSfx('add');
+      onToast('Photo avatar uploaded & saved!');
+    };
+
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
@@ -223,14 +252,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           const sy = (img.height - minSide) / 2;
           ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, targetDim, targetDim);
           const compressed = canvas.toDataURL('image/jpeg', 0.85);
-          setSelectedImage(compressed);
-          setAvatarSubTab('upload');
-          onToast('Photo avatar ready! Tap Save & Close.');
+          applyUploadedAvatar(compressed);
         } else {
-          setSelectedImage(dataUrl);
-          setAvatarSubTab('upload');
-          onToast('Photo avatar loaded!');
+          applyUploadedAvatar(dataUrl);
         }
+      };
+      img.onerror = () => {
+        applyUploadedAvatar(dataUrl);
       };
       img.src = dataUrl;
     };
@@ -521,12 +549,17 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   className="w-18 h-18 rounded-full border-3 border-[#f2c14e] shadow-lg flex items-center justify-center text-xl font-black text-white mb-2 overflow-hidden"
                   style={{
                     backgroundColor: selectedColor,
-                    backgroundImage: selectedImage && avatarSubTab !== 'initials' ? `url(${selectedImage})` : undefined,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
                   }}
                 >
-                  {(!selectedImage || avatarSubTab === 'initials') && (name.slice(0, 2).toUpperCase() || 'P1')}
+                  {selectedImage && avatarSubTab !== 'initials' ? (
+                    <img
+                      src={selectedImage}
+                      alt={name || 'Avatar'}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    name.slice(0, 2).toUpperCase() || 'P1'
+                  )}
                 </div>
                 <div className="w-full max-w-xs">
                   <label className="text-[10px] font-black uppercase text-[#6d5138] tracking-wider block text-center mb-1">

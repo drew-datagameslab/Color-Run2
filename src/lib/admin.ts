@@ -109,20 +109,13 @@ export async function ensureAdminRecord(uid: string, email?: string, role: strin
       { merge: true }
     );
 
+    // If a legacy duplicate document keyed by email exists, clean it up so admins aren't duplicated
     if (email) {
       const emailDocId = email.toLowerCase().replace(/[^a-z0-9]/g, '_');
-      const emailRef = doc(db, 'admins', emailDocId);
-      await setDoc(
-        emailRef,
-        {
-          uid,
-          email: email.toLowerCase(),
-          role,
-          createdAt: new Date().toISOString(),
-          grantedBy: 'system_bootstrap',
-        },
-        { merge: true }
-      );
+      if (emailDocId !== uid) {
+        const legacyEmailRef = doc(db, 'admins', emailDocId);
+        deleteDoc(legacyEmailRef).catch(() => {});
+      }
     }
     return true;
   } catch (err) {
@@ -310,13 +303,88 @@ export async function adminDeleteRoom(roomId: string): Promise<void> {
  */
 export async function adminFetchAdmins(): Promise<AdminAccountRecord[]> {
   try {
+    // 1. Map emails to UIDs and UIDs to emails for accurate deduplication
+    const emailToUid = new Map<string, string>();
+    const uidToEmail = new Map<string, string>();
+    emailToUid.set(PRIMARY_ADMIN_EMAIL.toLowerCase(), PRIMARY_ADMIN_UID);
+    uidToEmail.set(PRIMARY_ADMIN_UID, PRIMARY_ADMIN_EMAIL.toLowerCase());
+
+    try {
+      const usersCol = collection(db, 'users');
+      const userSnap = await getDocs(usersCol);
+      userSnap.forEach(d => {
+        const u = d.data();
+        const uUid = (u.uid || d.id).trim();
+        const uEmail = (u.email || '').trim().toLowerCase();
+        if (uUid && uEmail) {
+          emailToUid.set(uEmail, uUid);
+          uidToEmail.set(uUid, uEmail);
+        }
+      });
+    } catch {
+      // Non-fatal if users collection query is restricted
+    }
+
     const adminsCol = collection(db, 'admins');
     const snapshot = await getDocs(adminsCol);
-    const admins: AdminAccountRecord[] = [];
+    const seenAdmins = new Map<string, AdminAccountRecord>();
+    const redundantDocIdsToDelete: string[] = [];
+
     snapshot.forEach(docSnap => {
-      admins.push(docSnap.data() as AdminAccountRecord);
+      const data = docSnap.data() as AdminAccountRecord;
+      const docId = docSnap.id;
+
+      // Determine canonical email and canonical UID
+      let rawEmail = (data.email || '').trim().toLowerCase();
+      let rawUid = (data.uid || docId).trim();
+
+      // Resolve via lookup
+      if (!rawEmail && rawUid && uidToEmail.has(rawUid)) {
+        rawEmail = uidToEmail.get(rawUid)!;
+      }
+      if (!rawUid && rawEmail && emailToUid.has(rawEmail)) {
+        rawUid = emailToUid.get(rawEmail)!;
+      }
+      if (rawUid.includes('@') && emailToUid.has(rawUid.toLowerCase())) {
+        rawEmail = rawUid.toLowerCase();
+        rawUid = emailToUid.get(rawEmail)!;
+      }
+      if (rawEmail === PRIMARY_ADMIN_EMAIL.toLowerCase() || rawUid === PRIMARY_ADMIN_UID) {
+        rawEmail = PRIMARY_ADMIN_EMAIL.toLowerCase();
+        rawUid = PRIMARY_ADMIN_UID;
+      }
+
+      const canonicalKey = rawEmail || rawUid;
+      if (!canonicalKey) return;
+
+      if (seenAdmins.has(canonicalKey) || (rawUid && seenAdmins.has(rawUid)) || (rawEmail && seenAdmins.has(rawEmail))) {
+        // Redundant duplicate document in Firestore (e.g. legacy email-keyed doc when UID doc exists)
+        if (docId !== rawUid || docId.includes('_')) {
+          redundantDocIdsToDelete.push(docId);
+        }
+        return;
+      }
+
+      const record: AdminAccountRecord = {
+        ...data,
+        uid: rawUid || canonicalKey,
+        email: rawEmail || data.email,
+      };
+
+      seenAdmins.set(canonicalKey, record);
+      if (rawUid) seenAdmins.set(rawUid, record);
+      if (rawEmail) seenAdmins.set(rawEmail, record);
     });
-    return admins;
+
+    // Auto-clean redundant duplicate docs in background
+    if (redundantDocIdsToDelete.length > 0) {
+      redundantDocIdsToDelete.forEach(id => {
+        deleteDoc(doc(db, 'admins', id)).catch(() => {});
+      });
+    }
+
+    const uniqueAdmins = Array.from(new Set(seenAdmins.values()));
+    return uniqueAdmins;
   } catch (err) {
     console.error('adminFetchAdmins error:', err);
     return [];
@@ -360,20 +428,26 @@ export async function adminGrantAdmin(
     grantedBy: auth.currentUser?.email || auth.currentUser?.uid || PRIMARY_ADMIN_EMAIL,
   };
 
-  // If we have targetUid, write to /admins/{targetUid}
+  // If we have targetUid, write ONLY to /admins/{targetUid}
   if (targetUid) {
     const docRef = doc(db, 'admins', targetUid);
     await setDoc(docRef, recordPayload, { merge: true });
+
+    // Clean up any old email-keyed duplicate document
+    if (targetEmail) {
+      const emailKey = targetEmail.replace(/[^a-z0-9]/g, '_');
+      if (emailKey !== targetUid) {
+        deleteDoc(doc(db, 'admins', emailKey)).catch(() => {});
+      }
+    }
 
     // Also mark their user profile
     try {
       const userRef = doc(db, 'users', targetUid);
       await setDoc(userRef, { role, isAdmin: true }, { merge: true });
     } catch {}
-  }
-
-  // Also write to /admins/{emailSafeKey} so lookup by email succeeds immediately
-  if (targetEmail) {
+  } else if (targetEmail) {
+    // Only if UID is not known yet, write to /admins/{emailSafeKey}
     const emailKey = targetEmail.replace(/[^a-z0-9]/g, '_');
     const emailDocRef = doc(db, 'admins', emailKey);
     await setDoc(emailDocRef, recordPayload, { merge: true });

@@ -44,13 +44,18 @@ export const Header: React.FC<HeaderProps> = ({
                   : 'border-[#f2c14e] bg-[#e58a1f]'
               }`}
               style={{
-                backgroundImage: user.avatar.image ? `url(${user.avatar.image})` : undefined,
-                backgroundSize: 'cover',
-                backgroundPosition: 'center',
                 backgroundColor: user.avatar.color,
               }}
             >
-              {!user.avatar.image && (user.name.slice(0, 2).toUpperCase() || 'P1')}
+              {user.avatar.image ? (
+                <img
+                  src={user.avatar.image}
+                  alt={user.name || 'Avatar'}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                user.name.slice(0, 2).toUpperCase() || 'P1'
+              )}
             </div>
 
             {/* Level Badge attached to Avatar */}

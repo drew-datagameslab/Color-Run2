@@ -114,6 +114,7 @@ export interface UserAccount {
   provider: 'guest' | 'email' | 'google' | 'apple';
   avatar: UserAvatar;
   scoreboardUnlocked: boolean;
+  coins?: number;
   isAdFree?: boolean;
   adFreePlan?: 'monthly' | 'yearly';
   adFreeBillingDate?: string;

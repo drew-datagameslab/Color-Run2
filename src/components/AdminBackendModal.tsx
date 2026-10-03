@@ -943,7 +943,11 @@ export const AdminBackendModal: React.FC<AdminBackendModalProps> = ({
 
                   <div className="space-y-2">
                     <h4 className="text-xs font-bold text-white">Authorized Administrators</h4>
-                    {adminsList.map(admin => {
+                    {Array.from(
+                      new Map<string, AdminAccountRecord>(
+                        adminsList.map(a => [(a.email?.toLowerCase().trim() || a.uid), a])
+                      ).values()
+                    ).map(admin => {
                       const isMaster =
                         (admin.email && admin.email.toLowerCase() === 'drew@datagameslab.com') ||
                         admin.uid === 'ZYHRSo415HeN1Tm9ChGYNJBGik02';

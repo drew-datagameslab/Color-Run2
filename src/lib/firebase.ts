@@ -122,7 +122,7 @@ export function mapFirebaseUserToAccount(
       if (parsed.avatar?.color) {
         color = parsed.avatar.color;
       }
-      if (parsed.avatar?.image !== undefined) {
+      if (typeof parsed.avatar?.image === 'string' && parsed.avatar.image.length > 0) {
         preservedImage = parsed.avatar.image;
       }
       if (parsed.name && parsed.name !== 'Player' && parsed.name !== 'Color Roller' && parsed.name !== 'Guest Roller') {
@@ -200,11 +200,12 @@ export async function signInWithEmail(email: string, pass: string): Promise<User
     if (existing) {
       return existing;
     }
-  } catch {
-    // ignore
+    // Only initialize brand new user document if none exists yet
+    await syncUserProfileToFirestore(account, 200);
+  } catch (err) {
+    console.warn('Network or Firestore error loading profile on sign-in (preserving account without overwriting coins):', err);
   }
 
-  await syncUserProfileToFirestore(account, 200);
   return account;
 }
 
@@ -222,11 +223,11 @@ export async function signInWithGoogle(): Promise<UserAccount> {
     if (existing) {
       return existing;
     }
-  } catch {
-    // ignore
+    await syncUserProfileToFirestore(account, 200);
+  } catch (err) {
+    console.warn('Network or Firestore error loading profile on Google sign-in (preserving account without overwriting coins):', err);
   }
 
-  await syncUserProfileToFirestore(account, 200);
   return account;
 }
 
@@ -245,11 +246,11 @@ export async function signInWithApple(): Promise<UserAccount> {
     if (existing) {
       return existing;
     }
-  } catch {
-    // ignore
+    await syncUserProfileToFirestore(account, 200);
+  } catch (err) {
+    console.warn('Network or Firestore error loading profile on Apple sign-in (preserving account without overwriting coins):', err);
   }
 
-  await syncUserProfileToFirestore(account, 200);
   return account;
 }
 
@@ -265,11 +266,11 @@ export async function signInAsGuest(): Promise<UserAccount> {
     if (existing) {
       return existing;
     }
-  } catch {
-    // ignore
+    await syncUserProfileToFirestore(account, 200);
+  } catch (err) {
+    console.warn('Network or Firestore error loading profile on Guest sign-in (preserving account without overwriting coins):', err);
   }
 
-  await syncUserProfileToFirestore(account, 200);
   return account;
 }
 
@@ -345,6 +346,7 @@ export function subscribeToAuth(
           const merged: UserAccount = {
             ...account,
             ...existing,
+            coins: existing.coins !== undefined ? existing.coins : account.coins,
             name: (existing.name && existing.name !== 'Color Roller' && existing.name !== 'Guest Roller')
               ? existing.name
               : account.name,
@@ -352,7 +354,7 @@ export function subscribeToAuth(
               ...account.avatar,
               ...(existing.avatar || {}),
               color: existing.avatar?.color || account.avatar?.color || '#1f7fd6',
-              image: existing.avatar?.image !== undefined ? existing.avatar.image : account.avatar?.image,
+              image: existing.avatar?.image || account.avatar?.image || undefined,
             },
             diceColors: existing.diceColors || account.diceColors || ['blue', 'red'],
           };
@@ -434,7 +436,11 @@ export async function syncUserProfileToFirestore(
       provider: user.provider,
       isGuest: !!user.isGuest,
       phoneNumber: user.phoneNumber || null,
-      avatar: user.avatar,
+      avatar: {
+        color: user.avatar?.color || '#1f7fd6',
+        name: user.avatar?.name || 'CR',
+        image: user.avatar?.image || null,
+      },
       diceColors: user.diceColors || ['blue', 'red'],
       // Level & XP progression
       level: user.level || 1,
@@ -458,24 +464,42 @@ export async function syncUserProfileToFirestore(
       data.createdAt = user.createdAt;
     }
 
-    // Role and permission boundary:
-    // Non-admin players cannot self-assign coins, isAdFree, or scoreboardUnlocked.
-    const isAdminUser = !!(user.email && ['admin@colorrun.game', 'admin@colorrun.com'].includes(user.email.toLowerCase()));
-
+    // Check document status and existing coin balance
     let isNewDoc = false;
+    let existingCoins: number | undefined = undefined;
     try {
       const snap = await getDoc(userRef);
       isNewDoc = !snap.exists();
+      if (snap.exists()) {
+        const snapData = snap.data();
+        if (typeof snapData?.coins === 'number') {
+          existingCoins = snapData.coins;
+        }
+      }
     } catch {
+      // On network read failure, DO NOT assume it's a new document and DO NOT overwrite
       isNewDoc = false;
     }
 
     if (isNewDoc) {
-      data.coins = Math.min(coins !== undefined ? coins : 200, 500);
+      // Brand new user registration: default 200 welcome coins
+      data.coins = coins !== undefined && typeof coins === 'number' ? Math.max(0, Math.floor(coins)) : 200;
       data.isAdFree = false;
       data.scoreboardUnlocked = true;
-    } else if (isAdminUser) {
-      if (coins !== undefined) data.coins = coins;
+    } else {
+      // Existing user: NEVER wipe their real coin balance!
+      if (coins !== undefined && typeof coins === 'number') {
+        data.coins = Math.max(0, Math.floor(coins));
+      } else if (user.coins !== undefined && typeof user.coins === 'number') {
+        data.coins = Math.max(0, Math.floor(user.coins));
+      } else if (existingCoins !== undefined) {
+        data.coins = existingCoins;
+      }
+    }
+
+    const isAdminUser = !!(user.email && ['admin@colorrun.game', 'admin@colorrun.com', 'drew@datagameslab.com'].includes(user.email.toLowerCase()));
+
+    if (isAdminUser) {
       data.isAdFree = !!user.isAdFree;
       data.scoreboardUnlocked = !!user.scoreboardUnlocked;
       if (user.adFreePlan) data.adFreePlan = user.adFreePlan;
@@ -501,8 +525,15 @@ export async function loadUserProfileFromFirestore(userId: string): Promise<User
         email: data.email || null,
         phoneNumber: data.phoneNumber || undefined,
         provider: data.provider || 'email',
-        avatar: data.avatar || { color: '#1f7fd6', name: 'CR' },
+        avatar: data.avatar
+          ? {
+              color: data.avatar.color || '#1f7fd6',
+              name: data.avatar.name || (data.name ? data.name.slice(0, 2).toUpperCase() : 'CR'),
+              image: data.avatar.image || undefined,
+            }
+          : { color: '#1f7fd6', name: 'CR' },
         scoreboardUnlocked: data.scoreboardUnlocked ?? true,
+        coins: typeof data.coins === 'number' ? data.coins : undefined,
         isAdFree: !!data.isAdFree,
         adFreePlan: data.adFreePlan || undefined,
         adFreeBillingDate: data.adFreeBillingDate || undefined,

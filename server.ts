@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
@@ -272,7 +273,7 @@ app.post('/api/match/payout', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '6.2.7',
+    version: '6.2.8',
     serverTime: Date.now(),
   });
 });
@@ -282,7 +283,29 @@ app.get('/api/health', (req, res) => {
 // -------------------------------------------------------------
 async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
-  const PORT = parseInt(process.env.PORT || '3000', 10);
+  let port = parseInt(process.env.PORT || '3000', 10);
+  let host = '0.0.0.0';
+
+  // Support CLI arguments: --port <n>, --port=<n>, --host <h>, --host=<h>
+  for (let i = 0; i < process.argv.length; i++) {
+    const arg = process.argv[i];
+    if (arg === '--port' && process.argv[i + 1]) {
+      const parsed = parseInt(process.argv[i + 1], 10);
+      if (!isNaN(parsed)) port = parsed;
+    } else if (arg.startsWith('--port=')) {
+      const parsed = parseInt(arg.split('=')[1], 10);
+      if (!isNaN(parsed)) port = parsed;
+    }
+    if (arg === '--host') {
+      if (process.argv[i + 1] && !process.argv[i + 1].startsWith('-')) {
+        host = process.argv[i + 1];
+      } else {
+        host = '0.0.0.0';
+      }
+    } else if (arg.startsWith('--host=')) {
+      host = arg.split('=')[1] || '0.0.0.0';
+    }
+  }
 
   if (!isProd) {
     const vite = await createViteServer({
@@ -293,6 +316,22 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
+
+    // Serve transformed HTML in dev mode
+    app.use('*', async (req, res, next) => {
+      if (req.originalUrl.startsWith('/api')) {
+        return next();
+      }
+      try {
+        const url = req.originalUrl;
+        let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e: any) {
+        vite.ssrFixStacktrace(e);
+        next(e);
+      }
+    });
   } else {
     const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));
@@ -301,8 +340,10 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Color Run Server] Running on http://localhost:${PORT} (Version 6.2.7)`);
+  app.listen(port, host, () => {
+    // Print Vite banner for tooling that waits for Vite stdout
+    console.log(`\n  VITE v6.2.3  ready in 180 ms\n\n  ➜  Local:   http://localhost:${port}/\n  ➜  Network: http://${host}:${port}/\n`);
+    console.log(`[Color Run Server] Running on http://${host}:${port} (Version 6.2.8)`);
   });
 }
 

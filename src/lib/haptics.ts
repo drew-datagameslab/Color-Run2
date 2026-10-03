@@ -111,6 +111,37 @@ export const triggerTurnHaptic = async (): Promise<void> => {
 };
 
 /**
+ * Subtle tactile vibration haptic feedback when the player rolls the dice in PlayScreen.
+ */
+export const triggerDiceRollHaptic = async (): Promise<void> => {
+  try {
+    await Haptics.impact({ style: ImpactStyle.Light });
+    setTimeout(async () => {
+      try {
+        await Haptics.impact({ style: ImpactStyle.Light });
+      } catch {
+        // Ignore
+      }
+    }, 90);
+    return;
+  } catch {
+    // Falls through to web vibration if Capacitor is not running natively
+  }
+
+  try {
+    if (
+      typeof window !== 'undefined' &&
+      typeof navigator !== 'undefined' &&
+      typeof navigator.vibrate === 'function'
+    ) {
+      navigator.vibrate([20, 35, 16, 40, 12]);
+    }
+  } catch {
+    // Ignore
+  }
+};
+
+/**
  * Celebratory haptic feedback for milestones (e.g. 6-of-a-kind Color Run).
  */
 export const triggerCelebrationHaptic = async (): Promise<void> => {
