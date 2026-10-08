@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { requireUser, requireAdmin, AuthedRequest } from './server/auth.ts';
-import { getAdminDb } from './server/firebaseAdmin.ts';
+import { getAdminDb, checkAdminAvailable } from './server/firebaseAdmin.ts';
 import { WalletService, WalletError } from './server/wallet.ts';
 import { FirestoreWalletStore } from './server/walletStores.ts';
 
@@ -72,8 +72,8 @@ app.post('/api/dice/roll', (req, res) => {
 // -------------------------------------------------------------
 
 let walletService: WalletService | null = null;
-function wallets(): WalletService {
-  if (!walletService) walletService = new WalletService(new FirestoreWalletStore(getAdminDb()));
+async function wallets(): Promise<WalletService> {
+  if (!walletService) walletService = new WalletService(new FirestoreWalletStore(await getAdminDb()));
   return walletService;
 }
 
@@ -83,7 +83,7 @@ function walletRoute(
 ) {
   return async (req: Request, res: Response) => {
     try {
-      res.json({ success: true, ...(await handler(req as AuthedRequest, wallets())) });
+      res.json({ success: true, ...(await handler(req as AuthedRequest, await wallets())) });
     } catch (err) {
       if (err instanceof WalletError) {
         return res.status(err.status).json({ error: err.code, message: err.message });
@@ -228,6 +228,7 @@ async function startServer() {
     // Print Vite banner for tooling that waits for Vite stdout
     console.log(`\n  VITE v6.2.3  ready in 180 ms\n\n  ➜  Local:   http://localhost:${port}/\n  ➜  Network: http://${host}:${port}/\n`);
     console.log(`[Color Run Server] Running on http://${host}:${port} (Version ${APP_VERSION})`);
+    checkAdminAvailable();
   });
 }
 

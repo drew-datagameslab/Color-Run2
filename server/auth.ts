@@ -28,8 +28,15 @@ export async function requireUser(req: Request, res: Response, next: NextFunctio
   if (!match) {
     return res.status(401).json({ error: 'unauthenticated', message: 'Sign in required.' });
   }
+  let adminAuth;
   try {
-    const decoded = await getAdminAuth().verifyIdToken(match[1]);
+    adminAuth = await getAdminAuth();
+  } catch {
+    // The app treats 503 as offline and keeps coins on the device
+    return res.status(503).json({ error: 'auth_unavailable', message: 'Sign-in check unavailable.' });
+  }
+  try {
+    const decoded = await adminAuth.verifyIdToken(match[1]);
     (req as AuthedRequest).user = {
       uid: decoded.uid,
       email: decoded.email ? decoded.email.toLowerCase() : null,
@@ -56,7 +63,7 @@ export async function isAdminUser(user: AuthedUser): Promise<boolean> {
     return true;
   }
   try {
-    const db = getAdminDb();
+    const db = await getAdminDb();
     if ((await db.collection('admins').doc(user.uid).get()).exists) return true;
     if (user.email && user.emailVerified) {
       return (await db.collection('admins').doc(adminEmailKey(user.email)).get()).exists;
