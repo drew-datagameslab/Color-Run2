@@ -1,6 +1,0 @@
-[
-	{
-		"pkg": "@capacitor/haptics",
-		"classpath": "com.capacitorjs.plugins.haptics.HapticsPlugin"
-	}
-]
