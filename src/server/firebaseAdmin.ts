@@ -13,7 +13,7 @@ interface AppletConfig {
 }
 
 function readAppletConfig(): AppletConfig {
-  const configPath = path.resolve(__dirname, '..', 'firebase-applet-config.json');
+  const configPath = path.resolve(__dirname, '..', '..', 'firebase-applet-config.json');
   return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 }
 

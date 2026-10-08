@@ -10,9 +10,9 @@ import {
   MAX_FREE_GAME_PRIZES_PER_DAY,
   DAILY_BONUS_COINS_PER_PIP,
   prizeForPlacement,
-} from '../src/lib/economy.ts';
-import { createInitialDailyMissions, createInitialWeeklyMissions } from '../src/lib/missions.ts';
-import { LEVEL_REWARDS } from '../src/lib/levelSystem.ts';
+} from '../lib/economy.ts';
+import { createInitialDailyMissions, createInitialWeeklyMissions } from '../lib/missions.ts';
+import { LEVEL_REWARDS } from '../lib/levelSystem.ts';
 
 /**
  * Server-side coin wallets. Every balance change goes through here, inside a

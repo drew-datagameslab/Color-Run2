@@ -5,10 +5,10 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
-import { requireUser, requireAdmin, AuthedRequest } from './server/auth.ts';
-import { getAdminDb, checkAdminAvailable } from './server/firebaseAdmin.ts';
-import { WalletService, WalletError } from './server/wallet.ts';
-import { FirestoreWalletStore } from './server/walletStores.ts';
+import { requireUser, requireAdmin, AuthedRequest } from './src/server/auth.ts';
+import { getAdminDb, checkAdminAvailable } from './src/server/firebaseAdmin.ts';
+import { WalletService, WalletError } from './src/server/wallet.ts';
+import { FirestoreWalletStore } from './src/server/walletStores.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

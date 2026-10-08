@@ -1,8 +1,8 @@
 import express from 'express';
 import { AddressInfo } from 'net';
-import { WalletService, WalletError, utcWeek } from '../../server/wallet.ts';
-import { MemoryWalletStore } from '../../server/walletStores.ts';
-import { requireUser, requireAdmin } from '../../server/auth.ts';
+import { WalletService, WalletError, utcWeek } from '../server/wallet.ts';
+import { MemoryWalletStore } from '../server/walletStores.ts';
+import { requireUser, requireAdmin } from '../server/auth.ts';
 import { prizeForPlacement, WELCOME_COINS, FREE_GAME_WIN_BONUS } from '../lib/economy';
 import { createInitialDailyMissions, createInitialWeeklyMissions } from '../lib/missions';
 import { LEVEL_REWARDS } from '../lib/levelSystem';
