@@ -1,0 +1,6 @@
+{
+  "name": "Color Run",
+  "description": "A standalone offline mobile dice rolling game where players roll 12 dice, collect matching symbols, score per-color bonuses, and survive elimination rounds.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
