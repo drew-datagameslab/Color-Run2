@@ -360,7 +360,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose, initial
         {/* Footer */}
         <div className="p-4 pt-3 border-t border-[#ebdcb9] bg-[#f3ecda]/70 flex flex-col sm:flex-row items-center justify-between gap-2">
           <div className="text-[10px] text-[#7d654c] font-medium">
-            Color Run • Version 6.4.1
+            Color Run • Version 6.5.1
           </div>
           <button
             onClick={onClose}

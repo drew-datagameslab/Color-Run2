@@ -19,7 +19,6 @@ import {
 } from 'lucide-react';
 import { DiceColor, ShopSettings, UserAccount } from '../types/game';
 import { getSoundVolume, setSoundVolume, playWinCoinsSound } from '../lib/audio';
-import { redeemShopCoupon } from '../lib/storage';
 import { redeemReferralCode } from '../lib/referrals';
 import { saveEmailSubscriber, markEmailSubscriberVerified } from '../lib/firebase';
 import { RisingCoinBubble } from './RisingCoinBubble';
@@ -33,7 +32,10 @@ interface ShopScreenProps {
   coins: number;
   shopSettings: ShopSettings;
   onUpdateShop: (settings: ShopSettings) => void;
-  onAddCoins: (amount: number) => void;
+  /** Coin changes go through the server; each resolves to whether it succeeded */
+  onSpendCoins: (price: number, item: string) => Promise<boolean>;
+  onBuyCoinPack: (amount: number) => Promise<boolean>;
+  onRedeemCoupon: (code: string) => Promise<{ success: boolean; coins: number; message: string }>;
   onSetAdFree: (
     adFree: boolean,
     subscription?: {
@@ -85,7 +87,9 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
   coins,
   shopSettings,
   onUpdateShop,
-  onAddCoins,
+  onSpendCoins,
+  onBuyCoinPack,
+  onRedeemCoupon,
   onSetAdFree,
   onOpenRedeemModal,
   onBack,
@@ -169,7 +173,7 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
     setCheckoutModalPlan(plan);
   };
 
-  const handleEquipColor = (colorId: DiceColor, slot: 0 | 1) => {
+  const handleEquipColor = async (colorId: DiceColor, slot: 0 | 1) => {
     const isUnlocked = shopSettings.unlockedColors.includes(colorId);
     if (!isUnlocked) {
       const colorDef = ALL_COLORS.find(c => c.id === colorId);
@@ -178,7 +182,7 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
         showToast('Not enough coins!');
         return;
       }
-      onAddCoins(-price);
+      if (!(await onSpendCoins(price, `color:${colorId}`))) return;
       const nextUnlocked = [...shopSettings.unlockedColors, colorId];
       const nextEquipped = [...shopSettings.equippedColors] as [DiceColor, DiceColor];
       nextEquipped[slot] = colorId;
@@ -199,7 +203,7 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
     }
   };
 
-  const handleEquipBg = (bgId: string) => {
+  const handleEquipBg = async (bgId: string) => {
     const isUnlocked =
       shopSettings.unlockedBgs.includes(bgId) ||
       shopSettings.unlockedBgs.includes(`bg-${bgId}`) ||
@@ -212,7 +216,7 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
         showToast('Not enough coins!');
         return;
       }
-      onAddCoins(-price);
+      if (!(await onSpendCoins(price, `bg:${bgId}`))) return;
       onUpdateShop({
         ...shopSettings,
         unlockedBgs: [...shopSettings.unlockedBgs, bgId],
@@ -230,8 +234,8 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
   };
 
   // Handle In-App Purchase of Coin Packs
-  const handlePurchaseCoinPack = (amount: number, priceStr: string) => {
-    onAddCoins(amount);
+  const handlePurchaseCoinPack = async (amount: number, priceStr: string) => {
+    if (!(await onBuyCoinPack(amount))) return;
     showToast(`🪙 ${amount.toLocaleString()} Coins added (${priceStr})!`);
     playWinCoinsSound();
   };
@@ -301,35 +305,27 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
       return;
     }
 
-    // 1. Check standard coupon codes (e.g. DGLFREE300, DGL1000FREE)
-    const res = redeemShopCoupon(user.uid, cleanInput);
-    if (res.success) {
-      setBubbleCoins(res.coins);
-      setShowBubble(true);
-      setIsCouponHighlighted(false);
-      setCouponSuccess(res.message);
-      return;
-    }
-
-    // 2. Also accept 8-digit friend referral codes!
+    // Coins are credited by the server when the code is accepted; the bubble just shows them
+    const isReferralCode = /^d{8}$/.test(cleanInput);
     try {
-      const refRes = await redeemReferralCode(cleanInput, user);
-      if (refRes.success) {
-        setBubbleCoins(refRes.coins);
+      const res = isReferralCode
+        ? await redeemReferralCode(cleanInput, user)
+        : await onRedeemCoupon(cleanInput);
+      if (res.success) {
+        setBubbleCoins(res.coins);
         setShowBubble(true);
         setIsCouponHighlighted(false);
-        setCouponSuccess(refRes.message);
+        setCouponSuccess(res.message);
         return;
       }
-      setCouponError(refRes.message || res.message);
-    } catch {
       setCouponError(res.message);
+    } catch {
+      setCouponError('Could not redeem that code. Please try again.');
     }
   };
 
   const handleBubbleComplete = () => {
     setShowBubble(false);
-    onAddCoins(bubbleCoins);
     playWinCoinsSound();
   };
 

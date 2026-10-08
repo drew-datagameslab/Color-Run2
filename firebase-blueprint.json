@@ -51,6 +51,48 @@
       },
       "required": ["uid", "name"]
     },
+    "Wallet": {
+      "title": "Wallet",
+      "description": "Server-owned coin balance and claim history. Written only by the Color Run server (Firebase Admin SDK); players can read their own.",
+      "type": "object",
+      "properties": {
+        "balance": { "type": "number" },
+        "day": { "type": "string", "maxLength": 16 },
+        "dayCounts": { "type": "object" },
+        "claimedMissions": { "type": "object" },
+        "claimedLevelRewards": { "type": "array", "items": { "type": "string" } },
+        "redeemedCoupons": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["balance"]
+    },
+    "MatchTicket": {
+      "title": "MatchTicket",
+      "description": "A started game: the buy-in charged and whether its prize has been claimed.",
+      "type": "object",
+      "properties": {
+        "buyIn": { "type": "number" },
+        "playerCount": { "type": "number" },
+        "tier": { "type": "string", "maxLength": 16 },
+        "createdAt": { "type": "number" },
+        "claimed": { "type": "boolean" }
+      },
+      "required": ["buyIn", "playerCount", "tier", "createdAt", "claimed"]
+    },
+    "LedgerEntry": {
+      "title": "LedgerEntry",
+      "description": "One coin balance change.",
+      "type": "object",
+      "properties": {
+        "delta": { "type": "number" },
+        "balance": { "type": "number" },
+        "reason": { "type": "string", "maxLength": 32 },
+        "ref": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["delta", "balance", "reason", "timestamp"]
+    },
     "UserFile": {
       "title": "UserFile",
       "description": "User uploaded file metadata and preview content.",
@@ -185,7 +227,19 @@
     },
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/User" },
-      "description": "User account documents. Read is restricted to the account owner or admin. Profile updates cannot self-assign coins, isAdFree, or scoreboardUnlocked."
+      "description": "User account documents. Read is restricted to the account owner or admin. Profile updates cannot change coins, isAdFree, scoreboardUnlocked or admin roles; the coin balance lives in /wallets."
+    },
+    "/wallets/{userId}": {
+      "schema": { "$ref": "#/entities/Wallet" },
+      "description": "Coin balances. Readable by the owner or an admin; written only by the server."
+    },
+    "/wallets/{userId}/matches/{matchId}": {
+      "schema": { "$ref": "#/entities/MatchTicket" },
+      "description": "Game tickets issued when a buy-in is charged; the prize is claimed once per ticket. Server-written."
+    },
+    "/wallets/{userId}/ledger/{entryId}": {
+      "schema": { "$ref": "#/entities/LedgerEntry" },
+      "description": "Audit log of coin balance changes. Server-written."
     },
     "/users/{userId}/files/{fileId}": {
       "schema": { "$ref": "#/entities/UserFile" },

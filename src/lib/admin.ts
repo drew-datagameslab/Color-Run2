@@ -1,15 +1,10 @@
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, updateDoc } from 'firebase/firestore';
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  updateProfile,
-} from 'firebase/auth';
-import { db, auth, mapFirebaseUserToAccount } from './firebase';
+import { db, auth } from './firebase';
+import { adminSetCoins } from './serverAuthoritative';
 import { UserAccount } from '../types/game';
 
 export const PRIMARY_ADMIN_EMAIL = 'drew@datagameslab.com';
 export const PRIMARY_ADMIN_UID = 'ZYHRSo415HeN1Tm9ChGYNJBGik02';
-export const ADMIN_EMAILS = [PRIMARY_ADMIN_EMAIL];
 
 export interface AdminAccountRecord {
   uid: string;
@@ -28,63 +23,55 @@ export interface SecurityAuditResult {
   adminConfigured: boolean;
 }
 
+/** Key the admin portal uses for /admins documents granted by email */
+function adminEmailKey(email: string): string {
+  return email.toLowerCase().replace(/[^a-z0-9]/g, '_');
+}
+
 /**
- * Checks if the current authenticated user is an administrator.
- * Currently, only drew@datagameslab.com (or users explicitly added to /admins) are permitted.
+ * Checks if the signed-in Firebase user is an administrator:
+ * - drew@datagameslab.com signed in with Google (or the master admin UID), or
+ * - an account granted admin access in the admin portal (/admins/{uid}, or
+ *   /admins/{emailKey} when granted by email before the person had signed in).
+ * Only the real Firebase sign-in counts; guests and local accounts are never admins.
+ * Firestore rules apply the same checks, so this only decides what the menu shows.
  */
 export async function checkIsAdmin(user?: UserAccount | null): Promise<boolean> {
-  const currentAuth = auth.currentUser;
-  const targetEmail = (user?.email || currentAuth?.email || '').toLowerCase().trim();
-  const targetUid = user?.uid || currentAuth?.uid || '';
-  const isGuest = user ? !!user.isGuest : !!currentAuth?.isAnonymous;
+  await auth.authStateReady();
+  const fbUser = auth.currentUser;
+  if (!fbUser || fbUser.isAnonymous) return false;
+  if (user && user.uid !== fbUser.uid) return false;
 
-  // Unauthenticated or guest users cannot be admins
-  if (isGuest || (!targetEmail && !targetUid)) {
-    return false;
-  }
+  const email = (fbUser.email || '').toLowerCase().trim();
+  const signedInWithGoogle = fbUser.providerData.some(p => p.providerId === 'google.com');
 
-  // 1. Master Administrator: drew@datagameslab.com or master UID
-  if (targetEmail === PRIMARY_ADMIN_EMAIL || targetUid === PRIMARY_ADMIN_UID) {
-    if (targetUid) {
-      ensureAdminRecord(targetUid, PRIMARY_ADMIN_EMAIL, 'master_admin').catch(() => {});
-    }
+  // 1. Master Administrator
+  if (
+    fbUser.uid === PRIMARY_ADMIN_UID ||
+    (email === PRIMARY_ADMIN_EMAIL && fbUser.emailVerified && signedInWithGoogle)
+  ) {
+    ensureAdminRecord(fbUser.uid, PRIMARY_ADMIN_EMAIL, 'master_admin').catch(() => {});
     return true;
   }
 
-  // 2. Secondary fallback emails
-  if (targetEmail && ADMIN_EMAILS.includes(targetEmail)) {
-    if (targetUid) {
-      ensureAdminRecord(targetUid, targetEmail, 'super_admin').catch(() => {});
-    }
-    return true;
+  // 2. Granted by UID in the admin portal
+  try {
+    if ((await getDoc(doc(db, 'admins', fbUser.uid))).exists()) return true;
+  } catch {
+    // Not an admin or denied
   }
 
-  // 3. Check Firestore /admins/{uid}
-  if (targetUid && !targetUid.startsWith('guest_')) {
+  // 3. Granted by email in the admin portal (verified emails only)
+  if (email && fbUser.emailVerified) {
     try {
-      const adminDocRef = doc(db, 'admins', targetUid);
-      const snap = await getDoc(adminDocRef);
+      const snap = await getDoc(doc(db, 'admins', adminEmailKey(email)));
       if (snap.exists()) {
+        // Record their UID too, so the grant also works if their email changes
+        ensureAdminRecord(fbUser.uid, email, snap.data()?.role || 'admin').catch(() => {});
         return true;
       }
     } catch {
-      // Not an admin or denied
-    }
-
-    // 4. Check Firestore /admins/{emailKey}
-    if (targetEmail) {
-      try {
-        const emailKey = targetEmail.replace(/[^a-z0-9]/g, '_');
-        const adminEmailDocRef = doc(db, 'admins', emailKey);
-        const snap = await getDoc(adminEmailDocRef);
-        if (snap.exists()) {
-          // Sync this user's UID to /admins/{targetUid} as well
-          ensureAdminRecord(targetUid, targetEmail, snap.data()?.role || 'admin').catch(() => {});
-          return true;
-        }
-      } catch {
-        // Not an admin
-      }
+      // Not an admin
     }
   }
 
@@ -121,62 +108,6 @@ export async function ensureAdminRecord(uid: string, email?: string, role: strin
   } catch (err) {
     console.warn('Could not register admin document in Firestore:', err);
     return false;
-  }
-}
-
-/**
- * Signs in as or creates the master Color Run admin account
- */
-export async function signInAsAdmin(
-  email: string = 'admin@colorrun.game',
-  pass: string = 'ColorRunAdmin2026!'
-): Promise<{ success: boolean; account?: UserAccount; error?: string }> {
-  try {
-    const cleanEmail = email.trim().toLowerCase();
-    let cred;
-    try {
-      cred = await signInWithEmailAndPassword(auth, cleanEmail, pass);
-    } catch (signInErr: any) {
-      // If user does not exist, create it
-      if (signInErr.code === 'auth/user-not-found' || signInErr.code === 'auth/invalid-credential') {
-        try {
-          cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
-          await updateProfile(cred.user, { displayName: 'Color Run Admin' });
-        } catch (createErr: any) {
-          throw new Error(createErr.message || 'Failed to initialize admin account');
-        }
-      } else {
-        throw signInErr;
-      }
-    }
-
-    const account = mapFirebaseUserToAccount(cred.user, 'email');
-    account.name = 'Color Run Admin';
-
-    // Register in /admins collection
-    await ensureAdminRecord(cred.user.uid, cleanEmail);
-
-    // Save profile with admin role flag
-    const userRef = doc(db, 'users', cred.user.uid);
-    await setDoc(
-      userRef,
-      {
-        uid: cred.user.uid,
-        name: 'Color Run Admin',
-        email: cleanEmail,
-        role: 'super_admin',
-        isAdmin: true,
-        scoreboardUnlocked: true,
-        isAdFree: true,
-        coins: 100000,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
-
-    return { success: true, account };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to authenticate admin' };
   }
 }
 
@@ -219,11 +150,9 @@ export async function adminFetchUsers(): Promise<UserAccount[]> {
  * Admin API: Safely adjust user coins
  */
 export async function adminUpdateCoins(userId: string, newCoins: number): Promise<void> {
-  const userRef = doc(db, 'users', userId);
-  await updateDoc(userRef, {
-    coins: Math.max(0, newCoins),
-    updatedAt: new Date().toISOString(),
-  });
+  // Balances are in the server's wallets; the server checks that the caller is an admin
+  const res = await adminSetCoins(userId, Math.max(0, Math.floor(newCoins)));
+  if (!res.ok) throw new Error(res.message);
 }
 
 /**

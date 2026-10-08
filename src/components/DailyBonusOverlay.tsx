@@ -6,12 +6,18 @@ import { ThreeDDice } from './ThreeDDice';
 
 interface DailyBonusOverlayProps {
   isOpen: boolean;
+  /**
+   * Rolls the two dice on the server (which also credits the coins). Resolves to the dice,
+   * null when offline (roll locally), or 'unavailable' when the bonus can't be claimed.
+   */
+  onRoll?: () => Promise<{ red: number; blue: number } | null | 'unavailable'>;
   onClaim: (coinsWon: number) => void;
   onClose: () => void;
 }
 
 export const DailyBonusOverlay: React.FC<DailyBonusOverlayProps> = ({
   isOpen,
+  onRoll,
   onClaim,
   onClose,
 }) => {
@@ -25,12 +31,20 @@ export const DailyBonusOverlay: React.FC<DailyBonusOverlayProps> = ({
 
   if (!isOpen) return null;
 
-  const handleRoll = () => {
+  const handleRoll = async () => {
     if (isRolling || hasRolled) return;
+    setIsRolling(true);
 
-    // Pick final random numbers
-    const finalRed = Math.floor(Math.random() * 6) + 1;
-    const finalBlue = Math.floor(Math.random() * 6) + 1;
+    const serverRoll = onRoll ? await onRoll() : null;
+    if (serverRoll === 'unavailable') {
+      setIsRolling(false);
+      onClose();
+      return;
+    }
+
+    // Server dice when online, otherwise local random numbers
+    const finalRed = serverRoll ? serverRoll.red : Math.floor(Math.random() * 6) + 1;
+    const finalBlue = serverRoll ? serverRoll.blue : Math.floor(Math.random() * 6) + 1;
 
     setRedDie(finalRed);
     setBlueDie(finalBlue);

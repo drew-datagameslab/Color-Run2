@@ -14,37 +14,16 @@ interface PickGameScreenProps {
   onStartGame: (settings: GameSettings) => void;
   onBack: () => void;
   onToast: (msg: string) => void;
-  onAddCoins?: (amount: number) => void;
+  /** Free coins when low (the server allows 50 or 100 while the balance is under 100) */
+  onClaimFreeCoins?: (amount: number) => Promise<boolean>;
 }
 
 const CPU_NAMES = ['Ava', 'Pixel', 'Chip', 'Byte', 'Vector', 'Nova', 'Key', 'Mouse'];
 const CPU_COLORS = ['#1f7fd6', '#e58a1f', '#8e44c9', '#0d4d23', '#d61f7a', '#00b894', '#0984e3', '#34495e'];
 
-export const STANDARD_PAYOUTS: Record<number, number[]> = {
-  2: [16],
-  3: [18, 6],
-  4: [20, 10],
-  5: [25, 10, 5],
-  6: [30, 15, 5],
-  8: [40, 20, 10],
-};
-
-export function calculatePayouts(
-  playerCount: number,
-  tier: 'standard' | 'double' | 'high_roller' = 'standard',
-  customBuyIn?: number
-): number[] {
-  const base = STANDARD_PAYOUTS[playerCount] || [16];
-  if (customBuyIn === 0) {
-    return base.map(() => 0);
-  }
-  if (typeof customBuyIn === 'number' && customBuyIn > 0) {
-    const scale = customBuyIn / 10;
-    return base.map(p => Math.round(p * scale));
-  }
-  const mult = tier === 'high_roller' ? 5 : tier === 'double' ? 2 : 1;
-  return base.map(p => p * mult);
-}
+// Payout table is shared with the server (src/lib/economy.ts)
+import { calculatePayouts } from '../lib/economy';
+export { STANDARD_PAYOUTS, calculatePayouts } from '../lib/economy';
 
 export const PickGameScreen: React.FC<PickGameScreenProps> = ({
   mode,
@@ -54,7 +33,7 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
   onStartGame,
   onBack,
   onToast,
-  onAddCoins,
+  onClaimFreeCoins,
 }) => {
   const userDiceColors: [DiceColor, DiceColor] = user.diceColors || equippedColors;
 
@@ -78,14 +57,14 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
     return count === 6 ? '6 Players' : `${count} Player`;
   };
 
-  const handlePick = (
+  const handlePick = async (
     playerCount: 2 | 4 | 6 | 8,
     buyIn: number,
     tier: 'standard' | 'double' | 'high_roller'
   ) => {
     if (coins < buyIn) {
-      if (onAddCoins) {
-        onAddCoins(50);
+      if (onClaimFreeCoins) {
+        if (!(await onClaimFreeCoins(50))) return;
         onToast('Claimed +50 Free Coins! Entering game…');
       } else {
         onToast(`Not enough coins — need 🪙 ${buyIn} to play`);
@@ -312,16 +291,15 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
         </div>
 
         {/* Low balance bonus helper */}
-        {coins < 10 && onAddCoins && (
+        {coins < 10 && onClaimFreeCoins && (
           <div className="w-full bg-amber-500/20 border border-amber-500/40 rounded-xl p-2.5 flex items-center justify-between text-white text-xs">
             <span className="flex items-center gap-1.5">
               <Sparkles className="w-4 h-4 text-yellow-400" />
               <span>Low on coins?</span>
             </span>
             <button
-              onClick={() => {
-                onAddCoins(100);
-                onToast('Claimed +100 Free Coins!');
+              onClick={async () => {
+                if (await onClaimFreeCoins(100)) onToast('Claimed +100 Free Coins!');
               }}
               className="px-2.5 py-1 bg-yellow-500 hover:bg-yellow-400 text-[#301c05] font-black rounded-lg shadow-xs cursor-pointer"
             >

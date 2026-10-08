@@ -85,6 +85,8 @@ export interface GameSettings {
   buyIn?: number;
   payoutMultiplier?: number;
   payouts?: number[];
+  /** Server ticket for this game: the buy-in was charged and the prize is claimed with it */
+  matchId?: string;
   adPlayedDuringMatchmaking?: boolean;
   roomId?: string;
   slots: Array<{

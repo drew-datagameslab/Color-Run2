@@ -31,18 +31,36 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    // Admin Verification: checks trusted /admins collection, master UID, or drew@datagameslab.com Google account
+    function hasVerifiedEmail() {
+      return isSignedIn() &&
+        'email' in request.auth.token &&
+        request.auth.token.email_verified == true;
+    }
+
+    // Key the admin portal uses for /admins documents granted by email
+    function myAdminEmailKey() {
+      return request.auth.token.email.lower().replace('[^a-z0-9]', '_');
+    }
+
+    // Admin Verification: the master UID, drew@datagameslab.com signed in with Google,
+    // or an account granted in the admin portal (/admins/{uid} or /admins/{emailKey})
     function isAdmin() {
       return isSignedIn() && (
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
         request.auth.uid == 'ZYHRSo415HeN1Tm9ChGYNJBGik02' ||
-        (request.auth.token.email == 'drew@datagameslab.com' && request.auth.token.email_verified == true)
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (hasVerifiedEmail() && (
+          (request.auth.token.email == 'drew@datagameslab.com' &&
+            request.auth.token.firebase.sign_in_provider == 'google.com') ||
+          exists(/databases/$(database)/documents/admins/$(myAdminEmailKey()))
+        ))
       );
     }
 
-    // Economy & Role Guard: restricts administrative and subscription fields from client self-writing
+    // Economy & Role Guard: restricts coins, administrative and subscription fields from client self-writing.
+    // Coins are changed only by the server (see wallets below).
     function isRestrictedUserField() {
       return incoming().diff(existing()).affectedKeys().hasAny([
+        'coins',
         'isAdFree',
         'adFreePlan',
         'scoreboardUnlocked',
@@ -55,8 +73,28 @@ service cloud.firestore {
     // Admins Collection: Elevated administrative accounts
     // -------------------------------------------------------------
     match /admins/{adminId} {
-      allow read: if isSignedIn();
+      // Players can only check their own admin record; the full list is for admins
+      allow get: if isSignedIn() && (
+        adminId == request.auth.uid ||
+        (hasVerifiedEmail() && adminId == myAdminEmailKey()) ||
+        isAdmin()
+      );
+      allow list: if isAdmin();
       allow write: if isAdmin();
+    }
+
+    // -------------------------------------------------------------
+    // Wallets: coin balances, written only by the server (Admin SDK)
+    // -------------------------------------------------------------
+    match /wallets/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow write: if false;
+
+      match /{allPaths=**} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if false;
+      }
     }
 
     // -------------------------------------------------------------
@@ -74,11 +112,12 @@ service cloud.firestore {
           (!('isAdFree' in incoming()) || incoming().isAdFree == false) &&
           (!('role' in incoming())) &&
           (!('isAdmin' in incoming())) &&
-          (!('coins' in incoming()) || incoming().coins <= 500)
+          (!('coins' in incoming()) || incoming().coins == 200)
         )
       );
 
-      // Update: Regular users cannot self-assign coins, isAdFree, or admin roles
+      // Update: Regular users cannot self-assign coins, isAdFree, or admin roles.
+      // (The real balance is in /wallets, so deleting and recreating a profile doesn't reset it.)
       allow update: if (isAdmin() || (isOwner(userId) && !isRestrictedUserField()));
 
       // Delete: Owner or admin

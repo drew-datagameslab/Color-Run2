@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GameSettings, PlayerUnit, ShopSettings, UserAccount, Friend, DiceColor } from './types/game';
 import {
   getInitialUser,
@@ -68,6 +68,19 @@ import {
   mergeFriendsWithPresence,
 } from './lib/presence';
 import { calculateMatchXp, applyXpToUser, MatchXpResult } from './lib/levelSystem';
+import { prizeForPlacement, GrantReason } from './lib/economy';
+import {
+  fetchWalletBalance,
+  onServerBalance,
+  requestCoinGrant,
+  requestSpend,
+  requestDailyBonus,
+  requestCouponRedeem,
+  requestMissionReward,
+  requestLevelRewards,
+  requestMatchStart,
+  requestMatchPrize,
+} from './lib/serverAuthoritative';
 import { MatchSummaryStats } from './components/PlayScreen';
 import {
   getMissionsData,
@@ -82,6 +95,16 @@ import { triggerButtonHaptic } from './lib/haptics';
 export default function App() {
   const [user, setUser] = useState<UserAccount>(() => getInitialUser());
   const [coins, setCoins] = useState<number>(() => user?.coins ?? getUserCoins(user.uid));
+
+  // The server owns the coin balance: every successful server call reports it here
+  useEffect(
+    () =>
+      onServerBalance((uid, balance) => {
+        setUserCoins(uid, balance);
+        if (uid === user.uid) setCoins(balance);
+      }),
+    [user.uid]
+  );
   const [shopSettings, setShopSettings] = useState<ShopSettings>(() => getShopSettings());
   const [screen, setScreen] = useState<
     'signin' | 'avatar' | 'mainmenu' | 'modeselect' | 'pickgame' | 'play' | 'winner' | 'shop' | 'scoreboard' | 'challenge_lobby'
@@ -205,7 +228,7 @@ export default function App() {
 
     // When the bubble arrives at the user bar: credit coins, play sound & haptics
     setTimeout(() => {
-      handleUpdateCoins(result.rewardCoins);
+      creditMissionReward(mission.id, result.rewardCoins);
       playSfx('add');
       triggerButtonHaptic();
       setFloatingCoin(null);
@@ -351,9 +374,27 @@ export default function App() {
   }, [screen, user]);
   */
 
+  // The server rolls the daily bonus dice and credits the coins. Offline, the overlay
+  // rolls locally and only the local balance changes.
+  const dailyBonusFromServerRef = useRef(false);
+  const handleRollDailyBonus = async (): Promise<{ red: number; blue: number } | null | 'unavailable'> => {
+    const res = await requestDailyBonus();
+    if (res.ok) {
+      dailyBonusFromServerRef.current = true;
+      return { red: res.data.red, blue: res.data.blue };
+    }
+    dailyBonusFromServerRef.current = false;
+    if (res.offline) return null;
+    markDailyBonusClaimed(user.uid);
+    triggerToast(res.message);
+    return 'unavailable';
+  };
+
   const handleClaimDailyBonus = (wonCoins: number) => {
     markDailyBonusClaimed(user.uid);
-    handleUpdateCoins(wonCoins);
+    if (!dailyBonusFromServerRef.current) {
+      applyLocalCoins(wonCoins);
+    }
     triggerToast(`🎉 +${wonCoins} Daily Bonus Coins claimed!`);
   };
 
@@ -391,6 +432,8 @@ export default function App() {
           const storedCoins = getUserCoins(authedUser.uid);
           setCoins(storedCoins);
         }
+        // Replace the local copy with the server's balance
+        fetchWalletBalance();
         setScreen(prev => (prev === 'signin' ? 'mainmenu' : prev));
         syncFriendsFromFirestore(authedUser.uid).then(f => setFriends(f));
       }
@@ -437,14 +480,82 @@ export default function App() {
     };
   }, []);
 
-  const handleUpdateCoins = (delta: number) => {
+  // Offline fallback: change only the local copy. The server's balance replaces it
+  // the next time the server answers.
+  const applyLocalCoins = (delta: number) => {
     const updated = addCoins(user.uid, delta);
     setCoins(updated);
-    if (user.uid) {
-      const updatedUser = { ...user, coins: updated };
-      setUser(updatedUser);
-      saveUser(updatedUser);
-      syncUserProfileToFirestore(updatedUser, updated).catch(() => {});
+    return updated;
+  };
+
+  /** Free coins, referral rewards and coin packs, within the server's limits */
+  const grantCoins = async (reason: GrantReason, amount: number): Promise<boolean> => {
+    const res = await requestCoinGrant(reason, amount);
+    if (res.ok) return true;
+    if (res.offline) {
+      applyLocalCoins(amount);
+      return true;
+    }
+    triggerToast(res.message);
+    return false;
+  };
+
+  const spendCoins = async (amount: number, item: string): Promise<boolean> => {
+    const res = await requestSpend(amount, item);
+    if (res.ok) return true;
+    if (res.offline && coins >= amount) {
+      applyLocalCoins(-amount);
+      return true;
+    }
+    triggerToast(res.offline ? 'Not enough coins!' : res.message);
+    return false;
+  };
+
+  const creditMissionReward = async (missionId: string, amount: number) => {
+    const res = await requestMissionReward(missionId);
+    if (!res.ok) {
+      if (res.offline) applyLocalCoins(amount);
+      else triggerToast(res.message);
+    }
+  };
+
+  const redeemCoupon = async (code: string): Promise<{ success: boolean; coins: number; message: string }> => {
+    const res = await requestCouponRedeem(code);
+    if (res.ok) {
+      return { success: true, coins: res.data.coins, message: `🎉 ${res.data.coins.toLocaleString()} Coins added!` };
+    }
+    return {
+      success: false,
+      coins: 0,
+      message: res.offline ? 'Coupon codes need an internet connection. Please try again.' : res.message,
+    };
+  };
+
+  // Prize and level-up coins from the last game, paid when the player leaves the results
+  type MatchRewards = {
+    matchId?: string;
+    placement: number;
+    prize: number;
+    levelRewardIds: string[];
+    levelCoins: number;
+    prestige: number;
+  };
+  const pendingRewardsRef = useRef<MatchRewards | null>(null);
+
+  const claimMatchRewards = async (rewards: MatchRewards | null) => {
+    if (!rewards) return;
+    if (rewards.prize > 0 && rewards.placement > 0) {
+      // No ticket means the game started offline, so the prize stays local too
+      const res = rewards.matchId ? await requestMatchPrize(rewards.matchId, rewards.placement) : null;
+      if (!res || (!res.ok && res.offline)) applyLocalCoins(rewards.prize);
+      else if (!res.ok) triggerToast(res.message);
+    }
+    if (rewards.levelCoins > 0 && rewards.levelRewardIds.length > 0) {
+      const res = await requestLevelRewards(rewards.levelRewardIds, rewards.prestige);
+      if (!res.ok) {
+        if (res.offline) applyLocalCoins(rewards.levelCoins);
+        else triggerToast(res.message);
+      }
     }
   };
 
@@ -453,7 +564,7 @@ export default function App() {
     setUser(withCoins);
     saveUser(withCoins);
     if (withCoins.uid) {
-      syncUserProfileToFirestore(withCoins, coins).catch(() => {});
+      syncUserProfileToFirestore(withCoins).catch(() => {});
     }
     if (updatedUser.diceColors) {
       const nextShop = {
@@ -515,7 +626,7 @@ export default function App() {
     const updated = setAdFree(user, adFree, subscription);
     setUser(updated);
     if (!updated.isGuest) {
-      syncUserProfileToFirestore(updated, coins).catch(() => {});
+      syncUserProfileToFirestore(updated).catch(() => {});
     }
   };
 
@@ -529,14 +640,25 @@ export default function App() {
     return false;
   };
 
-  const handleStartGame = (settings: GameSettings) => {
-    // If game has a buy-in, deduct it from player balance
-    if (settings.buyIn && settings.buyIn > 0) {
-      if (coins < settings.buyIn) {
-        triggerToast(`Not enough coins — need 🪙 ${settings.buyIn} to play`);
+  const handleStartGame = async (settings: GameSettings) => {
+    // The server charges the buy-in and issues the ticket the prize is claimed with
+    const buyIn = settings.buyIn && settings.buyIn > 0 ? settings.buyIn : 0;
+    const res = await requestMatchStart({
+      buyIn,
+      playerCount: settings.playersCount,
+      tier: settings.tier || 'standard',
+    });
+    if (res.ok) {
+      settings = { ...settings, matchId: res.data.matchId };
+    } else if (res.offline) {
+      if (coins < buyIn) {
+        triggerToast(`Not enough coins — need 🪙 ${buyIn} to play`);
         return;
       }
-      handleUpdateCoins(-settings.buyIn);
+      if (buyIn > 0) applyLocalCoins(-buyIn);
+    } else {
+      triggerToast(res.message);
+      return;
     }
 
     if (user.isAdFree || settings.adPlayedDuringMatchmaking) {
@@ -564,19 +686,19 @@ export default function App() {
     setFinalUnits(units);
 
     // Calculate coins won by the local player
+    // Same prize table the server pays from (src/lib/economy.ts)
     let wonCoins = 0;
     const human = units.find(u => u.isOwner);
-    if (currentGameSettings?.payouts && currentGameSettings.payouts.length > 0) {
-      if (human && human.place) {
-        const placeIdx = human.place - 1;
-        const payout = currentGameSettings.payouts[placeIdx] || 0;
-        if (payout > 0) {
-          wonCoins = payout;
-        }
-      }
-    } else if (winner && human && winner.id === human.id) {
-      wonCoins = 150; // Winner bonus!
+    const humanPlace = human?.place || (winner && human && winner.id === human.id ? 1 : 0);
+    if (currentGameSettings && humanPlace > 0) {
+      wonCoins = prizeForPlacement(
+        currentGameSettings.playersCount || units.length,
+        currentGameSettings.tier || 'standard',
+        currentGameSettings.buyIn || 0,
+        humanPlace
+      );
     }
+    const prize = wonCoins;
 
     // Calculate match XP earned
     const humanUnit = human;
@@ -662,14 +784,23 @@ export default function App() {
       }
     }
 
+    pendingRewardsRef.current = {
+      matchId: currentGameSettings?.matchId,
+      placement: humanPlace,
+      prize,
+      levelRewardIds: newRewards.filter(r => r.type === 'coins').map(r => r.rewardId),
+      levelCoins: coinsAwarded,
+      prestige: user.prestige || 0,
+    };
     setPendingWonCoins(wonCoins);
     setScreen('winner');
   };
 
-  const handleCoinsAwardedFromWinner = (amount: number) => {
-    if (amount <= 0) return;
-    handleUpdateCoins(amount);
+  const handleCoinsAwardedFromWinner = (_amount?: number) => {
     setPendingWonCoins(0);
+    const rewards = pendingRewardsRef.current;
+    pendingRewardsRef.current = null;
+    claimMatchRewards(rewards);
   };
 
   const handlePlayAgain = () => {
@@ -834,7 +965,7 @@ export default function App() {
             onStartGame={handleStartGame}
             onBack={() => setScreen('modeselect')}
             onToast={triggerToast}
-            onAddCoins={handleUpdateCoins}
+            onClaimFreeCoins={amount => grantCoins('free_coins', amount)}
           />
         )}
 
@@ -844,11 +975,6 @@ export default function App() {
             user={user}
             onGameOver={handleGameOver}
             onOpenMenu={() => setIsStandingsOpen(true)}
-            onAwardPrize={(amount) => {
-              handleUpdateCoins(amount);
-              triggerToast(`You won ${amount} coins in the last game!`);
-              playSfx('add');
-            }}
             onEmoteSentDuringElimination={() => {
               const res = recordEmoteSent(user.uid, true);
               setMissionsData({ ...res.missionsData });
@@ -858,6 +984,8 @@ export default function App() {
             }}
             onExitGame={(prizeWon?: number, stats?: MatchSummaryStats) => {
               let totalCoins = prizeWon || 0;
+              let levelRewardIds: string[] = [];
+              let levelCoins = 0;
               if (stats && stats.finished) {
                 if (currentGameSettings) {
                   const matchRecord = recordMatchForMissions(user.uid, {
@@ -887,7 +1015,7 @@ export default function App() {
                   lastFirstWinDate: user.lastFirstWinDate,
                 });
                 if (xpCalc.totalXp > 0) {
-                  const { updatedState, coinsAwarded } = applyXpToUser(
+                  const { updatedState, coinsAwarded, newRewards } = applyXpToUser(
                     {
                       xp: user.xp || 0,
                       totalXp: user.totalXp || 0,
@@ -905,12 +1033,21 @@ export default function App() {
                     xpCalc.isFirstWin
                   );
                   totalCoins += coinsAwarded;
+                  levelCoins = coinsAwarded;
+                  levelRewardIds = newRewards.filter(r => r.type === 'coins').map(r => r.rewardId);
                   handleSaveUser({ ...user, ...updatedState });
                   triggerToast(`+${xpCalc.totalXp} XP earned! ${totalCoins > 0 ? `Won ${totalCoins} coins!` : ''}`);
                 }
               }
               if (totalCoins > 0) {
-                handleUpdateCoins(totalCoins);
+                claimMatchRewards({
+                  matchId: currentGameSettings?.matchId,
+                  placement: stats?.placement || 0,
+                  prize: prizeWon || 0,
+                  levelRewardIds,
+                  levelCoins,
+                  prestige: user.prestige || 0,
+                });
                 playSfx('add');
               }
               setScreen('mainmenu');
@@ -943,7 +1080,9 @@ export default function App() {
             coins={coins}
             shopSettings={shopSettings}
             onUpdateShop={handleUpdateShop}
-            onAddCoins={handleUpdateCoins}
+            onSpendCoins={spendCoins}
+            onBuyCoinPack={amount => grantCoins('coin_pack', amount)}
+            onRedeemCoupon={redeemCoupon}
             onSetAdFree={handleSetAdFree}
             onOpenRedeemModal={() => setIsRedeemModalOpen(true)}
             onBack={() => setScreen('mainmenu')}
@@ -1112,6 +1251,7 @@ export default function App() {
       {/* Daily Bonus Dice Roll Overlay (Resets at midnight local time) */}
       <DailyBonusOverlay
         isOpen={isDailyBonusOpen}
+        onRoll={handleRollDailyBonus}
         onClaim={handleClaimDailyBonus}
         onClose={() => setIsDailyBonusOpen(false)}
       />

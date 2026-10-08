@@ -320,8 +320,8 @@ export function loginOAuthUser(
   return user;
 }
 
-import { fetchServerCoins, updateServerCoins } from './serverAuthoritative';
-
+// Local copy of the coin balance, for display and offline play. The real balance is the
+// server's (Firestore wallets/{uid}); the app replaces this copy whenever the server answers.
 export function getUserCoins(uid: string): number {
   try {
     const raw = localStorage.getItem(COINS_PREFIX + uid);
@@ -333,17 +333,6 @@ export function getUserCoins(uid: string): number {
   return 200;
 }
 
-export async function syncUserCoinsFromServer(uid: string): Promise<number> {
-  const serverBalance = await fetchServerCoins(uid);
-  if (serverBalance !== null) {
-    try {
-      localStorage.setItem(COINS_PREFIX + uid, String(serverBalance));
-    } catch {}
-    return serverBalance;
-  }
-  return getUserCoins(uid);
-}
-
 export function setUserCoins(uid: string, amount: number): void {
   const sanitized = Math.max(0, amount);
   try {
@@ -351,25 +340,12 @@ export function setUserCoins(uid: string, amount: number): void {
   } catch {
     // Ignore
   }
-  // Sync to server asynchronously
-  fetch('/api/coins/set', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ uid, amount: sanitized }),
-  }).catch(() => {});
 }
 
-export function addCoins(uid: string, delta: number, reason: string = 'gameplay'): number {
-  const cur = getUserCoins(uid);
-  const next = Math.max(0, cur + delta);
-  try {
-    localStorage.setItem(COINS_PREFIX + uid, String(next));
-  } catch {}
-  
-  // Authoritative server balance update
-  if (delta !== 0) {
-    updateServerCoins(uid, delta, reason).catch(() => {});
-  }
+/** Changes the local copy only (offline play); returns the new local balance */
+export function addCoins(uid: string, delta: number): number {
+  const next = Math.max(0, getUserCoins(uid) + delta);
+  setUserCoins(uid, next);
   return next;
 }
 
@@ -403,78 +379,6 @@ export function markDailyBonusClaimed(userId: string): void {
   } catch {
     // Ignore
   }
-}
-
-// -------------------------------------------------------------
-// Coupon Codes System (Case-insensitive)
-// -------------------------------------------------------------
-
-const COUPONS_PREFIX = 'cr_redeemed_coupons_';
-
-export function getRedeemedCoupons(userId: string): string[] {
-  try {
-    const raw = localStorage.getItem(COUPONS_PREFIX + userId);
-    if (raw) return JSON.parse(raw);
-  } catch {
-    // Ignore
-  }
-  return [];
-}
-
-export function redeemShopCoupon(
-  userId: string,
-  rawCode: string
-): { success: boolean; coins: number; message: string; couponId?: string } {
-  if (!rawCode || !rawCode.trim()) {
-    return { success: false, coins: 0, message: 'Please enter a coupon code.' };
-  }
-
-  const code = rawCode.trim().toUpperCase();
-  const redeemed = getRedeemedCoupons(userId);
-
-  if (redeemed.includes(code)) {
-    return {
-      success: false,
-      coins: 0,
-      message: 'This coupon code has already been redeemed on this account.',
-    };
-  }
-
-  // 1. Email subscriber reward code (300 coins)
-  if (code === 'DGLFREE300') {
-    const updated = [...redeemed, code];
-    try {
-      localStorage.setItem(COUPONS_PREFIX + userId, JSON.stringify(updated));
-    } catch {}
-    addCoins(userId, 300);
-    return {
-      success: true,
-      coins: 300,
-      message: 'Congratulations! 300 Coins added for verifying your email!',
-      couponId: code,
-    };
-  }
-
-  // 2. Tester reward code (1000 coins)
-  if (code === 'DGL1000FREE') {
-    const updated = [...redeemed, code];
-    try {
-      localStorage.setItem(COUPONS_PREFIX + userId, JSON.stringify(updated));
-    } catch {}
-    addCoins(userId, 1000);
-    return {
-      success: true,
-      coins: 1000,
-      message: 'App Tester reward verified! 1,000 Coins added!',
-      couponId: code,
-    };
-  }
-
-  return {
-    success: false,
-    coins: 0,
-    message: 'Invalid or expired coupon code. Check for typos and try again.',
-  };
 }
 
 export const DEFAULT_SHOP: ShopSettings = {

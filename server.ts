@@ -1,271 +1,155 @@
 import express from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
+import { requireUser, requireAdmin, AuthedRequest } from './server/auth.ts';
+import { getAdminDb } from './server/firebaseAdmin.ts';
+import { WalletService, WalletError } from './server/wallet.ts';
+import { FirestoreWalletStore } from './server/walletStores.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+export const APP_VERSION = '6.5.1';
+
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '16kb' }));
 
 // -------------------------------------------------------------
-// Server-Authoritative State & Storage
+// CORS for the Android/iOS apps, which call this server from their own origin
 // -------------------------------------------------------------
+const ALLOWED_ORIGINS = new Set([
+  'capacitor://localhost',
+  'https://localhost',
+  'http://localhost',
+  ...(process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
+]);
 
-// Server authoritative coin balance store
-const serverUserCoins = new Map<string, number>();
-
-// Audit log of server transactions
-const serverTransactions: Array<{
-  id: string;
-  uid: string;
-  delta: number;
-  balance: number;
-  reason: string;
-  timestamp: number;
-}> = [];
-
-// Pre-seed Master Admin
-serverUserCoins.set('ZYHRSo415HeN1Tm9ChGYNJBGik02', 100000);
+app.use('/api', (req, res, next) => {
+  const origin = req.get('origin');
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.set({
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      Vary: 'Origin',
+    });
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 
 // -------------------------------------------------------------
 // 1. Server-Side Dice Rolling API (Cryptographically Secure)
 // -------------------------------------------------------------
 
 /**
- * Generates tamper-proof random dice values on the server using Node crypto.randomInt.
- * Protects multiplayer and solo games against modified client apps.
+ * Generates random dice values on the server using Node crypto.randomInt.
  */
 app.post('/api/dice/roll', (req, res) => {
-  try {
-    const { count, diceIds, roomId, playerUid, rollNumber } = req.body;
-    const targetIds: number[] = Array.isArray(diceIds) && diceIds.length > 0
+  const { count, diceIds } = req.body || {};
+  const targetIds: number[] =
+    Array.isArray(diceIds) && diceIds.length > 0
       ? diceIds
       : Array.from({ length: typeof count === 'number' && count > 0 ? count : 12 }, (_, i) => i + 1);
 
-    const rolls: Array<{ id: number; value: number }> = [];
-
-    // crypto.randomInt(1, 7) guarantees cryptographically unbiased integer 1..6
-    for (const id of targetIds) {
-      const value = crypto.randomInt(1, 7);
-      rolls.push({ id, value });
-    }
-
-    const timestamp = Date.now();
-    const serverSignature = crypto
-      .createHash('sha256')
-      .update(`${roomId || 'solo'}:${playerUid || 'anonymous'}:${rollNumber || 1}:${rolls.map(r => r.value).join(',')}:${timestamp}`)
-      .digest('hex')
-      .slice(0, 16);
-
-    res.json({
-      success: true,
-      rolls,
-      timestamp,
-      serverSignature,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: 'Failed to generate server dice roll', details: err?.message });
+  // A turn never rolls more than the 12 dice in play
+  if (targetIds.length > 12 || !targetIds.every(id => Number.isInteger(id) && id >= 0 && id < 1000)) {
+    return res.status(400).json({ error: 'invalid_dice', message: 'Up to 12 dice ids are allowed.' });
   }
-});
 
-/**
- * Server-authoritative tiebreaker roll-off
- */
-app.post('/api/dice/roll-off', (req, res) => {
-  try {
-    const { participants, roomId } = req.body;
-    if (!Array.isArray(participants) || participants.length === 0) {
-      return res.status(400).json({ error: 'Participants array required' });
-    }
-
-    const rollScores: Record<string, number> = {};
-    for (const p of participants) {
-      rollScores[p] = crypto.randomInt(1, 7);
-    }
-
-    let highest = -1;
-    for (const val of Object.values(rollScores)) {
-      if (val > highest) highest = val;
-    }
-
-    const winners = Object.entries(rollScores)
-      .filter(([_, val]) => val === highest)
-      .map(([id]) => id);
-
-    res.json({
-      success: true,
-      rollScores,
-      highestRoll: highest,
-      winners,
-      isStillTied: winners.length > 1,
-      timestamp: Date.now(),
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: 'Tiebreaker roll-off failed', details: err?.message });
-  }
+  const rolls = targetIds.map(id => ({ id, value: crypto.randomInt(1, 7) }));
+  res.json({ success: true, rolls, timestamp: Date.now() });
 });
 
 // -------------------------------------------------------------
-// 2. Server-Side Coin Balance Management API
+// 2. Coins: every change is made here, for the signed-in player only.
+//    Amounts and limits come from src/lib/economy.ts; balances live in
+//    Firestore wallets/{uid}, which players can read but not write.
 // -------------------------------------------------------------
 
-/**
- * Retrieves the authoritative coin balance for a player
- */
-app.get('/api/coins/:uid', (req, res) => {
-  const uid = req.params.uid;
-  let balance = serverUserCoins.get(uid);
-  if (balance === undefined) {
-    balance = 200; // Standard 200 welcome coins
-    serverUserCoins.set(uid, balance);
-  }
-  res.json({
-    uid,
-    balance,
-    timestamp: Date.now(),
-  });
-});
+let walletService: WalletService | null = null;
+function wallets(): WalletService {
+  if (!walletService) walletService = new WalletService(new FirestoreWalletStore(getAdminDb()));
+  return walletService;
+}
 
-/**
- * Updates a player's balance authoritatively on the server
- */
-app.post('/api/coins/update', (req, res) => {
-  try {
-    const { uid, delta, reason } = req.body;
-    if (!uid || typeof delta !== 'number') {
-      return res.status(400).json({ error: 'Valid uid and numeric delta required' });
-    }
-
-    const current = serverUserCoins.get(uid) ?? 200;
-    const newBalance = Math.max(0, current + delta);
-    serverUserCoins.set(uid, newBalance);
-
-    const txId = 'tx_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
-    serverTransactions.push({
-      id: txId,
-      uid,
-      delta,
-      balance: newBalance,
-      reason: reason || 'gameplay_action',
-      timestamp: Date.now(),
-    });
-
-    res.json({
-      success: true,
-      uid,
-      balance: newBalance,
-      delta,
-      transactionId: txId,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: 'Failed to update coin balance', details: err?.message });
-  }
-});
-
-/**
- * Sets an exact balance (e.g. admin grant or initial sync)
- */
-app.post('/api/coins/set', (req, res) => {
-  try {
-    const { uid, amount } = req.body;
-    if (!uid || typeof amount !== 'number') {
-      return res.status(400).json({ error: 'Valid uid and numeric amount required' });
-    }
-
-    const newBalance = Math.max(0, Math.floor(amount));
-    serverUserCoins.set(uid, newBalance);
-
-    res.json({
-      success: true,
-      uid,
-      balance: newBalance,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: 'Failed to set coin balance', details: err?.message });
-  }
-});
-
-// -------------------------------------------------------------
-// 3. Server-Side Prize Calculation & Payout API
-// -------------------------------------------------------------
-
-/**
- * Calculates and awards official match prize payouts on the server.
- * Completely prevents clients from fabricating their own winnings.
- */
-app.post('/api/match/payout', (req, res) => {
-  try {
-    const { roomId, uid, placement, totalPlayers, tier, buyIn } = req.body;
-    if (!uid) {
-      return res.status(400).json({ error: 'Player UID required' });
-    }
-
-    const cleanTier = String(tier || 'casual').toLowerCase();
-    const cleanPlacement = Math.max(1, parseInt(placement, 10) || 1);
-    const cleanTotalP = Math.max(2, parseInt(totalPlayers, 10) || 2);
-    const cleanBuyIn = Math.max(0, parseInt(buyIn, 10) || 0);
-
-    let multiplier = 1;
-    if (cleanTier === 'highroller') multiplier = 2;
-    else if (cleanTier === 'elite') multiplier = 5;
-
-    let prizeWon = 0;
-
-    if (cleanTier === 'casual' || cleanBuyIn === 0) {
-      // Casual match: only 1st place receives 150 coins bonus
-      if (cleanPlacement === 1) {
-        prizeWon = 150;
+/** Wraps a wallet route: sign-in required, uid from the token, consistent errors */
+function walletRoute(
+  handler: (req: AuthedRequest, service: WalletService) => Promise<Record<string, unknown>>
+) {
+  return async (req: Request, res: Response) => {
+    try {
+      res.json({ success: true, ...(await handler(req as AuthedRequest, wallets())) });
+    } catch (err) {
+      if (err instanceof WalletError) {
+        return res.status(err.status).json({ error: err.code, message: err.message });
       }
-    } else {
-      // Competitive tiered match payouts
-      if (cleanTotalP <= 2) {
-        if (cleanPlacement === 1) prizeWon = 100 * multiplier;
-      } else if (cleanTotalP === 3) {
-        if (cleanPlacement === 1) prizeWon = 100 * multiplier;
-        else if (cleanPlacement === 2) prizeWon = 50 * multiplier;
-      } else if (cleanTotalP === 4) {
-        if (cleanPlacement === 1) prizeWon = 120 * multiplier;
-        else if (cleanPlacement === 2) prizeWon = 60 * multiplier;
-        else if (cleanPlacement === 3) prizeWon = 20 * multiplier;
-      } else {
-        // 5 or 6 players
-        if (cleanPlacement === 1) prizeWon = 150 * multiplier;
-        else if (cleanPlacement === 2) prizeWon = 75 * multiplier;
-        else if (cleanPlacement === 3) prizeWon = 25 * multiplier;
-      }
+      console.error('[Wallet] Error:', err);
+      // The app falls back to offline mode on 503
+      res.status(503).json({ error: 'wallet_unavailable', message: 'Coin service unavailable.' });
     }
+  };
+}
 
-    // Credit server balance immediately
-    const current = serverUserCoins.get(uid) ?? 200;
-    const newBalance = current + prizeWon;
-    serverUserCoins.set(uid, newBalance);
+const coins = express.Router();
+coins.use(requireUser);
 
-    const txId = 'payout_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
-    serverTransactions.push({
-      id: txId,
-      uid,
-      delta: prizeWon,
-      balance: newBalance,
-      reason: `match_prize_${cleanTier}_place_${cleanPlacement}`,
-      timestamp: Date.now(),
-    });
+coins.get('/', walletRoute(async (req, s) => ({ balance: await s.getBalance(req.user.uid) })));
 
-    res.json({
-      success: true,
-      prizeWon,
-      newBalance,
-      placement: cleanPlacement,
-      tier: cleanTier,
-      transactionId: txId,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: 'Failed to calculate prize payout', details: err?.message });
-  }
-});
+coins.post(
+  '/grant',
+  walletRoute(async (req, s) => ({ balance: await s.grant(req.user.uid, req.body?.reason, req.body?.amount) }))
+);
+
+coins.post(
+  '/spend',
+  walletRoute(async (req, s) => ({ balance: await s.spend(req.user.uid, req.body?.amount, req.body?.item) }))
+);
+
+coins.post('/daily-bonus', walletRoute(async (req, s) => s.dailyBonus(req.user.uid)));
+
+coins.post('/coupon', walletRoute(async (req, s) => s.redeemCoupon(req.user.uid, req.body?.code)));
+
+coins.post('/mission', walletRoute(async (req, s) => s.missionReward(req.user.uid, req.body?.missionId)));
+
+coins.post(
+  '/level-rewards',
+  walletRoute(async (req, s) => s.levelRewards(req.user.uid, req.body?.rewardIds, req.body?.prestige))
+);
+
+app.use('/api/coins', coins);
+
+// -------------------------------------------------------------
+// 3. Games: the buy-in is charged when a game starts, which issues a ticket.
+//    The prize is paid once per ticket, from the same table the app shows.
+// -------------------------------------------------------------
+const match = express.Router();
+match.use(requireUser);
+
+match.post('/start', walletRoute(async (req, s) => s.startMatch(req.user.uid, req.body || {})));
+
+match.post(
+  '/payout',
+  walletRoute(async (req, s) => s.claimMatchPrize(req.user.uid, req.body?.matchId, req.body?.placement))
+);
+
+app.use('/api/match', match);
+
+// -------------------------------------------------------------
+// 4. Admin: set any player's balance (admins only)
+// -------------------------------------------------------------
+app.post(
+  '/api/admin/coins/set',
+  requireUser,
+  requireAdmin,
+  walletRoute(async (req, s) => ({
+    balance: await s.adminSetBalance(req.user.uid, req.body?.uid, req.body?.amount),
+  }))
+);
 
 // -------------------------------------------------------------
 // Health Check Endpoint
@@ -273,7 +157,7 @@ app.post('/api/match/payout', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '6.2.8',
+    version: APP_VERSION,
     serverTime: Date.now(),
   });
 });
@@ -343,7 +227,7 @@ async function startServer() {
   app.listen(port, host, () => {
     // Print Vite banner for tooling that waits for Vite stdout
     console.log(`\n  VITE v6.2.3  ready in 180 ms\n\n  ➜  Local:   http://localhost:${port}/\n  ➜  Network: http://${host}:${port}/\n`);
-    console.log(`[Color Run Server] Running on http://${host}:${port} (Version 6.2.8)`);
+    console.log(`[Color Run Server] Running on http://${host}:${port} (Version ${APP_VERSION})`);
   });
 }
 

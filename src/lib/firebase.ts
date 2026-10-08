@@ -28,6 +28,7 @@ import {
   Firestore,
 } from 'firebase/firestore';
 import { UserAccount, UserFileRecord, DiceColor } from '../types/game';
+import { WELCOME_COINS } from './economy';
 
 // Firebase configuration from firebase-applet-config.json
 const firebaseConfig = {
@@ -182,7 +183,7 @@ export async function signUpWithEmail(
   }
 
   // New users get 200 coins when they sign in
-  await syncUserProfileToFirestore(account, 200);
+  await syncUserProfileToFirestore(account);
   return account;
 }
 
@@ -201,7 +202,7 @@ export async function signInWithEmail(email: string, pass: string): Promise<User
       return existing;
     }
     // Only initialize brand new user document if none exists yet
-    await syncUserProfileToFirestore(account, 200);
+    await syncUserProfileToFirestore(account);
   } catch (err) {
     console.warn('Network or Firestore error loading profile on sign-in (preserving account without overwriting coins):', err);
   }
@@ -223,7 +224,7 @@ export async function signInWithGoogle(): Promise<UserAccount> {
     if (existing) {
       return existing;
     }
-    await syncUserProfileToFirestore(account, 200);
+    await syncUserProfileToFirestore(account);
   } catch (err) {
     console.warn('Network or Firestore error loading profile on Google sign-in (preserving account without overwriting coins):', err);
   }
@@ -246,7 +247,7 @@ export async function signInWithApple(): Promise<UserAccount> {
     if (existing) {
       return existing;
     }
-    await syncUserProfileToFirestore(account, 200);
+    await syncUserProfileToFirestore(account);
   } catch (err) {
     console.warn('Network or Firestore error loading profile on Apple sign-in (preserving account without overwriting coins):', err);
   }
@@ -266,7 +267,7 @@ export async function signInAsGuest(): Promise<UserAccount> {
     if (existing) {
       return existing;
     }
-    await syncUserProfileToFirestore(account, 200);
+    await syncUserProfileToFirestore(account);
   } catch (err) {
     console.warn('Network or Firestore error loading profile on Guest sign-in (preserving account without overwriting coins):', err);
   }
@@ -424,8 +425,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 // -------------------------------------------------------------
 
 export async function syncUserProfileToFirestore(
-  user: UserAccount,
-  coins?: number
+  user: UserAccount
 ): Promise<void> {
   try {
     const userRef = doc(db, 'users', user.uid);
@@ -464,40 +464,25 @@ export async function syncUserProfileToFirestore(
       data.createdAt = user.createdAt;
     }
 
-    // Check document status and existing coin balance
+    // Check whether this is a brand new profile
     let isNewDoc = false;
-    let existingCoins: number | undefined = undefined;
     try {
       const snap = await getDoc(userRef);
       isNewDoc = !snap.exists();
-      if (snap.exists()) {
-        const snapData = snap.data();
-        if (typeof snapData?.coins === 'number') {
-          existingCoins = snapData.coins;
-        }
-      }
     } catch {
       // On network read failure, DO NOT assume it's a new document and DO NOT overwrite
       isNewDoc = false;
     }
 
+    // Coins are never written after the profile is created: the server owns the balance
+    // (Firestore wallets/{uid}) and the rules reject client coin changes.
     if (isNewDoc) {
-      // Brand new user registration: default 200 welcome coins
-      data.coins = coins !== undefined && typeof coins === 'number' ? Math.max(0, Math.floor(coins)) : 200;
+      data.coins = WELCOME_COINS;
       data.isAdFree = false;
       data.scoreboardUnlocked = true;
-    } else {
-      // Existing user: NEVER wipe their real coin balance!
-      if (coins !== undefined && typeof coins === 'number') {
-        data.coins = Math.max(0, Math.floor(coins));
-      } else if (user.coins !== undefined && typeof user.coins === 'number') {
-        data.coins = Math.max(0, Math.floor(user.coins));
-      } else if (existingCoins !== undefined) {
-        data.coins = existingCoins;
-      }
     }
 
-    const isAdminUser = !!(user.email && ['admin@colorrun.game', 'admin@colorrun.com', 'drew@datagameslab.com'].includes(user.email.toLowerCase()));
+    const isAdminUser = !!(user.email && user.email.toLowerCase() === 'drew@datagameslab.com');
 
     if (isAdminUser) {
       data.isAdFree = !!user.isAdFree;

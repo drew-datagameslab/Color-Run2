@@ -6,6 +6,7 @@ import { runCompanionScoreboardTests } from './companion_scoreboard_test';
 import { runLevelXpTests } from './level_xp_test';
 import { runMissionsTests } from './missions_test';
 import { runFriendsTests } from './friends_test';
+import { runWalletTests } from './wallet_test';
 
 console.log('==========================================');
 console.log('   COLOR RUN TEST SUITE VERIFICATION');
@@ -21,6 +22,7 @@ async function runAll() {
     runLevelXpTests();
     runMissionsTests();
     await runFriendsTests();
+    await runWalletTests();
     console.log('==========================================');
     console.log('   ALL TEST HARNESSES PASSED GREEN! ✓');
     console.log('==========================================');

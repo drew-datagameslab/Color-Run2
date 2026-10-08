@@ -1,8 +1,8 @@
 import { db } from './firebase';
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import { addFriend, getLocalFriends, saveLocalFriends } from './friends';
-import { addCoins } from './storage';
 import { UserAccount } from '../types/game';
+import { requestCoinGrant } from './serverAuthoritative';
 
 export interface ReferralInvite {
   code: string; // 8-digit alphanumeric code, e.g. "CR784920"
@@ -502,8 +502,8 @@ export async function redeemReferralCode(
   // 2. Update local storage
   saveInviteLocally(invite.inviterId, updatedInvite);
 
-  // 3. Award 300 coins
-  addCoins(currentUser.uid, 300);
+  // 3. Award 300 coins (the server checks the daily referral limit)
+  await requestCoinGrant('referral', 300);
 
   // 4. Automatically add mutual friends!
   // A) Add inviter to current user's friends

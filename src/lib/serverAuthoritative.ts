@@ -1,9 +1,115 @@
+/// <reference types="vite/client" />
+import { auth } from './firebase';
+import type { GrantReason, MatchTier } from './economy';
+
 /**
- * Client interface for server-authoritative game functions:
+ * Client for the Color Run server (server.ts):
  * - Server-side cryptographically secure dice rolling
- * - Server-side authoritative coin balance tracking
- * - Server-side prize calculation and payout validation
+ * - Coin balances: the server is the only place a balance changes. Every call sends
+ *   the player's Firebase sign-in token, and the server applies the limits in economy.ts.
+ *
+ * The web app is served by the same server, so calls go to /api. The Android/iOS apps
+ * need the server's address: set VITE_API_BASE_URL (e.g. the Cloud Run URL) when building.
  */
+const API_BASE = (import.meta.env?.VITE_API_BASE_URL || '').replace(/\/$/, '');
+
+export interface ServerResult<T> {
+  ok: boolean;
+  /** The server's answer when ok */
+  data: T | null;
+  /** The server couldn't be reached (or isn't available), so the app may continue locally */
+  offline: boolean;
+  message: string;
+}
+
+type BalanceListener = (uid: string, balance: number) => void;
+const balanceListeners = new Set<BalanceListener>();
+
+/** Called with the server's balance after every successful coin call */
+export function onServerBalance(listener: BalanceListener): () => void {
+  balanceListeners.add(listener);
+  return () => balanceListeners.delete(listener);
+}
+
+async function callServer<T>(
+  path: string,
+  init: { method?: 'GET' | 'POST'; body?: unknown } = {}
+): Promise<ServerResult<T>> {
+  const user = auth.currentUser;
+  if (!user) {
+    return { ok: false, data: null, offline: true, message: 'Not signed in.' };
+  }
+  try {
+    const token = await user.getIdToken();
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: init.method || 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
+    });
+    // Static hosting without the server answers /api with the app's HTML page
+    const isJson = (res.headers.get('content-type') || '').includes('application/json');
+    const data = isJson ? await res.json() : null;
+    if (res.ok && data?.success) {
+      if (typeof data.balance === 'number' && path !== '/api/admin/coins/set') {
+        balanceListeners.forEach(listener => listener(user.uid, data.balance));
+      }
+      return { ok: true, data: data as T, offline: false, message: '' };
+    }
+    return {
+      ok: false,
+      data: null,
+      offline: !isJson || res.status === 503,
+      message: data?.message || 'Coin service unavailable.',
+    };
+  } catch {
+    return { ok: false, data: null, offline: true, message: 'Coin service unavailable.' };
+  }
+}
+
+export function fetchWalletBalance() {
+  return callServer<{ balance: number }>('/api/coins', { method: 'GET' });
+}
+
+export function requestCoinGrant(reason: GrantReason, amount: number) {
+  return callServer<{ balance: number }>('/api/coins/grant', { body: { reason, amount } });
+}
+
+export function requestSpend(amount: number, item: string) {
+  return callServer<{ balance: number }>('/api/coins/spend', { body: { amount, item } });
+}
+
+export function requestDailyBonus() {
+  return callServer<{ red: number; blue: number; coins: number; balance: number }>('/api/coins/daily-bonus');
+}
+
+export function requestCouponRedeem(code: string) {
+  return callServer<{ coins: number; balance: number }>('/api/coins/coupon', { body: { code } });
+}
+
+export function requestMissionReward(missionId: string) {
+  return callServer<{ coins: number; balance: number }>('/api/coins/mission', { body: { missionId } });
+}
+
+export function requestLevelRewards(rewardIds: string[], prestige: number) {
+  return callServer<{ coins: number; balance: number }>('/api/coins/level-rewards', {
+    body: { rewardIds, prestige },
+  });
+}
+
+export function requestMatchStart(game: { buyIn: number; playerCount: number; tier: MatchTier }) {
+  return callServer<{ matchId: string; balance: number }>('/api/match/start', { body: game });
+}
+
+export function requestMatchPrize(matchId: string, placement: number) {
+  return callServer<{ prize: number; balance: number }>('/api/match/payout', { body: { matchId, placement } });
+}
+
+export function adminSetCoins(uid: string, amount: number) {
+  return callServer<{ balance: number }>('/api/admin/coins/set', { body: { uid, amount } });
+}
 
 /**
  * Rolls dice using the backend server's cryptographically secure random number generator.
@@ -21,7 +127,7 @@ export async function rollDiceOnServer(
   const result = new Map<number, number>();
 
   try {
-    const res = await fetch('/api/dice/roll', {
+    const res = await fetch(`${API_BASE}/api/dice/roll`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -33,7 +139,7 @@ export async function rollDiceOnServer(
       }),
     });
 
-    if (res.ok) {
+    if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
       const data = await res.json();
       if (Array.isArray(data.rolls)) {
         for (const item of data.rolls) {
@@ -61,131 +167,4 @@ export async function rollDiceOnServer(
   });
 
   return result;
-}
-
-/**
- * Executes a server-authoritative tiebreaker roll-off
- */
-export async function rollTiebreakerOnServer(
-  participants: string[],
-  roomId?: string
-): Promise<{
-  rollScores: Record<string, number>;
-  highestRoll: number;
-  winners: string[];
-  isStillTied: boolean;
-}> {
-  try {
-    const res = await fetch('/api/dice/roll-off', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ participants, roomId }),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      return {
-        rollScores: data.rollScores || {},
-        highestRoll: data.highestRoll || 0,
-        winners: data.winners || [],
-        isStillTied: !!data.isStillTied,
-      };
-    }
-  } catch (err) {
-    console.warn('[ServerTiebreaker] Network unavailable, using local tiebreaker fallback:', err);
-  }
-
-  // Fallback
-  const rollScores: Record<string, number> = {};
-  for (const p of participants) {
-    rollScores[p] = Math.floor(Math.random() * 6) + 1;
-  }
-  let highest = -1;
-  for (const val of Object.values(rollScores)) {
-    if (val > highest) highest = val;
-  }
-  const winners = Object.entries(rollScores)
-    .filter(([_, val]) => val === highest)
-    .map(([id]) => id);
-
-  return {
-    rollScores,
-    highestRoll: highest,
-    winners,
-    isStillTied: winners.length > 1,
-  };
-}
-
-/**
- * Fetches authoritative coin balance from backend server
- */
-export async function fetchServerCoins(uid: string): Promise<number | null> {
-  if (!uid) return null;
-  try {
-    const res = await fetch(`/api/coins/${encodeURIComponent(uid)}`);
-    if (res.ok) {
-      const data = await res.json();
-      return typeof data.balance === 'number' ? data.balance : null;
-    }
-  } catch {
-    // Offline fallback
-  }
-  return null;
-}
-
-/**
- * Updates coin balance authoritatively on backend server
- */
-export async function updateServerCoins(
-  uid: string,
-  delta: number,
-  reason: string
-): Promise<number | null> {
-  if (!uid || delta === 0) return null;
-  try {
-    const res = await fetch('/api/coins/update', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uid, delta, reason }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return typeof data.balance === 'number' ? data.balance : null;
-    }
-  } catch {
-    // Offline fallback
-  }
-  return null;
-}
-
-/**
- * Claims match prize payout authoritatively calculated and credited by the server
- */
-export async function claimServerPrizePayout(params: {
-  roomId?: string;
-  uid: string;
-  placement: number;
-  totalPlayers: number;
-  tier?: string;
-  buyIn?: number;
-}): Promise<{ prizeWon: number; newBalance: number }> {
-  try {
-    const res = await fetch('/api/match/payout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      return {
-        prizeWon: data.prizeWon ?? 0,
-        newBalance: data.newBalance ?? 0,
-      };
-    }
-  } catch (err) {
-    console.warn('[ServerPayout] Failed to contact server for prize payout:', err);
-  }
-
-  return { prizeWon: 0, newBalance: 0 };
 }

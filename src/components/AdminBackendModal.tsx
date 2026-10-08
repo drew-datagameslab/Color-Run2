@@ -14,14 +14,12 @@ import {
   Shield,
   Trash2,
   Search,
-  Sparkles,
   LogOut,
   Sliders,
 } from 'lucide-react';
 import { UserAccount } from '../types/game';
 import {
   checkIsAdmin,
-  signInAsAdmin,
   adminFetchUsers,
   adminUpdateCoins,
   adminUpdateAdFree,
@@ -55,12 +53,6 @@ export const AdminBackendModal: React.FC<AdminBackendModalProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<AdminTab>('audit');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-
-  // Sign In Form State
-  const [emailInput, setEmailInput] = useState<string>('admin@colorrun.game');
-  const [passwordInput, setPasswordInput] = useState<string>('ColorRunAdmin2026!');
-  const [isSigningIn, setIsSigningIn] = useState<boolean>(false);
-  const [authError, setAuthError] = useState<string | null>(null);
 
   // Data States
   const [usersList, setUsersList] = useState<UserAccount[]>([]);
@@ -118,49 +110,6 @@ export const AdminBackendModal: React.FC<AdminBackendModalProps> = ({
       console.warn('Error loading admin data:', err);
     } finally {
       setIsRefreshing(false);
-    }
-  };
-
-  const handleAdminSignIn = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setIsSigningIn(true);
-    setAuthError(null);
-    try {
-      const res = await signInAsAdmin(emailInput, passwordInput);
-      if (res.success && res.account) {
-        setIsAdmin(true);
-        if (onUserUpdated) onUserUpdated(res.account);
-        setStatusMessage('Successfully authenticated as Color Run Administrator!');
-        await loadAllAdminData();
-      } else {
-        setAuthError(res.error || 'Authentication failed');
-      }
-    } catch (err: any) {
-      setAuthError(err.message || 'Error signing in');
-    } finally {
-      setIsSigningIn(false);
-    }
-  };
-
-  const handleQuickAdminAccess = async () => {
-    setEmailInput('admin@colorrun.game');
-    setPasswordInput('ColorRunAdmin2026!');
-    setIsSigningIn(true);
-    setAuthError(null);
-    try {
-      const res = await signInAsAdmin('admin@colorrun.game', 'ColorRunAdmin2026!');
-      if (res.success && res.account) {
-        setIsAdmin(true);
-        if (onUserUpdated) onUserUpdated(res.account);
-        setStatusMessage('Master Admin Account activated.');
-        await loadAllAdminData();
-      } else {
-        setAuthError(res.error || 'Quick login failed');
-      }
-    } catch (err: any) {
-      setAuthError(err.message || 'Error during quick admin login');
-    } finally {
-      setIsSigningIn(false);
     }
   };
 
@@ -321,73 +270,19 @@ export const AdminBackendModal: React.FC<AdminBackendModalProps> = ({
             <p className="text-sm">Verifying Administrative Privileges...</p>
           </div>
         ) : !isAdmin ? (
-          /* Sign In Screen for Admin */
+          /* Not an admin: admin access comes from signing in with an approved account */
           <div className="p-6 sm:p-8 max-w-md mx-auto w-full">
-            <div className="text-center mb-6">
+            <div className="text-center">
               <div className="w-14 h-14 bg-blue-500/10 border border-blue-500/30 rounded-2xl flex items-center justify-center mx-auto mb-3 text-blue-400">
                 <Lock className="w-7 h-7" />
               </div>
               <h3 className="text-base font-bold text-white mb-1">
-                Admin Authentication Required
+                Admin Access Required
               </h3>
               <p className="text-xs text-gray-400">
-                Sign in with the Color Run backend administrator credentials to access restricted database operations.
+                Sign in to Color Run with an administrator account. Admin access is granted in the admin portal.
               </p>
             </div>
-
-            {authError && (
-              <div className="mb-4 p-3 bg-red-900/40 border border-red-500/50 rounded-xl text-xs text-red-300">
-                {authError}
-              </div>
-            )}
-
-            <form onSubmit={handleAdminSignIn} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-300 mb-1">
-                  Admin Email
-                </label>
-                <input
-                  type="email"
-                  value={emailInput}
-                  onChange={e => setEmailInput(e.target.value)}
-                  className="w-full bg-[#111317] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-300 mb-1">
-                  Admin Password
-                </label>
-                <input
-                  type="password"
-                  value={passwordInput}
-                  onChange={e => setPasswordInput(e.target.value)}
-                  className="w-full bg-[#111317] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                  required
-                />
-              </div>
-
-              <div className="flex flex-col gap-2 pt-2">
-                <button
-                  type="submit"
-                  disabled={isSigningIn}
-                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-md transition-colors disabled:opacity-50"
-                >
-                  {isSigningIn ? 'Authenticating...' : 'Sign In as Administrator'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleQuickAdminAccess}
-                  disabled={isSigningIn}
-                  className="w-full py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Quick One-Click Admin Access (admin@colorrun.game)
-                </button>
-              </div>
-            </form>
           </div>
         ) : (
           /* Authenticated Admin Dashboard */
