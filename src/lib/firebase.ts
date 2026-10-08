@@ -326,6 +326,15 @@ export async function markEmailSubscriberVerified(email: string): Promise<void> 
 }
 
 /**
+ * True when the player is signed in to a real account (not a guest): Firebase has a
+ * non-anonymous user that matches the app's current player.
+ */
+export function isSignedInAccount(user?: { uid: string } | null): boolean {
+  const fbUser = auth.currentUser;
+  return !!user && !!fbUser && !fbUser.isAnonymous && fbUser.uid === user.uid;
+}
+
+/**
  * Sign out user
  */
 export async function logOut(): Promise<void> {

@@ -1,9 +1,11 @@
 import React from 'react';
-import { Users, Swords, ArrowLeft, Globe, Bot } from 'lucide-react';
+import { Users, Swords, ArrowLeft, Globe, Bot, Lock } from 'lucide-react';
 import { Friend, UserAccount } from '../types/game';
 
 interface ModeSelectScreenProps {
   user?: UserAccount;
+  /** Not signed in to an account: online modes show a "Sign in" tag */
+  requiresSignIn?: boolean;
   friends?: Friend[];
   onSelectMode: (mode: 'online' | 'cpu' | 'challenge_friend' | 'pass_and_play') => void;
   onSelectFriend?: (friend: Friend) => void;
@@ -12,10 +14,20 @@ interface ModeSelectScreenProps {
   onBack: () => void;
 }
 
+// Shown on modes that need an account when a guest is playing
+const SignInTag = () => (
+  <span className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#1c6a35]/10 border border-[#1c6a35]/30 text-[10px] font-black text-[#1c6a35] uppercase tracking-wide">
+    <Lock className="w-3 h-3" />
+    Sign in
+  </span>
+);
+
 export const ModeSelectScreen: React.FC<ModeSelectScreenProps> = ({
+  requiresSignIn = false,
   onSelectMode,
   onBack,
 }) => {
+  const isGuest = requiresSignIn;
   return (
     <div className="w-full max-h-[calc(100vh-65px)] overflow-y-auto custom-scrollbar flex flex-col justify-center items-center select-none py-4 px-2">
       {/* 1. Main Select Game Mode Card (centered, scrollable if height constrained) */}
@@ -43,6 +55,7 @@ export const ModeSelectScreen: React.FC<ModeSelectScreenProps> = ({
                   Play against friends or random players.
                 </div>
               </div>
+              {isGuest && <SignInTag />}
             </button>
 
             {/* Mode 2: Play vs Computer */}
@@ -75,6 +88,7 @@ export const ModeSelectScreen: React.FC<ModeSelectScreenProps> = ({
                   Invite a friend to roll head-to-head for coins
                 </div>
               </div>
+              {isGuest && <SignInTag />}
             </button>
 
             {/* Mode 4: Pass & Play */}

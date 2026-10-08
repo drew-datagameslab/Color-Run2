@@ -13,7 +13,7 @@ import { FirestoreWalletStore } from './server/walletStores.ts';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export const APP_VERSION = '6.5.1';
+export const APP_VERSION = '6.5.2';
 
 const app = express();
 app.use(express.json({ limit: '16kb' }));

@@ -22,6 +22,8 @@
    - `rooms/{roomId}`: Unauthenticated reads and writes are blocked.
    - `game_invites/{inviteId}` and `friend_requests/{requestId}`: Only sender or recipient can access or modify invites.
 
+6. **Guest Access**: Guests (no Firebase account) can play vs Computer and Pass & Play only. Multiplayer Online and Friends Challenges (starting, joining or accepting invites) require signing in; rooms and invites already require `request.auth` in the rules.
+
 ---
 
 ## 2. The "Dirty Dozen" Malicious Payloads

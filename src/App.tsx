@@ -38,6 +38,7 @@ import { ShopScreen } from './components/ShopScreen';
 import { ScoreboardScreen } from './components/ScoreboardScreen';
 import { MatchmakingScreen } from './components/MatchmakingScreen';
 import { GameInviteOverlay } from './components/GameInviteOverlay';
+import { SignInRequiredModal } from './components/SignInRequiredModal';
 import { FriendRequestBanner } from './components/FriendRequestBanner';
 import { RulesModal } from './components/RulesModal';
 import { MissionsModal } from './components/MissionsModal';
@@ -54,7 +55,7 @@ import { DailyBonusOverlay } from './components/DailyBonusOverlay';
 import { ChallengeFriendsOverlay } from './components/ChallengeFriendsOverlay';
 import { PortraitLockOverlay } from './components/PortraitLockOverlay';
 import { shouldShow24hReferralOverlay, dismiss24hReferralOverlay } from './lib/referrals';
-import { subscribeToAuth, logOut, syncUserProfileToFirestore } from './lib/firebase';
+import { subscribeToAuth, logOut, syncUserProfileToFirestore, isSignedInAccount } from './lib/firebase';
 import { createChallengeRoom, joinChallengeRoom, GameRoom } from './lib/matchmaking';
 import {
   sendChallengeInvites,
@@ -293,7 +294,67 @@ export default function App() {
     playSfx('add');
   };
 
+  // Guests can play vs Computer and Pass & Play. Multiplayer Online and Friends Challenges
+  // need a signed-in account (coins, invites and rooms are tied to it).
+  const [signInPrompt, setSignInPrompt] = useState<string | null>(null);
+  const requireSignedIn = (feature: string): boolean => {
+    if (isSignedInAccount(user)) return true;
+    setSignInPrompt(feature);
+    return false;
+  };
+
+  const handleSelectMode = (mode: 'online' | 'cpu' | 'challenge_friend' | 'pass_and_play') => {
+    if (mode === 'challenge_friend') {
+      if (!requireSignedIn('Friends Challenges')) return;
+      setSelectedChallengeFriend(null);
+      setIsChallengeFriendModalOpen(true);
+    } else if (mode === 'pass_and_play') {
+      const userDiceColors: [DiceColor, DiceColor] = user.diceColors || shopSettings.equippedColors;
+      handleStartGame({
+        playersCount: 2,
+        mode: 'pass_and_play',
+        threshold: 250,
+        colorA: userDiceColors[0],
+        colorB: userDiceColors[1],
+        slots: [
+          {
+            name: user.name,
+            type: 'human',
+            color: user.avatar.color,
+            image: user.avatar.image,
+            diceColors: userDiceColors,
+          },
+          {
+            name: 'Player 2',
+            type: 'human',
+            color: '#1f7fd6',
+            diceColors: ['blue', 'red'],
+          },
+        ],
+      });
+    } else if (mode === 'cpu') {
+      setGameMode('cpu');
+      setScreen('pickgame');
+    } else {
+      if (!requireSignedIn('Multiplayer Online')) return;
+      setGameMode('online');
+      setScreen('pickgame');
+    }
+  };
+
+  const handleSelectChallengeFriend = (friend: Friend) => {
+    if (!requireSignedIn('Friends Challenges')) return;
+    setSelectedChallengeFriend(friend);
+    setIsChallengeFriendModalOpen(true);
+  };
+
+  const openChallengeFriends = () => {
+    if (!requireSignedIn('Friends Challenges')) return;
+    setIsChallengeFriendsOpen(true);
+  };
+
   const handleStartChallengeRoom = async (selectedFriends: Friend[], buyIn: number) => {
+    if (!requireSignedIn('Friends Challenges')) return;
     try {
       const equippedDice = shopSettings.equippedColors;
       const room = await createChallengeRoom(user, equippedDice, selectedFriends, buyIn);
@@ -313,6 +374,7 @@ export default function App() {
   };
 
   const handleAcceptInvite = async (invite: GameInvite) => {
+    if (!requireSignedIn('Friends Challenges')) return;
     try {
       await respondToChallengeInvite(invite.id, invite.roomId, user.uid, 'joined');
       const joinedRoom = await joinChallengeRoom(
@@ -844,6 +906,20 @@ export default function App() {
           </div>
         )}
 
+        {/* Sign-in required for online play */}
+        {signInPrompt && (
+          <SignInRequiredModal
+            feature={signInPrompt}
+            onSignIn={() => {
+              setSignInPrompt(null);
+              setIsChallengeFriendModalOpen(false);
+              setIsChallengeFriendsOpen(false);
+              setScreen('signin');
+            }}
+            onClose={() => setSignInPrompt(null)}
+          />
+        )}
+
         {/* Live Challenge Game Invite Banner Overlay */}
         <GameInviteOverlay
           invite={incomingInvite}
@@ -909,49 +985,12 @@ export default function App() {
         {screen === 'modeselect' && (
           <ModeSelectScreen
             user={user}
+            requiresSignIn={!isSignedInAccount(user)}
             friends={friends}
             onToast={triggerToast}
-            onSelectMode={mode => {
-              if (mode === 'challenge_friend') {
-                setSelectedChallengeFriend(null);
-                setIsChallengeFriendModalOpen(true);
-              } else if (mode === 'pass_and_play') {
-                const userDiceColors: [DiceColor, DiceColor] = user.diceColors || shopSettings.equippedColors;
-                handleStartGame({
-                  playersCount: 2,
-                  mode: 'pass_and_play',
-                  threshold: 250,
-                  colorA: userDiceColors[0],
-                  colorB: userDiceColors[1],
-                  slots: [
-                    {
-                      name: user.name,
-                      type: 'human',
-                      color: user.avatar.color,
-                      image: user.avatar.image,
-                      diceColors: userDiceColors,
-                    },
-                    {
-                      name: 'Player 2',
-                      type: 'human',
-                      color: '#1f7fd6',
-                      diceColors: ['blue', 'red'],
-                    },
-                  ],
-                });
-              } else if (mode === 'cpu') {
-                setGameMode('cpu');
-                setScreen('pickgame');
-              } else {
-                setGameMode('online');
-                setScreen('pickgame');
-              }
-            }}
-            onSelectFriend={friend => {
-              setSelectedChallengeFriend(friend);
-              setIsChallengeFriendModalOpen(true);
-            }}
-            onInviteFriends={() => setIsChallengeFriendsOpen(true)}
+            onSelectMode={handleSelectMode}
+            onSelectFriend={handleSelectChallengeFriend}
+            onInviteFriends={openChallengeFriends}
             onBack={() => setScreen('mainmenu')}
           />
         )}
@@ -1205,7 +1244,7 @@ export default function App() {
         onOpenProfile={() => setIsProfileModalOpen(true)}
         onOpenRules={() => handleOpenRules('rules')}
         onOpenScoreboard={() => setScreen('scoreboard')}
-        onOpenChallengeFriends={() => setIsChallengeFriendsOpen(true)}
+        onOpenChallengeFriends={openChallengeFriends}
         onOpenAdmin={isAdmin ? () => setIsAdminModalOpen(true) : undefined}
         onLogOut={handleLogOut}
         onUpdateShop={handleUpdateShop}
