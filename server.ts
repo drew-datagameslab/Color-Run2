@@ -15,6 +15,12 @@ const __dirname = path.dirname(__filename);
 
 export const APP_VERSION = '6.5.2';
 
+// Google's Firestore client can reject a promise outside our awaits (for example when
+// no credentials are available at all). Log it instead of letting it stop the server.
+process.on('unhandledRejection', reason => {
+  console.error('[Color Run Server] Unhandled error (server kept running):', (reason as Error)?.message || reason);
+});
+
 const app = express();
 app.use(express.json({ limit: '16kb' }));
 

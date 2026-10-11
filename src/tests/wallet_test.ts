@@ -3,6 +3,7 @@ import { AddressInfo } from 'net';
 import { WalletService, WalletError, utcWeek } from '../server/wallet.ts';
 import { MemoryWalletStore } from '../server/walletStores.ts';
 import { requireUser, requireAdmin } from '../server/auth.ts';
+import { readServiceAccountFromEnv } from '../server/firebaseAdmin.ts';
 import { prizeForPlacement, WELCOME_COINS, FREE_GAME_WIN_BONUS } from '../lib/economy';
 import { createInitialDailyMissions, createInitialWeeklyMissions } from '../lib/missions';
 import { LEVEL_REWARDS } from '../lib/levelSystem';
@@ -180,8 +181,36 @@ async function runAuthTests() {
   console.log('✓ Coin and admin endpoints require a valid sign-in');
 }
 
+function runServiceAccountTests() {
+  const key = {
+    type: 'service_account',
+    project_id: 'demo-project',
+    client_email: 'server@demo-project.iam.gserviceaccount.com',
+    // As pasted into a one-line secret: line breaks written as a backslash and "n"
+    private_key: '-----BEGIN PRIVATE KEY-----\\nABC\\n-----END PRIVATE KEY-----\\n',
+  };
+  assert(readServiceAccountFromEnv(undefined) === null && readServiceAccountFromEnv('  ') === null, 'No secret means no key');
+  const fromJson = readServiceAccountFromEnv(JSON.stringify(key))!;
+  assert(fromJson.client_email === key.client_email, 'Reads the key JSON as pasted');
+  assert(
+    fromJson.private_key === '-----BEGIN PRIVATE KEY-----\nABC\n-----END PRIVATE KEY-----\n',
+    'Turns written-out line breaks into real ones'
+  );
+  const fromBase64 = readServiceAccountFromEnv(Buffer.from(JSON.stringify(key)).toString('base64'))!;
+  assert(fromBase64.project_id === 'demo-project', 'Reads a base64-encoded key');
+  let threw = false;
+  try {
+    readServiceAccountFromEnv(JSON.stringify({ project_id: 'x' }));
+  } catch {
+    threw = true;
+  }
+  assert(threw, 'Rejects JSON that is not a service account key');
+  console.log('✓ FIREBASE_SERVICE_ACCOUNT secret parsing verified');
+}
+
 export async function runWalletTests() {
   console.log('\n--- Running Server Coin Wallet Tests ---');
   await runEconomyTests();
   await runAuthTests();
+  runServiceAccountTests();
 }
