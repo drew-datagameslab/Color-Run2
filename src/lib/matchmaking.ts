@@ -79,7 +79,7 @@ export interface RoomGameState {
 export interface GameRoom {
   id: string;
   roomCode?: string; // 4-digit code (e.g. "4821") for direct friend joining
-  gameKey: string; // e.g. "standard_4", "double_2", "high_roller_6"
+  gameKey: string; // tier_playerCount_buyIn, e.g. "standard_4_10", "high_roller_6_50"
   tier: 'standard' | 'double' | 'high_roller';
   playerCount: 2 | 3 | 4 | 5 | 6 | 8;
   buyIn: number;
@@ -189,12 +189,30 @@ export function generateBots(countNeeded: number, existingCount: number = 0): Ro
 }
 
 /**
+ * Level grouping for online matchmaking. Off for now: any player of any level joins any
+ * open game with the same player count, tier and buy-in, because live players playing
+ * each other matters more than matching levels. Turn it on once there are enough players;
+ * a room then admits players within LEVEL_MATCH_RANGE levels of its host during its first
+ * LEVEL_MATCH_WINDOW_MS, and anyone after that.
+ */
+export const LEVEL_MATCHING_ENABLED = false;
+export const LEVEL_MATCH_RANGE = 5;
+const LEVEL_MATCH_WINDOW_MS = 5000;
+
+/** Lobby key: players only meet when player count, tier and buy-in all match */
+function matchmakingKey(tier: string, playerCount: number, buyIn: number): string {
+  return `${tier}_${playerCount}_${buyIn}`;
+}
+
+/**
  * Finds an open room within the entry window with available spots,
  * or creates a brand-new game room.
  *
- * Matchmaking priority:
- * - First 5 seconds of a room's life: players within ±5 levels of the room's host/creator are admitted first.
- * - After 5 seconds (or while continuing to scan as the timer runs down): any player of any level is admitted so rooms fill with human testers rather than bots.
+ * Matchmaking:
+ * - Players are grouped by player count, tier and buy-in only (see LEVEL_MATCHING_ENABLED).
+ * - The lobby document points every device at the same open room. Joining it, or creating
+ *   a new room when there is none, happens in one transaction, so players who search at
+ *   the same moment end up at the same table instead of in separate rooms.
  */
 export async function findOrCreateRoom(
   tier: 'standard' | 'double' | 'high_roller',
@@ -204,7 +222,7 @@ export async function findOrCreateRoom(
   equippedColors: [DiceColor, DiceColor]
 ): Promise<{ room: GameRoom; isNew: boolean }> {
   const userLevel = user.level || 1;
-  const gameKey = `${tier}_${playerCount}`;
+  const gameKey = matchmakingKey(tier, playerCount, buyIn);
   const now = Date.now();
   const userDiceColors: [DiceColor, DiceColor] = user.diceColors || equippedColors;
   const sessionId = getClientSessionId();
@@ -225,18 +243,46 @@ export async function findOrCreateRoom(
   const lobbyRef = doc(db, 'lobbies', gameKey);
 
   const isEligibleForRoom = (roomData: GameRoom, currentTime: number): boolean => {
+    // Same settings: player count and tier come from the lobby/query, buy-in is checked here
+    if (roomData.isChallenge || roomData.buyIn !== buyIn) return false;
+    if (!LEVEL_MATCHING_ENABLED) return true;
     const roomCreatedAt = roomData.createdAt || currentTime;
     const roomAgeMs = Math.max(0, currentTime - roomCreatedAt);
     const hostPlayer = roomData.players?.[0];
     const hostLevel = hostPlayer?.level ?? roomData.minLevel ?? 1;
-    const levelDiff = Math.abs(userLevel - hostLevel);
-    // During the first 5 seconds of a room, only admit players within 5 levels of the host
-    if (roomAgeMs < 5000) {
-      return levelDiff <= 5;
+    // Early in a room's life, only admit players near the host's level; anyone after that
+    if (roomAgeMs < LEVEL_MATCH_WINDOW_MS) {
+      return Math.abs(userLevel - hostLevel) <= LEVEL_MATCH_RANGE;
     }
-    // After 5 seconds, admit any player of any level
     return true;
   };
+
+  const buildNewRoom = (createTime: number): GameRoom => ({
+    id: `room_${createTime}_${Math.random().toString(36).substring(2, 7)}`,
+    roomCode: generateRoomCode(),
+    gameKey,
+    tier,
+    playerCount,
+    buyIn,
+    createdAt: createTime,
+    expiresAt: createTime + 45000,
+    status: 'waiting',
+    players: [currentPlayer],
+    filledBots: [],
+    minLevel: Math.max(1, userLevel - LEVEL_MATCH_RANGE),
+    maxLevel: userLevel + LEVEL_MATCH_RANGE,
+    updatedAt: createTime,
+  });
+
+  const lobbyPointer = (room: GameRoom, playersInRoom: number, time: number) => ({
+    roomId: room.id,
+    roomCode: room.roomCode,
+    createdAt: room.createdAt,
+    playerCount: playersInRoom,
+    maxPlayers: playerCount,
+    status: 'waiting',
+    updatedAt: time,
+  });
 
   // 1. Atomic transaction on the lobby & room so devices joining simultaneously converge into the same room
   try {
@@ -306,7 +352,13 @@ export async function findOrCreateRoom(
         }
       }
 
-      return null;
+      // No open room with space: create one and point the lobby at it in this same
+      // transaction. If another player does the same at the same moment, Firestore retries
+      // one of the transactions, which then finds this room and joins it.
+      const newRoom = buildNewRoom(currentTime);
+      transaction.set(doc(db, 'rooms', newRoom.id), sanitizeForFirestore(newRoom));
+      transaction.set(lobbyRef, sanitizeForFirestore(lobbyPointer(newRoom, 1, currentTime)));
+      return { room: newRoom, isNew: true };
     });
 
     if (result) {
@@ -323,6 +375,7 @@ export async function findOrCreateRoom(
       roomsCol,
       where('tier', '==', tier),
       where('playerCount', '==', playerCount),
+      where('buyIn', '==', buyIn),
       where('status', '==', 'waiting')
     );
 
@@ -361,11 +414,16 @@ export async function findOrCreateRoom(
       }
     });
 
-    // Prioritize rooms where host is within ±5 levels first, then earliest created (FIFO)
+    // Live players first: the room with the most players waiting, then the oldest.
+    // With level grouping on, rooms near the player's level come before the rest.
     candidateRooms.sort((a, b) => {
-      const aWithin5 = a.levelDiff <= 5 ? 0 : 1;
-      const bWithin5 = b.levelDiff <= 5 ? 0 : 1;
-      if (aWithin5 !== bWithin5) return aWithin5 - bWithin5;
+      if (LEVEL_MATCHING_ENABLED) {
+        const aNear = a.levelDiff <= LEVEL_MATCH_RANGE ? 0 : 1;
+        const bNear = b.levelDiff <= LEVEL_MATCH_RANGE ? 0 : 1;
+        if (aNear !== bNear) return aNear - bNear;
+      }
+      const byPlayers = (b.players?.length || 0) - (a.players?.length || 0);
+      if (byPlayers !== 0) return byPlayers;
       return a.createdAt - b.createdAt;
     });
 
@@ -424,24 +482,9 @@ export async function findOrCreateRoom(
 
   // 3. No open room with time and space available — create a brand-new room!
   const createTime = Date.now();
-  const newRoomId = `room_${createTime}_${Math.random().toString(36).substring(2, 7)}`;
-  const newRoomCode = generateRoomCode();
-  const newRoom: GameRoom = {
-    id: newRoomId,
-    roomCode: newRoomCode,
-    gameKey,
-    tier,
-    playerCount,
-    buyIn,
-    createdAt: createTime,
-    expiresAt: createTime + 45000,
-    status: 'waiting',
-    players: [currentPlayer],
-    filledBots: [],
-    minLevel: Math.max(1, userLevel - 5),
-    maxLevel: userLevel + 5,
-    updatedAt: createTime,
-  };
+  const newRoom = buildNewRoom(createTime);
+  const newRoomId = newRoom.id;
+  const newRoomCode = newRoom.roomCode;
 
   try {
     const roomRef = doc(db, 'rooms', newRoomId);

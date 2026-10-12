@@ -13,6 +13,8 @@ import {
 import { sendChallengeInvites } from '../lib/invites';
 import {
   findOrCreateRoom,
+  LEVEL_MATCHING_ENABLED,
+  LEVEL_MATCH_RANGE,
   subscribeToRoom,
   finalizeAndStartRoom,
   generateBots,
@@ -408,10 +410,10 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
       if (remainingSec <= 3 && remainingSec > 0) {
         setStatusText('Filling remaining spots with computer players…');
       } else if (!isChallengeMode && remainingSec > 3) {
-        if (elapsed < 5000) {
-          setStatusText('Scanning for players within 5 levels…');
+        if (LEVEL_MATCHING_ENABLED && elapsed < 5000) {
+          setStatusText(`Scanning for players within ${LEVEL_MATCH_RANGE} levels…`);
         } else {
-          setStatusText('Scanning for players of any level…');
+          setStatusText('Looking for live players…');
         }
       }
 
