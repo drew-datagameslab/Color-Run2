@@ -9,7 +9,7 @@
 2. **PII Isolation & Anti-Harvesting**:
    - `users/{userId}`: Document read is restricted to the owner (`request.auth.uid == userId`) or an admin. General listing of all users is forbidden to non-admins to prevent email and phone harvesting.
    - `emailSubscribers/{subId}`: Listing is restricted to `isAdmin()`. Non-admins cannot view or enumerate subscriber emails.
-   - `phoneIndex/{phoneId}`: Listing is restricted to `isAdmin()`. Exact lookup (`get`) requires authentication; arbitrary enumeration is forbidden.
+   - `phoneIndex/{phoneId}`: Listing is restricted to `isAdmin()`. Exact lookup (`get`) requires authentication; arbitrary enumeration is forbidden. A new entry must name its creator, and an existing entry can only be changed by the player it belongs to.
 3. **Friend List Integrity**: `users/{userId}/friends/{friendId}` can only be written or read by the account owner (`request.auth.uid == userId`) or an admin. Cross-user write pollution is strictly rejected.
 4. **Economy & Privilege Protection**:
    - Players cannot modify their own `coins`, `isAdFree`, `adFreePlan`, `scoreboardUnlocked`, or self-assign `role`/`isAdmin` during updates. New profiles start with exactly 200 coins.
@@ -22,7 +22,9 @@
    - `rooms/{roomId}`: Unauthenticated reads and writes are blocked.
    - `game_invites/{inviteId}` and `friend_requests/{requestId}`: Only sender or recipient can access or modify invites.
 
-6. **Guest Access**: Guests (no Firebase account) can play vs Computer and Pass & Play only. Multiplayer Online and Friends Challenges (starting, joining or accepting invites) require signing in; rooms and invites already require `request.auth` in the rules.
+6. **Referral Codes**: The inviter can update their own code but cannot reassign it (`inviterId`) or mark it redeemed. Anyone else can redeem an unused code exactly once, and that write may only set `used`, `usedBy` (themselves), `usedByName` and `usedAt`.
+7. **Invites & Friend Requests**: Only the sender or recipient can update, `fromUid` and `toUid` can never change, and only the response fields (`status`, plus `respondedAt` on game invites) can be changed.
+8. **Guest Access**: Guests (no Firebase account) can play vs Computer and Pass & Play only. Multiplayer Online and Friends Challenges (starting, joining or accepting invites) require signing in; rooms and invites already require `request.auth` in the rules.
 
 ---
 
@@ -108,10 +110,23 @@
     - Target: `POST /api/match/payout` twice with the same `matchId`
     - Expected: second call `409`
 
+
+17. **Malicious Payload 17: Phone Number Hijack**
+    - Target: `SET /phoneIndex/{someone else's number}` with `{ userId: 'attacker' }`
+    - Expected: `PERMISSION_DENIED`
+
+18. **Malicious Payload 18: Referral Code Rewrite**
+    - Target: `UPDATE /referralCodes/{code}` with `{ usedBy: 'attacker', inviterId: 'attacker' }` (or redeeming a used code)
+    - Expected: `PERMISSION_DENIED`
+
+19. **Malicious Payload 19: Invite / Friend Request Redirect**
+    - Target: `UPDATE /game_invites/{id}` or `/friend_requests/{id}` changing `fromUid` or `toUid`
+    - Expected: `PERMISSION_DENIED`
+
 ---
 
 ## 3. Tests
-- Firestore rules: payloads 6, 9, 13 and 14, plus the admin and wallet read rules, were checked against the Firestore emulator with `@firebase/rules-unit-testing` (version 6.5.1).
+- Firestore rules: payloads 6, 9, 13 and 14, plus the admin and wallet read rules, were checked against the Firestore emulator with `@firebase/rules-unit-testing` (version 6.5.1). Payloads 17–19 and the app's own writes to these collections were checked the same way in version 6.5.5.
 - Server: `src/tests/wallet_test.ts` (run with `npm test`) covers the wallet limits, one-time claims, game tickets and the sign-in checks (payloads 15–16).
 
 ## 4. Known Gaps (not yet implemented)

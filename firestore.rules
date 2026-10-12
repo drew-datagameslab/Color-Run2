@@ -42,6 +42,12 @@ service cloud.firestore {
       return request.auth.token.email.lower().replace('[^a-z0-9]', '_');
     }
 
+    // Invites and friend requests: who it is from and to stays the same on every update
+    function keepsParticipants() {
+      return incoming().get('fromUid', null) == existing().get('fromUid', null) &&
+        incoming().get('toUid', null) == existing().get('toUid', null);
+    }
+
     // Admin Verification: the master UID, drew@datagameslab.com signed in with Google,
     // or an account granted in the admin portal (/admins/{uid} or /admins/{emailKey})
     function isAdmin() {
@@ -152,8 +158,13 @@ service cloud.firestore {
       allow get: if isSignedIn();
       // Directory listing forbidden to non-admins to prevent bulk harvesting
       allow list: if isAdmin();
-      // Only the authenticated owner of the phone entry can create/update
-      allow create, update: if isSignedIn() && (incoming().userId == request.auth.uid || isAdmin());
+      // A new entry must name its creator; an existing entry can only be changed by the
+      // player it already belongs to (no taking over someone else's phone number)
+      allow create: if isSignedIn() && (incoming().userId == request.auth.uid || isAdmin());
+      allow update: if isSignedIn() && (
+        (existing().userId == request.auth.uid && incoming().userId == request.auth.uid) ||
+        isAdmin()
+      );
       allow delete: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
     }
 
@@ -178,8 +189,20 @@ service cloud.firestore {
       allow list: if isSignedIn() && (resource.data.inviterId == request.auth.uid || isAdmin());
       allow create: if isSignedIn() && incoming().inviterId == request.auth.uid;
       allow update: if isSignedIn() && (
-        existing().inviterId == request.auth.uid ||
-        incoming().usedBy == request.auth.uid ||
+        // The inviter can update their own code, but not hand it to someone else or redeem it
+        (
+          existing().inviterId == request.auth.uid &&
+          incoming().inviterId == existing().inviterId &&
+          !incoming().diff(existing()).affectedKeys().hasAny(['used', 'usedBy', 'usedByName', 'usedAt'])
+        ) ||
+        // Someone else can redeem an unused code once: mark it used by themselves, nothing more
+        (
+          existing().inviterId != request.auth.uid &&
+          existing().get('used', false) != true &&
+          incoming().used == true &&
+          incoming().usedBy == request.auth.uid &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['used', 'usedBy', 'usedByName', 'usedAt'])
+        ) ||
         isAdmin()
       );
       allow delete: if isSignedIn() && (existing().inviterId == request.auth.uid || isAdmin());
@@ -232,9 +255,14 @@ service cloud.firestore {
         isAdmin()
       );
       allow create: if isSignedIn() && incoming().fromUid == request.auth.uid;
+      // Only the sender or recipient can update, who it is from and to can never change,
+      // and only the response fields can be changed (admins excepted)
       allow update: if isSignedIn() && (
-        existing().toUid == request.auth.uid ||
-        existing().fromUid == request.auth.uid ||
+        (
+          (existing().toUid == request.auth.uid || existing().fromUid == request.auth.uid) &&
+          keepsParticipants() &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'respondedAt'])
+        ) ||
         isAdmin()
       );
       allow delete: if isSignedIn() && (
@@ -259,9 +287,14 @@ service cloud.firestore {
         isAdmin()
       );
       allow create: if isSignedIn() && incoming().fromUid == request.auth.uid;
+      // Only the sender or recipient can update, who it is from and to can never change,
+      // and only the response fields can be changed (admins excepted)
       allow update: if isSignedIn() && (
-        existing().toUid == request.auth.uid ||
-        existing().fromUid == request.auth.uid ||
+        (
+          (existing().toUid == request.auth.uid || existing().fromUid == request.auth.uid) &&
+          keepsParticipants() &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status'])
+        ) ||
         isAdmin()
       );
       allow delete: if isSignedIn() && (
