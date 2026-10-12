@@ -1058,7 +1058,6 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       return;
     }
 
-    const activeIds = new Set(active.map(d => d.id));
     const activeCount = active.length;
     // On roll 2/3: adjust spaces. 8 remaining -> 2 rows of 4; <=6 remaining -> 1 row
     const newSlots = rollsUsed === 0 ? 12 : activeCount;
@@ -1133,30 +1132,16 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       }
     }
 
+    // Set the rolled values as the dice start tumbling (each die is a spinning cube showing
+    // all faces, so nothing is revealed early). The tumble then lands on these values.
+    // Changing them mid-roll would restart the tumble: fast, slow, then fast again.
+    setDice(finalDice);
     setIsRolling(true);
 
     const rollDuration = spectatorFastForward ? 120 : 1100;
-    const lockPreTime = spectatorFastForward ? 60 : 800;
 
-    // Phase 1: Pre-lock true final values while the dice are still actively tumbling.
+    // Roll ends: the flat dice replace the cubes, which have just landed on the same faces
     setTimeout(() => {
-      setDice(prev =>
-        prev.map(d => {
-          if (d.zone === 'active' && activeIds.has(d.id)) {
-            return {
-              ...d,
-              value: finalValuesMap.get(d.id) ?? d.value,
-              selected: false,
-            };
-          }
-          return d;
-        })
-      );
-    }, lockPreTime);
-
-    // Phase 2: Complete roll tumble animation cleanly
-    setTimeout(() => {
-      setDice(finalDice);
       setRollsUsed(nextRoll);
 
       // Human player gets time for rolls 2 & 3 (20s in multiplayer, 10s otherwise)
