@@ -11,7 +11,44 @@ export interface DieProps {
   onClick?: () => void;
   className?: string;
   delayMs?: number;
+  /** How long the roll lasts; the tumble lands on `value` just before it ends */
+  rollDurationMs?: number;
 }
+
+/**
+ * Cube rotation that brings each value's face to the front. Each face is placed with the
+ * opposite rotation on the same axis (see `faces` below), so the two cancel out and the
+ * landed face lines up exactly with the flat die shown after the roll.
+ */
+const LANDING_ROTATION: Record<number, { x: number; y: number }> = {
+  1: { x: 0, y: 0 },
+  6: { x: 0, y: 180 },
+  2: { x: 0, y: -90 },
+  5: { x: 0, y: 90 },
+  3: { x: 90, y: 0 },
+  4: { x: -90, y: 0 },
+};
+
+// One "land and settle" bounce, the same shape as the old repeating bounce
+const BOUNCE_FRAMES: Keyframe[] = [
+  { transform: 'translateY(0px) scale(1)' },
+  { transform: 'translateY(-24px) scale(1.08)', offset: 0.22 },
+  { transform: 'translateY(2px) scale(0.95)', offset: 0.48 },
+  { transform: 'translateY(-10px) scale(1.03)', offset: 0.68 },
+  { transform: 'translateY(1px) scale(0.98)', offset: 0.84 },
+  { transform: 'translateY(-3px) scale(1.01)', offset: 0.94 },
+  { transform: 'translateY(0px) scale(1)' },
+];
+
+const SHADOW_FRAMES: Keyframe[] = [
+  { transform: 'scale(1)', opacity: 0.55 },
+  { transform: 'scale(0.55)', opacity: 0.2, offset: 0.22 },
+  { transform: 'scale(1.2)', opacity: 0.85, offset: 0.48 },
+  { transform: 'scale(0.7)', opacity: 0.35, offset: 0.68 },
+  { transform: 'scale(1.1)', opacity: 0.75, offset: 0.84 },
+  { transform: 'scale(0.92)', opacity: 0.5, offset: 0.94 },
+  { transform: 'scale(1)', opacity: 0.55 },
+];
 
 const COLOR_THEMES: Record<
   DiceColor,
@@ -106,8 +143,12 @@ export const DieComponent: React.FC<DieProps> = ({
   onClick,
   className = '',
   delayMs = 0,
+  rollDurationMs = 1100,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const cubeRef = useRef<HTMLDivElement>(null);
+  const bounceRef = useRef<HTMLDivElement>(null);
+  const shadowRef = useRef<HTMLDivElement>(null);
   const [cubeSize, setCubeSize] = useState(44);
   const [imgErrors, setImgErrors] = useState<Record<number, boolean>>({});
 
@@ -124,8 +165,41 @@ export const DieComponent: React.FC<DieProps> = ({
   }, []);
 
   const isWarm = color === 'red' || color === 'orange' || color === 'pink';
-  const bounceClass = isWarm ? 'animate-tumble-bounce-red' : 'animate-tumble-bounce-blue';
-  const cubeTumbleClass = isWarm ? 'animate-cube-tumble-red' : 'animate-cube-tumble-blue';
+
+  // One tumble per roll that finishes on the rolled value, so the face the die lands on
+  // is the result (an endlessly looping spin stopped on whatever face it was showing).
+  useEffect(() => {
+    if (!rolling) return;
+    const cube = cubeRef.current;
+    if (!cube || typeof cube.animate !== 'function') return;
+
+    const end = LANDING_ROTATION[value] || LANDING_ROTATION[1];
+    // Warm dice spin one way, cool dice the other; two full turns (720deg) before landing
+    const turns = isWarm ? 720 : -720;
+    const wobble = isWarm ? -14 : 14;
+    // Land a little before the roll ends so the flat die replaces an already-settled cube.
+    // The stagger delay is capped so short (fast-forward) rolls still finish in time.
+    const delay = Math.min(delayMs, rollDurationMs * 0.15);
+    const duration = Math.max(40, rollDurationMs - delay - Math.min(60, rollDurationMs * 0.2));
+    const timing: KeyframeAnimationOptions = { duration, delay, fill: 'both' };
+
+    const animations = [
+      cube.animate(
+        [
+          { transform: 'rotateX(0deg) rotateY(0deg) rotateZ(0deg)' },
+          {
+            transform: `rotateX(${turns * 0.6 + end.x * 0.5}deg) rotateY(${turns * 0.6 + end.y * 0.5}deg) rotateZ(${wobble}deg)`,
+            offset: 0.55,
+          },
+          { transform: `rotateX(${turns + end.x}deg) rotateY(${turns + end.y}deg) rotateZ(0deg)` },
+        ],
+        { ...timing, easing: 'cubic-bezier(0.25, 0.6, 0.3, 1)' }
+      ),
+      bounceRef.current?.animate(BOUNCE_FRAMES, { ...timing, easing: 'linear' }),
+      shadowRef.current?.animate(SHADOW_FRAMES, { ...timing, easing: 'linear' }),
+    ];
+    return () => animations.forEach(a => a?.cancel());
+  }, [rolling, value, isWarm, delayMs, rollDurationMs]);
 
   const renderFaceGraphic = (faceVal: number) => {
     if (forcePips || imgErrors[faceVal]) {
@@ -164,27 +238,25 @@ export const DieComponent: React.FC<DieProps> = ({
       >
         {/* Dynamic Tabletop Contact Shadow */}
         <div
-          style={{ animationDelay: delayMs > 0 ? `${delayMs}ms` : undefined }}
-          className="absolute -bottom-1 w-[78%] h-2 rounded-full bg-black/45 blur-[1.5px] animate-tumble-shadow pointer-events-none"
+          ref={shadowRef}
+          className="absolute -bottom-1 w-[78%] h-2 rounded-full bg-black/45 blur-[1.5px] pointer-events-none"
         />
 
         {/* Vertical Bounce Wrapper for Tabletop Physics */}
         <div
-          style={{
-            animationDelay: delayMs > 0 ? `${delayMs}ms` : undefined,
-            transformStyle: 'preserve-3d',
-          }}
-          className={`relative w-full h-full flex items-center justify-center ${bounceClass}`}
+          ref={bounceRef}
+          style={{ transformStyle: 'preserve-3d' }}
+          className="relative w-full h-full flex items-center justify-center"
         >
           {/* 3D Tumbling Cube displaying all 6 sides turning through 3D space */}
           <div
+            ref={cubeRef}
             style={{
               width: `${cubeSize}px`,
               height: `${cubeSize}px`,
-              animationDelay: delayMs > 0 ? `${delayMs}ms` : undefined,
               transformStyle: 'preserve-3d',
             }}
-            className={`relative rounded-[16%] ${cubeTumbleClass}`}
+            className="relative rounded-[16%]"
           >
             {faces.map(({ val, transform }) => (
               <div

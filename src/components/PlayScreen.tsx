@@ -2584,6 +2584,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
           <RollArea
             dice={dice}
+            rollDurationMs={spectatorFastForward ? 120 : 1100}
             rollsUsed={rollsUsed}
             rollSlotsCount={rollSlotsCount}
             isCPU={isEffectiveCPU}

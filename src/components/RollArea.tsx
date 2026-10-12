@@ -13,6 +13,8 @@ interface RollAreaProps {
   joiningCountdown?: number | null;
   playerName: string;
   isRolling: boolean;
+  /** Length of the roll animation (shorter when fast-forwarding) */
+  rollDurationMs?: number;
   onTapActiveDie: (id: number) => void;
   onDoRoll: () => void;
   spectatorState?: {
@@ -34,6 +36,7 @@ export const RollArea: React.FC<RollAreaProps> = ({
   joiningCountdown = null,
   playerName,
   isRolling,
+  rollDurationMs = 1100,
   onTapActiveDie,
   onDoRoll,
   spectatorState,
@@ -74,6 +77,7 @@ export const RollArea: React.FC<RollAreaProps> = ({
                 color={die.color}
                 value={die.value}
                 rolling={isRolling}
+                rollDurationMs={rollDurationMs}
                 selected={die.selected}
                 delayMs={(die.id * 35) % 150}
                 onClick={
@@ -105,6 +109,7 @@ export const RollArea: React.FC<RollAreaProps> = ({
                     color={die.color}
                     value={die.value}
                     rolling={isRolling}
+                    rollDurationMs={rollDurationMs}
                     selected={die.selected}
                     delayMs={(slotIdx * 45) % 180}
                     onClick={
