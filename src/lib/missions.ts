@@ -315,7 +315,7 @@ export function createInitialWeeklyMissions(streakDays = 0): MissionGoal[] {
     {
       id: 'weekly_color_master_3',
       title: 'Color Master',
-      description: 'Score a 5-of-a-kind color bonus (+40 pts) in 3 different matches.',
+      description: 'Score a 5-of-a-kind color bonus (+50 pts) in 3 different matches.',
       type: 'weekly',
       rewardCoins: 100,
       current: 0,

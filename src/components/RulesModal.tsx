@@ -111,7 +111,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose, initial
                   </div>
                   <div className="bg-[#2f9a4f]/10 p-2 rounded-lg border border-[#2f9a4f]/30">
                     <div className="text-[11px] text-[#2b2219]">5 Same Color</div>
-                    <div className="text-sm text-[#1c6a35] font-black">+40 pts</div>
+                    <div className="text-sm text-[#1c6a35] font-black">+50 pts</div>
                   </div>
                   <div className="bg-[#2f9a4f]/10 p-2 rounded-lg border border-[#2f9a4f]/30">
                     <div className="text-[11px] text-[#2b2219]">6 Same Color</div>

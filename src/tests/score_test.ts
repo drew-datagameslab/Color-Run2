@@ -14,7 +14,7 @@ export function runScoreTests() {
   assert(bonusFor(2) === 0, 'bonusFor(2) must be 0');
   assert(bonusFor(3) === 10, 'bonusFor(3) must be 10');
   assert(bonusFor(4) === 25, 'bonusFor(4) must be 25');
-  assert(bonusFor(5) === 40, 'bonusFor(5) must be 40');
+  assert(bonusFor(5) === 50, 'bonusFor(5) must be 50');
   assert(bonusFor(6) === 100, 'bonusFor(6) must be 100');
   assert(bonusFor(7) === 100, 'bonusFor(7) must be 100');
 

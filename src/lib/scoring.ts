@@ -4,12 +4,12 @@ import { Die, ScoreResult, ScoreSet } from '../types/game';
  * Same-color bonus rule:
  * 3 of a color: +10
  * 4 of a color: +25
- * 5 of a color: +40
+ * 5 of a color: +50
  * 6 of a color: +100
  */
 export function bonusFor(n: number): number {
   if (n >= 6) return 100;
-  if (n === 5) return 40;
+  if (n === 5) return 50;
   if (n === 4) return 25;
   if (n === 3) return 10;
   return 0;

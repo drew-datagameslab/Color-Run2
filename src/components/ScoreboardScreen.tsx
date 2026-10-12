@@ -1163,7 +1163,7 @@ export const ScoreboardScreen: React.FC<ScoreboardScreenProps> = ({
                 <strong>Points:</strong> Each die in a valid set is worth 5 points.
               </p>
               <p>
-                <strong>Color Bonus:</strong> 3 of same color = +10, 4 = +25, 5 = +40, 6 = +100!
+                <strong>Color Bonus:</strong> 3 of same color = +10, 4 = +25, 5 = +50, 6 = +100!
               </p>
               <p>
                 <strong>Host Tip:</strong> Tap any player's card at the top if players take turns out of sequence.
