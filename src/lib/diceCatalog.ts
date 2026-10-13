@@ -18,12 +18,12 @@ export interface DiceColorOption {
 export const CLASSIC_DICE: DiceColorOption[] = [
   { id: 'blue', name: 'Blue', swatch: '#1f7fd6', price: 0, gradient: false },
   { id: 'red', name: 'Red', swatch: '#e5352f', price: 0, gradient: false },
-  { id: 'green', name: 'Green', swatch: '#2f9a4f', price: 50, gradient: false },
-  { id: 'purple', name: 'Purple', swatch: '#8e44c9', price: 50, gradient: false },
-  { id: 'black', name: 'Midnight', swatch: '#222222', price: 50, gradient: false },
-  { id: 'lblue', name: 'Sky Blue', swatch: '#45aaf2', price: 50, gradient: false },
-  { id: 'orange', name: 'Amber', swatch: '#fa8231', price: 50, gradient: false },
-  { id: 'pink', name: 'Neon Pink', swatch: '#fd79a8', price: 50, gradient: false },
+  { id: 'green', name: 'Green', swatch: '#2f9a4f', price: 75, gradient: false },
+  { id: 'purple', name: 'Purple', swatch: '#8e44c9', price: 75, gradient: false },
+  { id: 'black', name: 'Midnight', swatch: '#222222', price: 75, gradient: false },
+  { id: 'lblue', name: 'Sky Blue', swatch: '#45aaf2', price: 75, gradient: false },
+  { id: 'orange', name: 'Amber', swatch: '#fa8231', price: 75, gradient: false },
+  { id: 'pink', name: 'Neon Pink', swatch: '#fd79a8', price: 75, gradient: false },
 ];
 
 export const GRADIENT_DICE_PRICE = 100;

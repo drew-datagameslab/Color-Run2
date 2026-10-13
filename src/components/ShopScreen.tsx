@@ -49,22 +49,22 @@ interface ShopScreenProps {
   onBack: () => void;
 }
 
-// Dice colors and prices live in src/lib/diceCatalog.ts (classic 50 coins, gradient sets 100)
+// Dice colors and prices live in src/lib/diceCatalog.ts (solid colors 75 coins, gradient sets 100)
 const DICE_GROUPS = [
   { title: 'Gradient Sets', items: GRADIENT_DICE },
   { title: 'Classic Colors', items: CLASSIC_DICE },
 ];
 
-// User specified: Backgrounds should be 50 coins as well.
+// User specified: Backgrounds are 75 coins.
 const ALL_BGS = [
   { id: 'wood', name: 'Wood Table', price: 0, image: '/media/backgrounds/wood.jpg' },
-  { id: 'blue-abstract', name: 'Blue Abstract', price: 50, image: '/media/backgrounds/blue-abstract.jpg' },
-  { id: 'purple-abstract', name: 'Purple Abstract', price: 50, image: '/media/backgrounds/purple-abstract.jpg' },
-  { id: 'purple-dots', name: 'Purple Dots', price: 50, image: '/media/backgrounds/purple-dots.jpg' },
-  { id: 'galaxy', name: 'Night Galaxy', price: 50, image: '/media/backgrounds/galaxy.jpg' },
-  { id: 'sky', name: 'Puffy Clouds', price: 50, image: '/media/backgrounds/sky.jpg' },
-  { id: 'castle', name: 'Castle Garden', price: 50, image: '/media/backgrounds/castle.jpg' },
-  { id: 'cliffs', name: 'Cliffs of Scotland', price: 50, image: '/media/backgrounds/cliffs.jpg' },
+  { id: 'blue-abstract', name: 'Blue Abstract', price: 75, image: '/media/backgrounds/blue-abstract.jpg' },
+  { id: 'purple-abstract', name: 'Purple Abstract', price: 75, image: '/media/backgrounds/purple-abstract.jpg' },
+  { id: 'purple-dots', name: 'Purple Dots', price: 75, image: '/media/backgrounds/purple-dots.jpg' },
+  { id: 'galaxy', name: 'Night Galaxy', price: 75, image: '/media/backgrounds/galaxy.jpg' },
+  { id: 'sky', name: 'Puffy Clouds', price: 75, image: '/media/backgrounds/sky.jpg' },
+  { id: 'castle', name: 'Castle Garden', price: 75, image: '/media/backgrounds/castle.jpg' },
+  { id: 'cliffs', name: 'Cliffs of Scotland', price: 75, image: '/media/backgrounds/cliffs.jpg' },
 ];
 
 // Coin Bank packages specified by user:
@@ -204,7 +204,7 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
     const isUnlocked = shopSettings.unlockedColors.includes(colorId);
     if (!isUnlocked) {
       const colorDef = diceOption(colorId);
-      const price = colorDef ? colorDef.price : 50;
+      const price = colorDef ? colorDef.price : 75;
       if (coins < price) {
         showToast('Not enough coins!');
         return;
@@ -238,7 +238,7 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
 
     if (!isUnlocked) {
       const bgDef = ALL_BGS.find(b => b.id === bgId);
-      const price = bgDef ? bgDef.price : 50;
+      const price = bgDef ? bgDef.price : 75;
       if (coins < price) {
         showToast('Not enough coins!');
         return;
@@ -817,7 +817,7 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
                 <span className="text-xs text-[#8c7456] font-bold bg-white/80 px-2.5 py-1 rounded-lg border border-[#ebdcb9] text-right leading-tight">
                   Gradient {GRADIENT_DICE_PRICE} 🪙
                   <br />
-                  Classic 50 🪙
+                  Classic 75 🪙
                 </span>
               </div>
 
@@ -922,7 +922,7 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
                   </p>
                 </div>
                 <span className="text-xs text-[#8c7456] font-bold bg-white/80 px-2.5 py-1 rounded-lg border border-[#ebdcb9]">
-                  50 🪙 each
+                  75 🪙 each
                 </span>
               </div>
 
