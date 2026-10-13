@@ -15,7 +15,7 @@ const DICE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const SETS = {
   sunset: { dir: 'd', stops: [[0, '#fbbf24'], [0.5, '#f97316'], [1, '#db2777']] },
   ocean: { dir: 'd', stops: [[0, '#22d3ee'], [1, '#1e3a8a']] },
-  aurora: { dir: 'd', stops: [[0, '#34d399'], [0.5, '#06b6d4'], [1, '#7c3aed']] },
+  fireice: { dir: 'd', stops: [[0, '#fb923c'], [0.35, '#dc2626'], [0.65, '#2563eb'], [1, '#7dd3fc']] },
   twilight: { dir: 'd', stops: [[0, '#f472b6'], [0.5, '#9333ea'], [1, '#1e1b4b']] },
   galaxy: { dir: 'd', stops: [[0, '#7c3aed'], [0.55, '#312e81'], [1, '#0b1026']], stars: true },
   rainbow: { dir: 'd', stops: [[0, '#ef4444'], [0.2, '#f97316'], [0.4, '#eab308'], [0.6, '#22c55e'], [0.8, '#3b82f6'], [1, '#8b5cf6']] },

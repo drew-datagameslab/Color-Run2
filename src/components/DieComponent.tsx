@@ -68,7 +68,7 @@ const COLOR_THEMES: Record<
   desert: { bgTop: '#f5d08a', bgBottom: '#7c2d12', stroke: 'rgba(255, 255, 255, 0.45)' },
   gold: { bgTop: '#fde68a', bgBottom: '#8a6508', stroke: 'rgba(255, 255, 255, 0.45)' },
   forest: { bgTop: '#a3e635', bgBottom: '#14532d', stroke: 'rgba(255, 255, 255, 0.45)' },
-  aurora: { bgTop: '#34d399', bgBottom: '#7c3aed', stroke: 'rgba(255, 255, 255, 0.45)' },
+  fireice: { bgTop: '#fb923c', bgBottom: '#7dd3fc', stroke: 'rgba(255, 255, 255, 0.45)' },
   ocean: { bgTop: '#22d3ee', bgBottom: '#1e3a8a', stroke: 'rgba(255, 255, 255, 0.45)' },
   silver: { bgTop: '#f1f5f9', bgBottom: '#5b6470', stroke: 'rgba(255, 255, 255, 0.45)' },
   cottoncandy: { bgTop: '#f472b6', bgBottom: '#3b82f6', stroke: 'rgba(255, 255, 255, 0.45)' },

@@ -36,7 +36,7 @@ export const GRADIENT_DICE: DiceColorOption[] = [
   { id: 'desert', name: 'Desert', swatch: gradient('#f5d08a', '#d97742', '#7c2d12') },
   { id: 'gold', name: 'Gold', swatch: gradient('#fde68a', '#d4a017', '#8a6508') },
   { id: 'forest', name: 'Forest', swatch: gradient('#a3e635', '#16a34a', '#14532d') },
-  { id: 'aurora', name: 'Aurora', swatch: gradient('#34d399', '#06b6d4', '#7c3aed') },
+  { id: 'fireice', name: 'Fire & Ice', swatch: gradient('#fb923c', '#dc2626', '#2563eb', '#7dd3fc') },
   { id: 'ocean', name: 'Ocean', swatch: gradient('#22d3ee', '#1e3a8a') },
   { id: 'silver', name: 'Silver', swatch: gradient('#f1f5f9', '#a3adb8', '#5b6470') },
   { id: 'cottoncandy', name: 'Cotton Candy', swatch: gradient('#f472b6', '#a78bfa', '#3b82f6') },

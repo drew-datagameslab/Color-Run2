@@ -2,7 +2,7 @@ export type DiceColor =
   // Classic solid colors
   | 'blue' | 'red' | 'green' | 'purple' | 'black' | 'lblue' | 'orange' | 'pink'
   // Gradient sets (see src/lib/diceCatalog.ts)
-  | 'sunset' | 'ruby' | 'desert' | 'gold' | 'forest' | 'aurora'
+  | 'sunset' | 'ruby' | 'desert' | 'gold' | 'forest' | 'fireice'
   | 'ocean' | 'silver' | 'cottoncandy' | 'twilight' | 'galaxy' | 'rainbow';
 
 export interface Die {
