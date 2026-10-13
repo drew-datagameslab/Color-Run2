@@ -29,6 +29,7 @@ import {
 import { UserAccount, DiceColor, ShopSettings, Friend, FriendRequest } from '../types/game';
 import { DEFAULT_AVATARS } from '../lib/storage';
 import { DieComponent } from './DieComponent';
+import { ALL_DICE_OPTIONS, ownsDiceColor } from '../lib/diceCatalog';
 import { getSoundVolume, setSoundVolume, playSfx } from '../lib/audio';
 import { registerUserPhoneNumber } from '../lib/referrals';
 import {
@@ -65,16 +66,8 @@ interface ProfileModalProps {
   onOpenRules?: (tab?: 'rules' | 'levels') => void;
 }
 
-const ALL_DICE_COLORS: Array<{ id: DiceColor; name: string; hex: string }> = [
-  { id: 'blue', name: 'Blue', hex: '#1f7fd6' },
-  { id: 'red', name: 'Red', hex: '#e5352f' },
-  { id: 'green', name: 'Green', hex: '#2f9a4f' },
-  { id: 'purple', name: 'Purple', hex: '#8e44c9' },
-  { id: 'black', name: 'Midnight', hex: '#222222' },
-  { id: 'lblue', name: 'Sky Blue', hex: '#45aaf2' },
-  { id: 'orange', name: 'Amber', hex: '#fa8231' },
-  { id: 'pink', name: 'Neon Pink', hex: '#fd79a8' },
-];
+// Dice colors come from src/lib/diceCatalog.ts; only owned colors can be equipped here
+const ALL_DICE_COLORS = ALL_DICE_OPTIONS;
 
 const ALL_BACKGROUNDS: Array<{ id: string; name: string; previewClass: string; desc: string }> = [
   { id: 'bg-wood', name: 'Classic Wood', previewClass: 'bg-wood', desc: 'Warm mahogany grain' },
@@ -86,6 +79,14 @@ const ALL_BACKGROUNDS: Array<{ id: string; name: string; previewClass: string; d
   { id: 'bg-midnight', name: 'Midnight Blue Felt', previewClass: 'bg-midnight', desc: 'Sleek luxury navy' },
   { id: 'bg-marble', name: 'Dark Slate Marble', previewClass: 'bg-marble', desc: 'Modern charcoal stone' },
 ];
+
+// Backgrounds the shop sells must be bought (or unlocked with a coupon) before they can be
+// equipped here. Wood and the felt/marble surfaces, which the shop doesn't sell, are free.
+const SHOP_BACKGROUNDS = ['bg-galaxy', 'bg-sky', 'bg-castle', 'bg-cliffs'];
+function ownsBackground(unlockedBgs: string[] | undefined, id: string): boolean {
+  if (!SHOP_BACKGROUNDS.includes(id)) return true;
+  return !!unlockedBgs && (unlockedBgs.includes(id) || unlockedBgs.includes(id.replace(/^bg-/, '')));
+}
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({
   isOpen,
@@ -266,6 +267,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   };
 
   // Dice state
+  const ownedDiceColors = ALL_DICE_COLORS.filter(c => ownsDiceColor(shopSettings.unlockedColors, c.id));
+  const ownedBackgrounds = ALL_BACKGROUNDS.filter(bg => ownsBackground(shopSettings.unlockedBgs, bg.id));
   const [diceColorA, setDiceColorA] = useState<DiceColor>(user.diceColors?.[0] || shopSettings.equippedColors[0] || 'blue');
   const [diceColorB, setDiceColorB] = useState<DiceColor>(user.diceColors?.[1] || shopSettings.equippedColors[1] || 'red');
   const [activeSlot, setActiveSlot] = useState<1 | 2>(1);
@@ -304,7 +307,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     if (activeSlot === 1) {
       nextA = c;
       if (c === nextB) {
-        nextB = ALL_DICE_COLORS.find(item => item.id !== c)?.id || 'red';
+        nextB = ownedDiceColors.find(item => item.id !== c)?.id || 'red';
       }
       setDiceColorA(nextA);
       setDiceColorB(nextB);
@@ -312,7 +315,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     } else {
       nextB = c;
       if (c === nextA) {
-        nextA = ALL_DICE_COLORS.find(item => item.id !== c)?.id || 'blue';
+        nextA = ownedDiceColors.find(item => item.id !== c)?.id || 'blue';
       }
       setDiceColorA(nextA);
       setDiceColorB(nextB);
@@ -1112,7 +1115,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
               {/* Color Grid */}
               <div className="grid grid-cols-4 gap-2 mb-3">
-                {ALL_DICE_COLORS.map(c => {
+                {ownedDiceColors.map(c => {
                   const isSelected =
                     (activeSlot === 1 && diceColorA === c.id) || (activeSlot === 2 && diceColorB === c.id);
                   const isOtherSlot =
@@ -1132,7 +1135,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                     >
                       <div
                         className="w-7 h-7 rounded-lg shadow-xs border border-black/20"
-                        style={{ backgroundColor: c.hex }}
+                        style={{ background: c.swatch }}
                       />
                       <span className="text-[10px] font-black text-[#4a3622] truncate w-full text-center">
                         {c.name}
@@ -1140,6 +1143,11 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                     </button>
                   );
                 })}
+              </div>
+
+
+              <div className="text-[10px] text-[#6e533c] text-center font-bold bg-amber-50 p-2 rounded-xl border border-amber-300/60 mb-2">
+                🛍️ More dice sets, including gradients, are in the Shop. Level-up coupons unlock one free!
               </div>
 
               <div className="text-[10px] text-[#8c7456] text-center italic bg-white/50 p-2 rounded-xl border border-[#ebdcb9]">
@@ -1161,7 +1169,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               </div>
 
               <div className="grid grid-cols-2 gap-2.5">
-                {ALL_BACKGROUNDS.map(bg => {
+                {ownedBackgrounds.map(bg => {
                   const isEquipped = equippedBg === bg.id;
                   return (
                     <button

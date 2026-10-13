@@ -106,13 +106,15 @@ export function runLevelXpTests() {
     rankedUnlocked: false,
   };
 
-  // Give 1,700 XP (enough to reach Level 10 and unlock ranked mode!)
+  // Give 1,700 XP (enough to reach Level 10)
   const progressRes = applyXpToUser(initialUserLevel, 1700, false);
   assert(progressRes.leveledUp === true, 'Player leveled up');
   assert(progressRes.updatedState.level === 10, `Player should be level 10, got ${progressRes.updatedState.level}`);
   assert(progressRes.updatedState.rankedUnlocked === true, 'Ranked mode unlocked at level 10');
   assert(progressRes.updatedState.unlockedRewards.includes('feature_custom_name_color'), 'Custom name color unlocked at level 5');
-  assert(progressRes.updatedState.unlockedRewards.includes('feature_ranked_mode'), 'Ranked mode feature unlocked in rewards');
+  assert(progressRes.updatedState.unlockedRewards.includes('coupon_lvl10'), 'Level 10 coupon unlocked in rewards');
+  // Coupons at levels 2, 3, 4, 8 and 10
+  assert(progressRes.diceCreditsAwarded === 5, `Five free coupons by level 10, got ${progressRes.diceCreditsAwarded}`);
   console.log('✓ Level up progression and rewards unlocks verified');
 
   // Test 5: Prestige Execution
@@ -135,10 +137,15 @@ export function runLevelXpTests() {
   const lvl5 = LEVEL_REWARDS.find(r => r.level === 5);
   assert(lvl5?.type === 'name_color', 'Level 5 reward is custom name color');
   const lvl10 = LEVEL_REWARDS.find(r => r.level === 10);
-  assert(lvl10?.type === 'ranked_unlock', 'Level 10 reward is ranked mode unlock');
+  assert(lvl10?.type === 'dice_credit', 'Level 10 reward is a free dice or background coupon');
   const lvl50 = LEVEL_REWARDS.find(r => r.level === 50);
-  assert(lvl50?.type === 'dice_credit', 'Level 50 reward is dice color credit & prestige access');
+  assert(lvl50?.type === 'dice_credit', 'Level 50 reward is a free coupon & prestige access');
   const lvl2 = LEVEL_REWARDS.find(r => r.level === 2);
-  assert(lvl2?.type === 'dice_credit', 'Level 2 reward is dice color credit');
-  console.log('✓ Master rewards catalog verified');
+  assert(lvl2?.type === 'dice_credit', 'Level 2 reward is a free coupon');
+  // Every reward unlocks something real: no emotes, themes, roll effects or ranked mode
+  const unbuilt = LEVEL_REWARDS.filter(r => ['emote', 'board_theme', 'roll_effect', 'ranked_unlock', 'animated_dice', 'dice_skin'].includes(r.type));
+  assert(unbuilt.length === 0, `No rewards for features that do not exist, found ${unbuilt.map(r => r.level).join(', ')}`);
+  const coupons = LEVEL_REWARDS.filter(r => r.type === 'dice_credit').map(r => r.level);
+  assert(coupons.join() === '2,3,4,8,10,12,15,17,20,22,27,30,32,35,37,40,42,45,47,50', `Coupon levels, got ${coupons.join()}`);
+  console.log('✓ Master rewards catalog verified (20 free dice or background coupons)');
 }

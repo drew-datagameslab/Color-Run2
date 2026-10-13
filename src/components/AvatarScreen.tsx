@@ -3,29 +3,23 @@ import { Camera, Upload, Check } from 'lucide-react';
 import { UserAccount, DiceColor } from '../types/game';
 import { DEFAULT_AVATARS } from '../lib/storage';
 import { DieComponent } from './DieComponent';
+import { ALL_DICE_OPTIONS, ownsDiceColor } from '../lib/diceCatalog';
 
 interface AvatarScreenProps {
   user: UserAccount;
   onSave: (updatedUser: UserAccount) => void;
   onBack: () => void;
+  /** Dice colors the player owns (from the shop); only these can be chosen */
+  unlockedColors?: string[];
 }
-
-const ALL_DICE_COLORS: Array<{ id: DiceColor; name: string; hex: string }> = [
-  { id: 'blue', name: 'Blue', hex: '#1f7fd6' },
-  { id: 'red', name: 'Red', hex: '#e5352f' },
-  { id: 'green', name: 'Green', hex: '#2f9a4f' },
-  { id: 'purple', name: 'Purple', hex: '#8e44c9' },
-  { id: 'black', name: 'Black', hex: '#222222' },
-  { id: 'lblue', name: 'Sky Blue', hex: '#45aaf2' },
-  { id: 'orange', name: 'Orange', hex: '#fa8231' },
-  { id: 'pink', name: 'Pink', hex: '#fd79a8' },
-];
 
 export const AvatarScreen: React.FC<AvatarScreenProps> = ({
   user,
   onSave,
   onBack,
+  unlockedColors,
 }) => {
+  const ALL_DICE_COLORS = ALL_DICE_OPTIONS.filter(c => ownsDiceColor(unlockedColors, c.id));
   const [name, setName] = useState(user.name);
   const [selectedColor, setSelectedColor] = useState(user.avatar.color || DEFAULT_AVATARS[0]);
   const [selectedImage, setSelectedImage] = useState<string | undefined>(user.avatar.image);
@@ -326,7 +320,7 @@ export const AvatarScreen: React.FC<AvatarScreenProps> = ({
                   >
                     <div
                       className="w-6 h-6 rounded-md shadow-xs border border-black/20"
-                      style={{ backgroundColor: c.hex }}
+                      style={{ background: c.swatch }}
                     />
                     <span className="text-[10px] font-bold text-[#4a3622] truncate w-full text-center">
                       {c.name}

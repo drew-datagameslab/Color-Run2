@@ -959,6 +959,7 @@ export default function App() {
         {screen === 'avatar' && (
           <AvatarScreen
             user={user}
+            unlockedColors={shopSettings.unlockedColors}
             onSave={u => {
               handleSaveUser(u);
               setScreen('mainmenu');

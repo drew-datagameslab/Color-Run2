@@ -18,6 +18,7 @@ import {
   Palette,
 } from 'lucide-react';
 import { DiceColor, ShopSettings, UserAccount } from '../types/game';
+import { CLASSIC_DICE, GRADIENT_DICE, GRADIENT_DICE_PRICE, diceOption } from '../lib/diceCatalog';
 import { getSoundVolume, setSoundVolume, playWinCoinsSound } from '../lib/audio';
 import { redeemReferralCode } from '../lib/referrals';
 import { saveEmailSubscriber, markEmailSubscriberVerified } from '../lib/firebase';
@@ -48,16 +49,10 @@ interface ShopScreenProps {
   onBack: () => void;
 }
 
-// User specified: Prices for all dice will be 50 coins.
-const ALL_COLORS: Array<{ id: DiceColor; name: string; hex: string; price: number }> = [
-  { id: 'blue', name: 'Blue', hex: '#1f7fd6', price: 0 },
-  { id: 'red', name: 'Red', hex: '#e5352f', price: 0 },
-  { id: 'green', name: 'Green', hex: '#2f9a4f', price: 50 },
-  { id: 'purple', name: 'Purple', hex: '#8e44c9', price: 50 },
-  { id: 'black', name: 'Midnight', hex: '#222222', price: 50 },
-  { id: 'lblue', name: 'Sky Blue', hex: '#45aaf2', price: 50 },
-  { id: 'orange', name: 'Amber', hex: '#fa8231', price: 50 },
-  { id: 'pink', name: 'Neon Pink', hex: '#fd79a8', price: 50 },
+// Dice colors and prices live in src/lib/diceCatalog.ts (classic 50 coins, gradient sets 100)
+const DICE_GROUPS = [
+  { title: 'Gradient Sets', items: GRADIENT_DICE },
+  { title: 'Classic Colors', items: CLASSIC_DICE },
 ];
 
 // User specified: Backgrounds should be 50 coins as well.
@@ -151,23 +146,55 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
     });
   };
 
-  const handleUnlockWithCredit = (colorId: DiceColor) => {
-    const credits = shopSettings.diceColorCredits || 0;
-    if (credits <= 0) {
-      showToast('No dice color credits available!');
+  // Level-up coupons (stored as diceColorCredits) unlock any dice set or background for free
+  const couponCount = shopSettings.diceColorCredits || 0;
+
+  const handleUseCoupon = (kind: 'dice' | 'background', id: string) => {
+    if (couponCount <= 0) {
+      showToast('No free coupons available!');
       return;
     }
-    const colorDef = ALL_COLORS.find(c => c.id === colorId);
-    const nextUnlocked = [...shopSettings.unlockedColors, colorId];
-    const nextCredits = credits - 1;
-    onUpdateShop({
-      ...shopSettings,
-      unlockedColors: nextUnlocked,
-      diceColorCredits: nextCredits,
-    });
-    showToast(`🎨 Unlocked ${colorDef?.name || colorId} using 1 Dice Color Credit!`);
+    const nextCoupons = couponCount - 1;
+    if (kind === 'dice') {
+      const name = diceOption(id as DiceColor)?.name || id;
+      onUpdateShop({
+        ...shopSettings,
+        unlockedColors: [...shopSettings.unlockedColors, id as DiceColor],
+        diceColorCredits: nextCoupons,
+      });
+      showToast(`🎟️ Unlocked ${name} dice with a free coupon!`);
+    } else {
+      const name = ALL_BGS.find(b => b.id === id)?.name || id;
+      onUpdateShop({
+        ...shopSettings,
+        unlockedBgs: [...shopSettings.unlockedBgs, id],
+        equippedBg: id,
+        diceColorCredits: nextCoupons,
+      });
+      showToast(`🎟️ Unlocked ${name} with a free coupon!`);
+    }
     playWinCoinsSound();
   };
+
+  const couponBanner =
+    couponCount > 0 ? (
+      <div className="p-2.5 rounded-xl bg-gradient-to-r from-amber-500/20 via-yellow-400/25 to-amber-500/20 border-2 border-amber-500/70 flex items-center justify-between shadow-xs">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">🎟️</span>
+          <div>
+            <div className="text-xs font-black text-amber-900">
+              {couponCount} Free Coupon{couponCount === 1 ? '' : 's'} Available!
+            </div>
+            <div className="text-[10px] text-amber-800 font-medium">
+              Unlock any dice set or table background for FREE. Your choice!
+            </div>
+          </div>
+        </div>
+        <span className="text-[10px] font-black bg-amber-500 text-stone-950 px-2.5 py-0.5 rounded-full shadow-2xs">
+          Free Unlock
+        </span>
+      </div>
+    ) : null;
 
   const handleOpenAdFreeCheckout = (plan: 'monthly' | 'yearly') => {
     setCheckoutModalPlan(plan);
@@ -176,7 +203,7 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
   const handleEquipColor = async (colorId: DiceColor, slot: 0 | 1) => {
     const isUnlocked = shopSettings.unlockedColors.includes(colorId);
     if (!isUnlocked) {
-      const colorDef = ALL_COLORS.find(c => c.id === colorId);
+      const colorDef = diceOption(colorId);
       const price = colorDef ? colorDef.price : 50;
       if (coins < price) {
         showToast('Not enough coins!');
@@ -787,38 +814,25 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
                     Spade face (♠) showing for each available color
                   </p>
                 </div>
-                <span className="text-xs text-[#8c7456] font-bold bg-white/80 px-2.5 py-1 rounded-lg border border-[#ebdcb9]">
-                  50 🪙 each
+                <span className="text-xs text-[#8c7456] font-bold bg-white/80 px-2.5 py-1 rounded-lg border border-[#ebdcb9] text-right leading-tight">
+                  Gradient {GRADIENT_DICE_PRICE} 🪙
+                  <br />
+                  Classic 50 🪙
                 </span>
               </div>
 
-              {/* Dice Color Credit notification banner */}
-              {(shopSettings.diceColorCredits || 0) > 0 && (
-                <div className="p-2.5 rounded-xl bg-gradient-to-r from-amber-500/20 via-yellow-400/25 to-amber-500/20 border-2 border-amber-500/70 flex items-center justify-between shadow-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl">🎨</span>
-                    <div>
-                      <div className="text-xs font-black text-amber-900">
-                        {shopSettings.diceColorCredits} Dice Color Credit{shopSettings.diceColorCredits === 1 ? '' : 's'} Available!
-                      </div>
-                      <div className="text-[10px] text-amber-800 font-medium">
-                        Redeem on any locked color below for FREE!
-                      </div>
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-black bg-amber-500 text-stone-950 px-2.5 py-0.5 rounded-full shadow-2xs">
-                    Free Unlock
-                  </span>
-                </div>
-              )}
+              {couponBanner}
 
+              {DICE_GROUPS.map(group => (
+              <div key={group.title} className="flex flex-col gap-1.5">
+              <h4 className="px-1 text-[11px] font-black text-[#6e533c] uppercase tracking-wide">{group.title}</h4>
               <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
-                {ALL_COLORS.map(color => {
+                {group.items.map(color => {
                   const isUnlocked = shopSettings.unlockedColors.includes(color.id);
                   const isEquippedSlot0 = shopSettings.equippedColors[0] === color.id;
                   const isEquippedSlot1 = shopSettings.equippedColors[1] === color.id;
                   const isEquipped = isEquippedSlot0 || isEquippedSlot1;
-                  const hasCredits = (shopSettings.diceColorCredits || 0) > 0;
+                  const hasCredits = couponCount > 0;
 
                   return (
                     <div
@@ -846,11 +860,11 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
                         <div className="flex flex-col gap-1 w-full">
                           {hasCredits && (
                             <button
-                              onClick={() => handleUnlockWithCredit(color.id)}
+                              onClick={() => handleUseCoupon('dice', color.id)}
                               className="w-full py-1 text-xs font-black bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-stone-950 rounded-lg shadow-xs transition-transform active:scale-95 cursor-pointer flex items-center justify-center gap-1"
                             >
-                              <span>🎨</span>
-                              <span>Use Credit (Free)</span>
+                              <span>🎟️</span>
+                              <span>Use Coupon (Free)</span>
                             </button>
                           )}
                           <button
@@ -888,6 +902,8 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
                   );
                 })}
               </div>
+              </div>
+              ))}
             </div>
           )}
 
@@ -910,6 +926,8 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
                 </span>
               </div>
 
+              {couponBanner}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {ALL_BGS.map(bg => {
                   const isUnlocked =
@@ -922,14 +940,17 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
                     (bg.id === 'wood' && (shopSettings.equippedBg === 'wood' || shopSettings.equippedBg === 'bg-wood'));
 
                   return (
-                    <button
+                    <div
                       key={bg.id}
-                      onClick={() => handleEquipBg(bg.id)}
-                      className={`p-2.5 rounded-xl text-left border flex items-center gap-2.5 transition-all cursor-pointer ${
+                      className={`p-2.5 rounded-xl border flex flex-col gap-2 transition-all ${
                         isEquipped
                           ? 'bg-[#2f9a4f]/15 border-[#2f9a4f] ring-1 ring-[#2f9a4f]'
                           : 'bg-white/85 border-[#ebdcb9] hover:bg-white'
                       }`}
+                    >
+                    <button
+                      onClick={() => handleEquipBg(bg.id)}
+                      className="text-left flex items-center gap-2.5 w-full cursor-pointer"
                     >
                       <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0 border border-[#ebdcb9] bg-[#bd9059] flex items-center justify-center shadow-2xs">
                         {bg.image ? (
@@ -946,6 +967,16 @@ export const ShopScreen: React.FC<ShopScreenProps> = ({
                       </div>
                       {isEquipped && <Check className="w-4 h-4 text-[#2f9a4f] shrink-0" />}
                     </button>
+                    {!isUnlocked && couponCount > 0 && (
+                      <button
+                        onClick={() => handleUseCoupon('background', bg.id)}
+                        className="w-full py-1 text-xs font-black bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-stone-950 rounded-lg shadow-xs transition-transform active:scale-95 cursor-pointer flex items-center justify-center gap-1"
+                      >
+                        <span>🎟️</span>
+                        <span>Use Coupon (Free)</span>
+                      </button>
+                    )}
+                    </div>
                   );
                 })}
               </div>

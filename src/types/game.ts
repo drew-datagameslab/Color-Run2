@@ -1,4 +1,9 @@
-export type DiceColor = 'blue' | 'red' | 'green' | 'purple' | 'black' | 'lblue' | 'orange' | 'pink';
+export type DiceColor =
+  // Classic solid colors
+  | 'blue' | 'red' | 'green' | 'purple' | 'black' | 'lblue' | 'orange' | 'pink'
+  // Gradient sets (see src/lib/diceCatalog.ts)
+  | 'sunset' | 'ember' | 'desert' | 'gold' | 'lagoon' | 'aurora'
+  | 'ocean' | 'silver' | 'cottoncandy' | 'twilight' | 'galaxy' | 'rainbow';
 
 export interface Die {
   id: number;

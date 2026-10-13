@@ -264,52 +264,40 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose, initial
                 </h3>
 
                 <div className="space-y-2 text-xs">
-                  <div className="p-2 rounded-lg bg-[#faf4e6] border border-[#ebdcb9] flex items-center justify-between">
+                  <div className="p-2 rounded-lg bg-[#faf4e6] border border-[#ebdcb9] flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-[#1c6a35]">Lv. 2–4</span>
-                      <span className="text-[#523d2a]">Free Dice Skins (Golden Ember, Emerald, Frozen Frost)</span>
+                      <span className="font-bold text-[#1c6a35] shrink-0">Lv. 2–4</span>
+                      <span className="text-[#523d2a]">Free Dice or Background Coupon at each level: unlock any dice set or table background in the Shop</span>
                     </div>
-                    <span className="text-base">🎲</span>
+                    <span className="text-base">🎟️</span>
                   </div>
-
-                  <div className="p-2 rounded-lg bg-[#faf4e6] border border-[#ebdcb9] flex items-center justify-between">
+                  <div className="p-2 rounded-lg bg-[#faf4e6] border border-[#ebdcb9] flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-[#1c6a35]">Lv. 5</span>
+                      <span className="font-bold text-[#1c6a35] shrink-0">Lv. 5</span>
                       <span className="text-[#523d2a]">Custom Player Name Colors unlocked</span>
                     </div>
                     <span className="text-base">🎨</span>
                   </div>
-
-                  <div className="p-2 rounded-lg bg-[#faf4e6] border border-[#ebdcb9] flex items-center justify-between">
+                  <div className="p-2 rounded-lg bg-[#faf4e6] border border-[#ebdcb9] flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-[#1c6a35]">Lv. 15</span>
-                      <span className="text-[#523d2a]">Cyber Neon Dice Skin</span>
+                      <span className="font-bold text-[#1c6a35] shrink-0">Lv. 8–47</span>
+                      <span className="text-[#523d2a]">More Free Coupons at levels 8, 10, 12, 15, 17, 20, 22, 27, 30, 32, 35, 37, 40, 42, 45 &amp; 47</span>
                     </div>
-                    <span className="text-base">🟣</span>
+                    <span className="text-base">🎟️</span>
                   </div>
-
-                  <div className="p-2 rounded-lg bg-[#faf4e6] border border-[#ebdcb9] flex items-center justify-between">
+                  <div className="p-2 rounded-lg bg-[#faf4e6] border border-[#ebdcb9] flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-[#1c6a35]">Lv. 20</span>
-                      <span className="text-[#523d2a]">Retro Synthwave Board Theme</span>
+                      <span className="font-bold text-[#1c6a35] shrink-0">Lv. 6–49</span>
+                      <span className="text-[#523d2a]">Bonus coins at every other level, growing from 50 to 1,000</span>
                     </div>
-                    <span className="text-base">🌆</span>
+                    <span className="text-base">🪙</span>
                   </div>
-
-                  <div className="p-2 rounded-lg bg-[#faf4e6] border border-[#ebdcb9] flex items-center justify-between">
+                  <div className="p-2 rounded-lg bg-[#faf4e6] border border-[#ebdcb9] flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-[#1c6a35]">Lv. 25</span>
+                      <span className="font-bold text-[#1c6a35] shrink-0">Lv. 25</span>
                       <span className="text-[#523d2a]">Custom Profile Banners &amp; Exclusive Titles</span>
                     </div>
                     <span className="text-base">👑</span>
-                  </div>
-
-                  <div className="p-2 rounded-lg bg-[#faf4e6] border border-[#ebdcb9] flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-[#1c6a35]">Lv. 30–45</span>
-                      <span className="text-[#523d2a]">Imperial Palace Theme, Midnight Dice, Electric Trail</span>
-                    </div>
-                    <span className="text-base">⚡</span>
                   </div>
 
                   <div className="p-2.5 rounded-xl bg-amber-50/90 border border-amber-300 flex items-start gap-2.5">
@@ -317,9 +305,9 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose, initial
                       Lv. 50
                     </div>
                     <div>
-                      <div className="font-black text-amber-950 text-xs">🌈 Animated Prismatic Dice &amp; Prestige Access</div>
+                      <div className="font-black text-amber-950 text-xs">🌈 Free Coupon &amp; Prestige Access</div>
                       <p className="text-[11px] text-amber-800 mt-0.5">
-                        Color-shifting animated dice skin + access to Prestige rank reset with permanent ⭐ badge.
+                        One more free dice set or background (Rainbow, Galaxy, Gold and more) + access to Prestige rank reset with permanent ⭐ badge.
                       </p>
                     </div>
                   </div>
