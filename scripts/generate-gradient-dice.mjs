@@ -21,8 +21,8 @@ const SETS = {
   rainbow: { dir: 'd', stops: [[0, '#ef4444'], [0.2, '#f97316'], [0.4, '#eab308'], [0.6, '#22c55e'], [0.8, '#3b82f6'], [1, '#8b5cf6']] },
   gold: { dir: 'd', stops: [[0, '#fde68a'], [0.45, '#d4a017'], [1, '#8a6508']] },
   silver: { dir: 'd', stops: [[0, '#f1f5f9'], [0.45, '#a3adb8'], [1, '#5b6470']] },
-  ember: { dir: 'd', stops: [[0, '#facc15'], [0.45, '#ea580c'], [1, '#7f1d1d']] },
-  lagoon: { dir: 'd', stops: [[0, '#a3e635'], [0.5, '#14b8a6'], [1, '#1d4ed8']] },
+  ruby: { dir: 'd', stops: [[0, '#fb7185'], [0.45, '#be123c'], [1, '#4c0519']] },
+  forest: { dir: 'd', stops: [[0, '#a3e635'], [0.5, '#16a34a'], [1, '#14532d']] },
   cottoncandy: { dir: 'd', stops: [[0, '#f472b6'], [0.5, '#a78bfa'], [1, '#3b82f6']] },
   desert: { dir: 'd', stops: [[0, '#f5d08a'], [0.5, '#d97742'], [1, '#7c2d12']] },
 };

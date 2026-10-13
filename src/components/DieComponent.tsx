@@ -64,10 +64,10 @@ const COLOR_THEMES: Record<
   pink: { bgTop: '#f472b6', bgBottom: '#be185d', stroke: 'rgba(255, 255, 255, 0.45)' },
   // Gradient sets: start and end colors (the dice images carry the full gradient)
   sunset: { bgTop: '#fbbf24', bgBottom: '#db2777', stroke: 'rgba(255, 255, 255, 0.45)' },
-  ember: { bgTop: '#facc15', bgBottom: '#7f1d1d', stroke: 'rgba(255, 255, 255, 0.45)' },
+  ruby: { bgTop: '#fb7185', bgBottom: '#4c0519', stroke: 'rgba(255, 255, 255, 0.45)' },
   desert: { bgTop: '#f5d08a', bgBottom: '#7c2d12', stroke: 'rgba(255, 255, 255, 0.45)' },
   gold: { bgTop: '#fde68a', bgBottom: '#8a6508', stroke: 'rgba(255, 255, 255, 0.45)' },
-  lagoon: { bgTop: '#a3e635', bgBottom: '#1d4ed8', stroke: 'rgba(255, 255, 255, 0.45)' },
+  forest: { bgTop: '#a3e635', bgBottom: '#14532d', stroke: 'rgba(255, 255, 255, 0.45)' },
   aurora: { bgTop: '#34d399', bgBottom: '#7c3aed', stroke: 'rgba(255, 255, 255, 0.45)' },
   ocean: { bgTop: '#22d3ee', bgBottom: '#1e3a8a', stroke: 'rgba(255, 255, 255, 0.45)' },
   silver: { bgTop: '#f1f5f9', bgBottom: '#5b6470', stroke: 'rgba(255, 255, 255, 0.45)' },
@@ -177,7 +177,7 @@ export const DieComponent: React.FC<DieProps> = ({
     return () => window.removeEventListener('resize', updateSize);
   }, []);
 
-  const isWarm = ['red', 'orange', 'pink', 'sunset', 'ember', 'desert', 'gold'].includes(color);
+  const isWarm = ['red', 'orange', 'pink', 'sunset', 'ruby', 'desert', 'gold'].includes(color);
 
   // One tumble per roll that finishes on the rolled value, so the face the die lands on
   // is the result (an endlessly looping spin stopped on whatever face it was showing).
