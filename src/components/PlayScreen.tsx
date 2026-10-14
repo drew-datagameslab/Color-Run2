@@ -8,6 +8,7 @@ import { triggerTurnHaptic, triggerButtonHaptic, triggerDiceRollHaptic, triggerD
 import { getLocalFriends, addFriend, removeFriend, sendFriendRequest } from '../lib/friends';
 import { CardsStrip } from './CardsStrip';
 import { SavedBoard } from './SavedBoard';
+import { preloadColorRunCelebration } from './ColorRunCelebration';
 import { RollArea } from './RollArea';
 import { PlayerProfileModal } from './PlayerProfileModal';
 import { BattleVideoOverlay } from './BattleVideoOverlay';
@@ -591,12 +592,18 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     setShowSixCelebration(false);
   }, []);
 
-  // Auto-dismiss 6-of-a-kind Color Run celebration after animation plays
+  // Preload the 6-of-a-kind Color Run video so it starts instantly (and is allowed to play on iPhone)
+  useEffect(() => {
+    preloadColorRunCelebration();
+  }, []);
+
+  // Safety net for the 6-of-a-kind Color Run celebration. It normally closes itself when the
+  // animation ends (timed from when playback starts, so a slow load doesn't cut it short).
   useEffect(() => {
     if (!showSixCelebration) return;
     const timer = setTimeout(() => {
       setShowSixCelebration(false);
-    }, 3500);
+    }, 7000);
     return () => clearTimeout(timer);
   }, [showSixCelebration]);
 
