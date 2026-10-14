@@ -226,25 +226,29 @@ export const AvatarScreen: React.FC<AvatarScreenProps> = ({
             )}
           </div>
         ) : tab === 'presets' ? (
-          <div className="grid grid-cols-5 gap-2 max-h-56 overflow-y-auto p-1 scrollbar-none mb-4">
-            {Array.from({ length: 45 }).map((_, idx) => {
-              const imgPath = `/assets/avatars/avatar_${idx + 1}.png`;
-              const isSelected = selectedImage === imgPath;
-              return (
-                <button
-                  key={idx}
-                  onClick={() => setSelectedImage(imgPath)}
-                  className={`aspect-square rounded-full overflow-hidden border-2 transition-transform active:scale-90 ${isSelected ? 'border-[#2f9a4f] ring-2 ring-[#2f9a4f] scale-105' : 'border-[#d8c89f] hover:border-[#a8986f]'}`}
-                >
-                  <img
-                    src={imgPath}
-                    alt={`Avatar ${idx + 1}`}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
-                </button>
-              );
-            })}
+          // The wrapper scrolls, not the grid: iPhone Safari squeezes the rows of a height-limited
+          // grid on top of each other. Each avatar is kept square with padding (works everywhere).
+          <div className="max-h-56 overflow-y-auto p-1 scrollbar-none mb-4">
+            <div className="grid grid-cols-5 gap-2">
+              {Array.from({ length: 45 }).map((_, idx) => {
+                const imgPath = `/assets/avatars/avatar_${idx + 1}.png`;
+                const isSelected = selectedImage === imgPath;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => setSelectedImage(imgPath)}
+                    className={`relative block w-full h-0 pb-[calc(100%-4px)] rounded-full overflow-hidden border-2 transition-transform active:scale-90 ${isSelected ? 'border-[#2f9a4f] ring-2 ring-[#2f9a4f] scale-105' : 'border-[#d8c89f] hover:border-[#a8986f]'}`}
+                  >
+                    <img
+                      src={imgPath}
+                      alt={`Avatar ${idx + 1}`}
+                      className="absolute inset-0 w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  </button>
+                );
+              })}
+            </div>
           </div>
         ) : tab === 'initials' ? (
           <div className="grid grid-cols-4 gap-3 mb-4 p-2">

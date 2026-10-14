@@ -609,29 +609,33 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               </div>
 
               {avatarSubTab === 'presets' && (
-                <div className="w-full grid grid-cols-5 gap-2 max-h-48 overflow-y-auto p-1 bg-white/60 rounded-2xl border border-[#ebdcb9]">
-                  {Array.from({ length: 45 }).map((_, idx) => {
-                    const imgPath = `/assets/avatars/avatar_${idx + 1}.png`;
-                    const isSelected = selectedImage === imgPath;
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => setSelectedImage(imgPath)}
-                        className={`aspect-square rounded-full overflow-hidden border-2 transition-transform active:scale-90 cursor-pointer ${
-                          isSelected
-                            ? 'border-[#2f9a4f] ring-2 ring-[#2f9a4f] scale-105 shadow-sm'
-                            : 'border-[#d8c89f] hover:border-[#a8986f]'
-                        }`}
-                      >
-                        <img
-                          src={imgPath}
-                          alt={`Avatar ${idx + 1}`}
-                          className="w-full h-full object-cover"
-                          loading="lazy"
-                        />
-                      </button>
-                    );
-                  })}
+                // The wrapper scrolls, not the grid: iPhone Safari squeezes the rows of a height-limited
+                // grid on top of each other. Each avatar is kept square with padding (works everywhere).
+                <div className="w-full max-h-48 overflow-y-auto p-1 bg-white/60 rounded-2xl border border-[#ebdcb9]">
+                  <div className="grid grid-cols-5 gap-2">
+                    {Array.from({ length: 45 }).map((_, idx) => {
+                      const imgPath = `/assets/avatars/avatar_${idx + 1}.png`;
+                      const isSelected = selectedImage === imgPath;
+                      return (
+                        <button
+                          key={idx}
+                          onClick={() => setSelectedImage(imgPath)}
+                          className={`relative block w-full h-0 pb-[calc(100%-4px)] rounded-full overflow-hidden border-2 transition-transform active:scale-90 cursor-pointer ${
+                            isSelected
+                              ? 'border-[#2f9a4f] ring-2 ring-[#2f9a4f] scale-105 shadow-sm'
+                              : 'border-[#d8c89f] hover:border-[#a8986f]'
+                          }`}
+                        >
+                          <img
+                            src={imgPath}
+                            alt={`Avatar ${idx + 1}`}
+                            className="absolute inset-0 w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
