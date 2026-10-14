@@ -111,39 +111,39 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
           return acc + (g.count >= 8 ? 2 : 1);
         }, 0);
 
-  // Die size per row, as the --die CSS variable. Dice shrink below it only when the row is too narrow.
-  // Scales down progressively as more rows are added so dice never overlap
-  const defaultDieSizeClass =
-    visualRowCount >= 5
-      ? '[--die:22px] sm:[--die:26px]'
-      : visualRowCount === 4
-      ? '[--die:26px] sm:[--die:28px]'
-      : visualRowCount === 3
-      ? '[--die:30px] sm:[--die:34px]'
-      : visualRowCount === 2
-      ? '[--die:36px] sm:[--die:42px]'
-      : '[--die:42px] sm:[--die:48px]';
+  // Dice are sized from the space the rows actually have (measured below), so they stay as
+  // large as possible: 6 dice plus the points box must fit across, and every row must fit
+  // down. When the rolling area collapses to 1 row, the saved area grows and so do the dice.
+  const rowsRef = React.useRef<HTMLDivElement>(null);
+  const [space, setSpace] = React.useState({ w: 0, h: 0 });
+  React.useLayoutEffect(() => {
+    const el = rowsRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect;
+      setSpace(prev =>
+        Math.abs(prev.w - width) < 1 && Math.abs(prev.h - height) < 1 ? prev : { w: width, h: height }
+      );
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
-  // If 7 dice of the same shape are collected, shrink as needed to fit the 7 dice and points total
-  const shrunkSevenDieSizeClass =
-    visualRowCount >= 5
-      ? '[--die:19px] sm:[--die:22px]'
-      : visualRowCount === 4
-      ? '[--die:22px] sm:[--die:24px]'
-      : visualRowCount === 3
-      ? '[--die:26px] sm:[--die:30px]'
-      : visualRowCount === 2
-      ? '[--die:32px] sm:[--die:36px]'
-      : '[--die:38px] sm:[--die:42px]';
-
-  const rowGapClass =
-    visualRowCount >= 5
-      ? 'gap-0.5 md:gap-1'
-      : visualRowCount === 4
-      ? 'gap-0.5 md:gap-1.5'
-      : visualRowCount === 3
-      ? 'gap-1 md:gap-2'
-      : 'gap-1 sm:gap-1.5 md:gap-2.5';
+  const MAX_ROW_WIDTH = 520;
+  const POINTS_COL_PX = 44; // points box (40px) + gap
+  const DIE_GAP_PX = 4;
+  const ROW_GAP_PX = 12; // leaves room for the "+N Bonus" badge above each row
+  const MIN_DIE_PX = 20;
+  const MAX_DIE_PX = 64;
+  const rowWidth = Math.min(space.w || 340, MAX_ROW_WIDTH);
+  const dieWidthFor = (cols: number) => (rowWidth - POINTS_COL_PX - (cols - 1) * DIE_GAP_PX) / cols;
+  const dieHeight = space.h
+    ? (space.h - ROW_GAP_PX - (visualRowCount - 1) * ROW_GAP_PX) / visualRowCount
+    : MAX_DIE_PX;
+  const clampDie = (px: number) => Math.max(MIN_DIE_PX, Math.min(MAX_DIE_PX, Math.floor(px)));
+  const dieSize = clampDie(Math.min(dieWidthFor(6), dieHeight));
+  // 7 dice of the same shape stay on one row, so they shrink to fit the row
+  const sevenDieSize = clampDie(Math.min(dieWidthFor(7), dieHeight));
 
   // Helper to partition dice across 2 rows keeping same-colored dice on the same line
   const splitDiceByColor = (diceList: Die[]): [Die[], Die[]] => {
@@ -192,15 +192,15 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
     return [row1, row2];
   };
 
-  // Renders one row of dice flush left in fixed-size columns (`cols` slots, each up to --die wide),
+  // Renders one row of dice flush left in fixed-size columns (`cols` slots, each dieSize px wide),
   // filling left to right, with dashed placeholders for the remaining slots.
   // Runs of 3+ same-color dice get a gold bonus frame spanning exactly their columns,
   // so framed and unframed dice stay aligned on the same grid.
-  const DIE_GAP = 'gap-1 sm:gap-1.5';
+  const DIE_GAP = 'gap-1';
   const renderDiceRow = (
     diceList: Die[],
     cols: number,
-    dieSizeClass: string,
+    dieSize: number,
     keyPrefix: string
   ) => {
     // Group consecutive same-color dice
@@ -230,8 +230,8 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
 
     return (
       <div
-        className={`grid ${DIE_GAP} items-center justify-start w-full ${dieSizeClass}`}
-        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, var(--die)))` }}
+        className={`grid ${DIE_GAP} items-center justify-start w-full`}
+        style={{ gridTemplateColumns: `repeat(${cols}, ${dieSize}px)` }}
       >
         {colorGroups.map((group, gIdx) => {
           if (group.length >= 3) {
@@ -386,15 +386,19 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
       </AnimatePresence>
 
       {/* Rows Container: Each set pairs its dice and points total together */}
-      <div className={`flex-1 flex flex-col justify-center ${rowGapClass} min-h-0 w-full px-0.5 pt-1.5 sm:pt-2 pb-0.5 overflow-y-auto`}>
+      <div
+        ref={rowsRef}
+        className="flex-1 flex flex-col justify-center min-h-0 w-full px-0.5 pt-1.5 sm:pt-2 pb-0.5 overflow-y-auto"
+        style={{ gap: ROW_GAP_PX }}
+      >
         {groups.length === 0 ? (
           // Empty placeholder row when no dice are saved yet
-          <div className="flex items-stretch justify-between gap-1 sm:gap-1.5 md:gap-2.5 w-full max-w-[360px] sm:max-w-[420px] md:max-w-[520px] mx-auto min-h-0">
+          <div className="flex items-stretch justify-between gap-1 w-full max-w-[520px] mx-auto min-h-0">
             <div className="flex-1 min-w-0 flex items-center justify-start">
-              {renderDiceRow([], 6, defaultDieSizeClass, 'empty-init')}
+              {renderDiceRow([], 6, dieSize, 'empty-init')}
             </div>
             {/* Points box matches dice row height, centered */}
-            <div className="w-8 sm:w-10 md:w-14 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
+            <div className="w-10 shrink-0 self-stretch flex items-center justify-center">
               <div className="w-full h-full min-h-[30px] sm:min-h-[38px] md:min-h-[48px] flex items-center justify-center font-mono font-black text-xs sm:text-base md:text-xl text-white/30 border border-white/10 rounded-lg md:rounded-xl text-center">
                 0
               </div>
@@ -415,16 +419,16 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
               return (
                 <div
                   key={`group-${group.value}`}
-                  className="flex items-stretch justify-between gap-1 sm:gap-1.5 md:gap-2.5 w-full max-w-[360px] sm:max-w-[420px] md:max-w-[520px] mx-auto min-h-0"
+                  className="flex items-stretch justify-between gap-1 w-full max-w-[520px] mx-auto min-h-0"
                 >
                   {/* Two rows of dice */}
-                  <div className="flex-1 min-w-0 flex flex-col gap-1 md:gap-1.5 justify-center">
-                    {renderDiceRow(row1Dice, 6, defaultDieSizeClass, `group-${group.value}-r1`)}
-                    {renderDiceRow(row2Dice, 6, defaultDieSizeClass, `group-${group.value}-r2`)}
+                  <div className="flex-1 min-w-0 flex flex-col justify-center" style={{ gap: ROW_GAP_PX }}>
+                    {renderDiceRow(row1Dice, 6, dieSize, `group-${group.value}-r1`)}
+                    {renderDiceRow(row2Dice, 6, dieSize, `group-${group.value}-r2`)}
                   </div>
 
                   {/* Points box spanning the height of the two rows with points total centered */}
-                  <div className="w-8 sm:w-10 md:w-14 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
+                  <div className="w-10 shrink-0 self-stretch flex items-center justify-center">
                     {isEligible ? (
                       <div className="w-full h-full min-h-[60px] sm:min-h-[76px] md:min-h-[96px] flex items-center justify-center font-mono font-black text-xs sm:text-base md:text-xl rounded-xl md:rounded-2xl bg-[#28974a] text-white border-2 border-[#34c759] shadow-md text-center">
                         {pts}
@@ -451,20 +455,20 @@ export const SavedBoard: React.FC<SavedBoardProps> = ({
             // If 7 dice: shrink as needed to fit the seven dice and the points total
             const isSeven = count === 7;
             const cols = isSeven ? 7 : 6;
-            const dieClass = isSeven ? shrunkSevenDieSizeClass : defaultDieSizeClass;
+            const rowDieSize = isSeven ? sevenDieSize : dieSize;
 
             return (
               <div
                 key={`group-${group.value}`}
-                className="flex items-stretch justify-between gap-1 sm:gap-1.5 md:gap-2.5 w-full max-w-[360px] sm:max-w-[420px] md:max-w-[520px] mx-auto min-h-0"
+                className="flex items-stretch justify-between gap-1 w-full max-w-[520px] mx-auto min-h-0"
               >
                 {/* Dice container for 1 row */}
                 <div className="flex-1 min-w-0 flex items-center justify-start">
-                  {renderDiceRow(matchingDice, cols, dieClass, `group-${group.value}`)}
+                  {renderDiceRow(matchingDice, cols, rowDieSize, `group-${group.value}`)}
                 </div>
 
                 {/* Points box matching the height of the single dice row with points total centered */}
-                <div className="w-8 sm:w-10 md:w-14 shrink-0 self-stretch flex items-center justify-center pl-1 md:pl-2">
+                <div className="w-10 shrink-0 self-stretch flex items-center justify-center">
                   {isEligible ? (
                     <div className="w-full h-full min-h-[30px] sm:min-h-[38px] md:min-h-[48px] flex items-center justify-center font-mono font-black text-xs sm:text-base md:text-xl rounded-lg md:rounded-xl bg-[#28974a] text-white border border-[#34c759] shadow-xs text-center transition-colors">
                       {pts}
