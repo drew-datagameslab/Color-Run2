@@ -13,7 +13,7 @@ import { FirestoreWalletStore } from './src/server/walletStores.ts';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export const APP_VERSION = '6.5.9';
+export const APP_VERSION = '6.5.10';
 
 // Google's Firestore client can reject a promise outside our awaits (for example when
 // no credentials are available at all). Log it instead of letting it stop the server.
