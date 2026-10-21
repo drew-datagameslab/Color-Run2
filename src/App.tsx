@@ -142,9 +142,8 @@ export default function App() {
   const [isStandingsOpen, setIsStandingsOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isMenuModalOpen, setIsMenuModalOpen] = useState(false);
-  // Balloon Pop bonus board: opens by itself after a game when today's balloon can be popped
+  // Balloon Pop side game: opens by itself when a game ends and today's balloon can be popped
   const [isBalloonPopOpen, setIsBalloonPopOpen] = useState(false);
-  const [balloonReady, setBalloonReady] = useState(false);
   const [isFilesModalOpen, setIsFilesModalOpen] = useState(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -308,23 +307,20 @@ export default function App() {
     return false;
   };
 
-  // Balloon Pop: back on the main menu, check whether today's balloon can be popped, and right
-  // after a game (the first one today unlocks it) open the board automatically
+  // Balloon Pop: when a player leaves a finished game (results screen or elimination exit) and
+  // today's balloon is ready (their first game today unlocked it), open the side game over the
+  // main menu. It closes itself 10 seconds after the pop.
   const prevScreenRef = useRef(screen);
   useEffect(() => {
-    const cameFromGame = prevScreenRef.current === 'play' || prevScreenRef.current === 'winner';
+    const prev = prevScreenRef.current;
     prevScreenRef.current = screen;
-    if (screen !== 'mainmenu') return;
-    if (!isSignedInAccount(user)) {
-      setBalloonReady(false);
-      return;
-    }
+    const leftGame = (prev === 'play' || prev === 'winner') && screen !== 'play' && screen !== 'winner';
+    if (!leftGame || !isSignedInAccount(user)) return;
     let cancelled = false;
     loadBalloonBoard(user.uid).then(({ view }) => {
-      if (cancelled) return;
-      const ready = view.status === 'ready';
-      setBalloonReady(ready);
-      if (ready && cameFromGame) setIsBalloonPopOpen(true);
+      if (cancelled || view.status !== 'ready') return;
+      setScreen('mainmenu');
+      setIsBalloonPopOpen(true);
     });
     return () => {
       cancelled = true;
@@ -1011,8 +1007,6 @@ export default function App() {
             onOpenScoreboard={() => setScreen('scoreboard')}
             onOpenRules={() => handleOpenRules('rules')}
             onOpenTournament={() => triggerToast('🏆 Tournament Mode arriving in next update!')}
-            onOpenBalloonPop={() => setIsBalloonPopOpen(true)}
-            balloonReady={balloonReady}
           />
         )}
 
@@ -1269,7 +1263,10 @@ export default function App() {
         isOpen={isBalloonPopOpen}
         uid={user.uid}
         isSignedIn={isSignedInAccount(user)}
-        onClose={() => setIsBalloonPopOpen(false)}
+        onClose={() => {
+          setIsBalloonPopOpen(false);
+          setScreen('mainmenu');
+        }}
         onSignIn={() => {
           setIsBalloonPopOpen(false);
           setScreen('signin');
@@ -1279,7 +1276,6 @@ export default function App() {
           if (offline) applyLocalCoins(won);
           triggerToast(`🎈 +${won} coins from Balloon Pop!`);
         }}
-        onStatusChange={view => setBalloonReady(view.status === 'ready')}
       />
 
       {/* Cheeseburger Navigation Menu (Leave game -> Main Menu, Shop, Rules, Settings, Files) */}

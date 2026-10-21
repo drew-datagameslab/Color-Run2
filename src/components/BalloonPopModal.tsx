@@ -19,6 +19,9 @@ interface BalloonPopModalProps {
   onStatusChange?: (view: BalloonBoardView) => void;
 }
 
+/** Seconds the board stays open after the pop before returning to the main menu */
+const AUTO_CLOSE_SECONDS = 10;
+
 const COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#f97316', '#ec4899', '#14b8a6'];
 
 const Balloon: React.FC<{ color: string }> = ({ color }) => (
@@ -84,6 +87,25 @@ export const BalloonPopModal: React.FC<BalloonPopModalProps> = ({
     const timer = setInterval(() => setNow(Date.now()), 30000);
     return () => clearInterval(timer);
   }, [isOpen, refresh]);
+
+  // After the pop, the side game closes by itself (and the player returns to the main menu)
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const [closeIn, setCloseIn] = useState(AUTO_CLOSE_SECONDS);
+  useEffect(() => {
+    if (!lastWin) return;
+    setCloseIn(AUTO_CLOSE_SECONDS);
+    const started = Date.now();
+    const timer = setInterval(() => {
+      const left = AUTO_CLOSE_SECONDS - Math.floor((Date.now() - started) / 1000);
+      setCloseIn(Math.max(0, left));
+      if (left <= 0) {
+        clearInterval(timer);
+        onCloseRef.current();
+      }
+    }, 250);
+    return () => clearInterval(timer);
+  }, [lastWin]);
 
   if (!isOpen) return null;
 
@@ -246,7 +268,7 @@ export const BalloonPopModal: React.FC<BalloonPopModalProps> = ({
               onClick={onClose}
               className="mt-2 w-full py-2.5 rounded-xl bg-[#f2c14e] text-[#3a2205] font-black text-sm shadow-md cursor-pointer active:scale-98"
             >
-              Collect &amp; Continue
+              Back to Main Menu ({closeIn})
             </button>
           )}
         </div>
