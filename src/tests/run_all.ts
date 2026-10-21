@@ -7,6 +7,7 @@ import { runLevelXpTests } from './level_xp_test';
 import { runMissionsTests } from './missions_test';
 import { runFriendsTests } from './friends_test';
 import { runWalletTests } from './wallet_test';
+import { runBalloonTests } from './balloon_test';
 
 console.log('==========================================');
 console.log('   COLOR RUN TEST SUITE VERIFICATION');
@@ -23,6 +24,7 @@ async function runAll() {
     runMissionsTests();
     await runFriendsTests();
     await runWalletTests();
+    await runBalloonTests();
     console.log('==========================================');
     console.log('   ALL TEST HARNESSES PASSED GREEN! ✓');
     console.log('==========================================');

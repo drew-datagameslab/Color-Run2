@@ -146,6 +146,25 @@ match.post(
 app.use('/api/match', match);
 
 // -------------------------------------------------------------
+// Balloon Pop bonus board: one pop a day after a game, signed-in accounts only
+// (not guests). The prizes stay on the server until a balloon is popped.
+// -------------------------------------------------------------
+const balloons = express.Router();
+balloons.use(requireUser);
+balloons.use((req, res, next) => {
+  if ((req as AuthedRequest).user.signInProvider === 'anonymous') {
+    return res.status(403).json({ error: 'sign_in_required', message: 'Sign in to play Balloon Pop.' });
+  }
+  next();
+});
+
+balloons.get('/', walletRoute(async (req, s) => ({ board: await s.balloonBoard(req.user.uid) })));
+
+balloons.post('/pop', walletRoute(async (req, s) => s.popBalloon(req.user.uid, req.body?.index)));
+
+app.use('/api/bonus/balloons', balloons);
+
+// -------------------------------------------------------------
 // 4. Admin: set any player's balance (admins only)
 // -------------------------------------------------------------
 app.post(

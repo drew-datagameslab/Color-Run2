@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import { auth } from './firebase';
 import type { GrantReason, MatchTier } from './economy';
+import type { BalloonBoardView } from './balloonBoard';
 
 /**
  * Client for the Color Run server (server.ts):
@@ -105,6 +106,18 @@ export function requestMatchStart(game: { buyIn: number; playerCount: number; ti
 
 export function requestMatchPrize(matchId: string, placement: number) {
   return callServer<{ prize: number; balance: number }>('/api/match/payout', { body: { matchId, placement } });
+}
+
+/** This week's Balloon Pop board (popped balloons only; prizes stay on the server) */
+export function fetchBalloonBoard() {
+  return callServer<{ board: BalloonBoardView }>('/api/bonus/balloons', { method: 'GET' });
+}
+
+/** Pops a balloon: the server reveals and pays the prize hidden under it */
+export function requestBalloonPop(index: number) {
+  return callServer<{ coins: number; balance: number; board: BalloonBoardView }>('/api/bonus/balloons/pop', {
+    body: { index },
+  });
 }
 
 export function adminSetCoins(uid: string, amount: number) {

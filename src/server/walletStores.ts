@@ -1,5 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import type { LedgerEntry, MatchTicket, Wallet, WalletStore, WalletTx } from './wallet.ts';
+import type { BalloonBoardRecord } from '../lib/balloonBoard.ts';
 
 /**
  * Wallets in Firestore: wallets/{uid}, with matches/{matchId} and ledger/{entry}
@@ -16,6 +17,8 @@ export class FirestoreWalletStore implements WalletStore {
 
   runTransaction<T>(uid: string, fn: (tx: WalletTx) => Promise<T>): Promise<T> {
     const walletRef = this.db.collection('wallets').doc(uid);
+    // Separate from the wallet, which players can read: the hidden prizes must stay hidden
+    const balloonRef = this.db.collection('balloonBoards').doc(uid);
     return this.db.runTransaction(async t => {
       const tx: WalletTx = {
         async getWallet() {
@@ -35,6 +38,13 @@ export class FirestoreWalletStore implements WalletStore {
         addLedger(entry: LedgerEntry) {
           t.set(walletRef.collection('ledger').doc(), entry);
         },
+        async getBalloonBoard() {
+          const snap = await t.get(balloonRef);
+          return snap.exists ? (snap.data() as BalloonBoardRecord) : null;
+        },
+        setBalloonBoard(board) {
+          t.set(balloonRef, board);
+        },
       };
       return fn(tx);
     });
@@ -46,6 +56,7 @@ export class MemoryWalletStore implements WalletStore {
   wallets = new Map<string, Wallet>();
   matches = new Map<string, MatchTicket>();
   ledger: Array<LedgerEntry & { uid: string }> = [];
+  balloonBoards = new Map<string, BalloonBoardRecord>();
   legacyCoins = new Map<string, number>();
 
   async getLegacyCoins(uid: string): Promise<number | null> {
@@ -67,6 +78,11 @@ export class MemoryWalletStore implements WalletStore {
       setWallet: wallet => writes.push(() => this.wallets.set(uid, structuredClone(wallet))),
       setMatch: (matchId, ticket) => writes.push(() => this.matches.set(`${uid}/${matchId}`, { ...ticket })),
       addLedger: entry => writes.push(() => this.ledger.push({ ...entry, uid })),
+      getBalloonBoard: async () => {
+        const b = this.balloonBoards.get(uid);
+        return b ? structuredClone(b) : null;
+      },
+      setBalloonBoard: board => writes.push(() => this.balloonBoards.set(uid, structuredClone(board))),
     };
     const result = await fn(tx);
     writes.forEach(w => w());

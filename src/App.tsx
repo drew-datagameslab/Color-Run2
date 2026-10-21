@@ -92,6 +92,8 @@ import {
   MissionsData,
 } from './lib/missions';
 import { triggerButtonHaptic } from './lib/haptics';
+import { BalloonPopModal } from './components/BalloonPopModal';
+import { loadBalloonBoard, recordGamePlayedForBalloons } from './lib/balloonPop';
 
 export default function App() {
   const [user, setUser] = useState<UserAccount>(() => getInitialUser());
@@ -140,6 +142,9 @@ export default function App() {
   const [isStandingsOpen, setIsStandingsOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isMenuModalOpen, setIsMenuModalOpen] = useState(false);
+  // Balloon Pop bonus board: opens by itself after a game when today's balloon can be popped
+  const [isBalloonPopOpen, setIsBalloonPopOpen] = useState(false);
+  const [balloonReady, setBalloonReady] = useState(false);
   const [isFilesModalOpen, setIsFilesModalOpen] = useState(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -302,6 +307,30 @@ export default function App() {
     setSignInPrompt(feature);
     return false;
   };
+
+  // Balloon Pop: back on the main menu, check whether today's balloon can be popped, and right
+  // after a game (the first one today unlocks it) open the board automatically
+  const prevScreenRef = useRef(screen);
+  useEffect(() => {
+    const cameFromGame = prevScreenRef.current === 'play' || prevScreenRef.current === 'winner';
+    prevScreenRef.current = screen;
+    if (screen !== 'mainmenu') return;
+    if (!isSignedInAccount(user)) {
+      setBalloonReady(false);
+      return;
+    }
+    let cancelled = false;
+    loadBalloonBoard(user.uid).then(({ view }) => {
+      if (cancelled) return;
+      const ready = view.status === 'ready';
+      setBalloonReady(ready);
+      if (ready && cameFromGame) setIsBalloonPopOpen(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, user.uid]);
 
   const handleSelectMode = (mode: 'online' | 'cpu' | 'challenge_friend' | 'pass_and_play') => {
     if (mode === 'challenge_friend') {
@@ -722,6 +751,8 @@ export default function App() {
       triggerToast(res.message);
       return;
     }
+    // A game today unlocks today's Balloon Pop (the server keeps its own record)
+    recordGamePlayedForBalloons(user.uid);
 
     if (user.isAdFree || settings.adPlayedDuringMatchmaking) {
       // Direct access without ad interruption (or ad already played during 15s matchmaking lobby)
@@ -980,6 +1011,8 @@ export default function App() {
             onOpenScoreboard={() => setScreen('scoreboard')}
             onOpenRules={() => handleOpenRules('rules')}
             onOpenTournament={() => triggerToast('🏆 Tournament Mode arriving in next update!')}
+            onOpenBalloonPop={() => setIsBalloonPopOpen(true)}
+            balloonReady={balloonReady}
           />
         )}
 
@@ -1229,6 +1262,24 @@ export default function App() {
         onLogOut={handleLogOut}
         onToast={triggerToast}
         onOpenRules={handleOpenRules}
+      />
+
+      {/* Balloon Pop bonus board */}
+      <BalloonPopModal
+        isOpen={isBalloonPopOpen}
+        uid={user.uid}
+        isSignedIn={isSignedInAccount(user)}
+        onClose={() => setIsBalloonPopOpen(false)}
+        onSignIn={() => {
+          setIsBalloonPopOpen(false);
+          setScreen('signin');
+        }}
+        onCoinsWon={(won, offline) => {
+          // Server pops update the balance on their own; offline pops are added on the device
+          if (offline) applyLocalCoins(won);
+          triggerToast(`🎈 +${won} coins from Balloon Pop!`);
+        }}
+        onStatusChange={view => setBalloonReady(view.status === 'ready')}
       />
 
       {/* Cheeseburger Navigation Menu (Leave game -> Main Menu, Shop, Rules, Settings, Files) */}

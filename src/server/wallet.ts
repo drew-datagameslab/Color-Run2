@@ -13,6 +13,14 @@ import {
 } from '../lib/economy.ts';
 import { createInitialDailyMissions, createInitialWeeklyMissions } from '../lib/missions.ts';
 import { LEVEL_REWARDS } from '../lib/levelSystem.ts';
+import {
+  BalloonBoardRecord,
+  BalloonBoardView,
+  balloonDay,
+  balloonView,
+  currentBalloonBoard,
+  popBalloonOnBoard,
+} from '../lib/balloonBoard.ts';
 
 /**
  * Server-side coin wallets. Every balance change goes through here, inside a
@@ -51,6 +59,8 @@ export interface Wallet {
   /** "<prestige>:<rewardId>" for level rewards already paid */
   claimedLevelRewards: string[];
   redeemedCoupons: string[];
+  /** Day (Balloon Pop time zone) the player last started a game, which unlocks that day's balloon */
+  lastGameDay?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -78,6 +88,9 @@ export interface WalletTx {
   setWallet(wallet: Wallet): void;
   setMatch(matchId: string, ticket: MatchTicket): void;
   addLedger(entry: LedgerEntry): void;
+  /** The hidden Balloon Pop board (stored where players can't read it) */
+  getBalloonBoard(): Promise<BalloonBoardRecord | null>;
+  setBalloonBoard(board: BalloonBoardRecord): void;
 }
 
 export interface WalletStore {
@@ -150,6 +163,8 @@ export class WalletService {
         getMatch: rawTx.getMatch.bind(rawTx),
         setMatch: rawTx.setMatch.bind(rawTx),
         addLedger: rawTx.addLedger.bind(rawTx),
+        getBalloonBoard: rawTx.getBalloonBoard.bind(rawTx),
+        setBalloonBoard: rawTx.setBalloonBoard.bind(rawTx),
         setWallet: w => {
           walletWritten = true;
           rawTx.setWallet(w);
@@ -340,10 +355,12 @@ export class WalletService {
       throw new WalletError(400, 'invalid_tier', 'Invalid game tier.');
     }
     const matchId = crypto.randomUUID();
-    return this.withWallet(uid, (wallet, tx, now) => {
-      if (wallet.balance < buyIn) {
+    return this.withWallet(uid, (current, tx, now) => {
+      if (current.balance < buyIn) {
         throw new WalletError(409, 'insufficient_coins', `Not enough coins — need 🪙 ${buyIn} to play.`);
       }
+      // Starting a game unlocks today's Balloon Pop
+      const wallet = { ...current, lastGameDay: balloonDay(now) };
       tx.setMatch(matchId, { buyIn, playerCount, tier, createdAt: now, claimed: false });
       const next = buyIn > 0 ? this.apply(tx, wallet, -buyIn, 'buy_in', now, undefined, matchId) : wallet;
       if (buyIn === 0) tx.setWallet(next);
@@ -390,6 +407,33 @@ export class WalletService {
         matchId
       );
       return { prize, balance: next.balance };
+    });
+  }
+
+  /** This week's Balloon Pop board as the player may see it (prizes stay hidden until popped) */
+  async balloonBoard(uid: string): Promise<BalloonBoardView> {
+    return this.withWallet(uid, async (wallet, tx, now) => {
+      const stored = await tx.getBalloonBoard();
+      const board = currentBalloonBoard(stored, now, n => crypto.randomInt(n));
+      if (board !== stored) tx.setBalloonBoard(board);
+      return balloonView(board, wallet.lastGameDay, now);
+    });
+  }
+
+  /** Pops one balloon (once a day, after a game that day) and pays its prize */
+  async popBalloon(
+    uid: string,
+    index: unknown
+  ): Promise<{ coins: number; balance: number; board: BalloonBoardView }> {
+    return this.withWallet(uid, async (wallet, tx, now) => {
+      const board = currentBalloonBoard(await tx.getBalloonBoard(), now, n => crypto.randomInt(n));
+      const result = popBalloonOnBoard(board, index, wallet.lastGameDay, now);
+      if ('message' in result) {
+        throw new WalletError(result.code === 'invalid_balloon' ? 400 : 409, result.code, result.message);
+      }
+      tx.setBalloonBoard(result.board);
+      const next = this.apply(tx, wallet, result.coins, 'balloon_pop', now, undefined, `${board.weekId}#${index}`);
+      return { coins: result.coins, balance: next.balance, board: balloonView(result.board, wallet.lastGameDay, now) };
     });
   }
 

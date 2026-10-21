@@ -11,6 +11,9 @@ interface MainMenuScreenProps {
   onOpenScoreboard: () => void;
   onOpenRules: () => void;
   onOpenTournament: () => void;
+  onOpenBalloonPop: () => void;
+  /** Today's balloon can be popped */
+  balloonReady?: boolean;
 }
 
 export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
@@ -21,6 +24,8 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
   onOpenScoreboard,
   onOpenRules,
   onOpenTournament,
+  onOpenBalloonPop,
+  balloonReady = false,
 }) => {
   const { dailyUnclaimed, weeklyUnclaimed } = getUnclaimedMissionsCount(missionsData);
 
@@ -121,6 +126,22 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
               )}
             </button>
           </div>
+
+          {/* Balloon Pop bonus board */}
+          <button
+            id="balloon-pop-button"
+            type="button"
+            onClick={onOpenBalloonPop}
+            className="relative w-full py-2 sm:py-2.5 px-3 bg-gradient-to-r from-[#2563eb] via-[#3b82f6] to-[#60a5fa] hover:brightness-110 text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-1.5 border border-[#1d4ed8] cursor-pointer"
+          >
+            <span className="text-base leading-none">🎈</span>
+            <span>Balloon Pop</span>
+            {balloonReady && (
+              <span className="text-[9px] font-black uppercase tracking-wider bg-[#f2c14e] text-[#3a2205] px-1.5 py-0.5 rounded-full ml-1 animate-pulse">
+                Pop today!
+              </span>
+            )}
+          </button>
 
           {/* App Version */}
           <div id="app-version-display" className="text-center text-[8.5px] sm:text-[9.5px] font-medium text-[#7d654c] tracking-wider pt-0.5 select-text">
