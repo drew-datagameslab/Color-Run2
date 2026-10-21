@@ -8,6 +8,7 @@ import { triggerTurnHaptic, triggerButtonHaptic, triggerDiceRollHaptic, triggerD
 import { getLocalFriends, addFriend, removeFriend, sendFriendRequest } from '../lib/friends';
 import { CardsStrip } from './CardsStrip';
 import { SavedBoard } from './SavedBoard';
+import { preloadDiceImages } from './DieComponent';
 import { preloadColorRunCelebration } from './ColorRunCelebration';
 import { RollArea } from './RollArea';
 import { PlayerProfileModal } from './PlayerProfileModal';
@@ -587,6 +588,12 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       triggerTurnHaptic();
     }
   }, [isUserTurn, activeTurnId]);
+
+  // Load every player's dice images up front, so rolls don't wait on (or drop) image loads
+  const diceColorsInPlay = units.flatMap(u => u.diceColors || []).join(',');
+  useEffect(() => {
+    preloadDiceImages(['blue', 'red', ...diceColorsInPlay.split(',').filter(Boolean)]);
+  }, [diceColorsInPlay]);
 
   const handleDismissSixCelebration = useCallback(() => {
     setShowSixCelebration(false);

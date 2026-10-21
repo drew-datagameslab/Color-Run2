@@ -15,6 +15,36 @@ export interface DieProps {
   rollDurationMs?: number;
 }
 
+// Dice face images, shared by every die. A file that fails is retried before the die falls back
+// to drawn pips, and only that file (one color and face) falls back.
+const MAX_IMAGE_RETRIES = 2;
+const failedDiceImages = new Set<string>();
+const requestedDiceImages = new Set<string>();
+
+export function diceImageUrl(color: string, face: number): string {
+  return `/assets/dice/${color}/${face}.png`;
+}
+
+function preloadImage(url: string, attempt = 0) {
+  const img = new Image();
+  img.onerror = () => {
+    if (attempt < MAX_IMAGE_RETRIES) setTimeout(() => preloadImage(url, attempt + 1), 500 * (attempt + 1));
+  };
+  img.src = attempt ? `${url}?retry=${attempt}` : url;
+}
+
+/** Loads the six faces of each color into the browser cache before the dice need them */
+export function preloadDiceImages(colors: string[]) {
+  for (const color of new Set(colors)) {
+    for (let face = 1; face <= 6; face++) {
+      const url = diceImageUrl(color, face);
+      if (requestedDiceImages.has(url)) continue;
+      requestedDiceImages.add(url);
+      preloadImage(url);
+    }
+  }
+}
+
 /**
  * Cube rotation that brings each value's face to the front. Each face is placed with the
  * opposite rotation on the same axis (see `faces` below), so the two cancel out and the
@@ -163,7 +193,8 @@ export const DieComponent: React.FC<DieProps> = ({
   const bounceRef = useRef<HTMLDivElement>(null);
   const shadowRef = useRef<HTMLDivElement>(null);
   const [cubeSize, setCubeSize] = useState(44);
-  const [imgErrors, setImgErrors] = useState<Record<number, boolean>>({});
+  // Retry count per image file (each die is reused across players, so this is by color and face)
+  const [retries, setRetries] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const updateSize = () => {
@@ -215,14 +246,25 @@ export const DieComponent: React.FC<DieProps> = ({
   }, [rolling, value, isWarm, delayMs, rollDurationMs]);
 
   const renderFaceGraphic = (faceVal: number) => {
-    if (forcePips || imgErrors[faceVal]) {
+    const url = diceImageUrl(color, faceVal);
+    if (forcePips || failedDiceImages.has(url)) {
       return <PippedDieFace color={color} value={faceVal} />;
     }
+    const attempt = retries[url] || 0;
     return (
       <img
-        src={`/assets/dice/${color}/${faceVal}.png`}
+        key={`${url}#${attempt}`}
+        src={attempt ? `${url}?retry=${attempt}` : url}
         alt={`${color} ${faceVal}`}
-        onError={() => setImgErrors(prev => ({ ...prev, [faceVal]: true }))}
+        onError={() => {
+          // A slow or dropped load is retried before falling back to the pip face
+          if (attempt < MAX_IMAGE_RETRIES) {
+            setTimeout(() => setRetries(prev => ({ ...prev, [url]: attempt + 1 })), 400 * (attempt + 1));
+          } else {
+            failedDiceImages.add(url);
+            setRetries(prev => ({ ...prev, [url]: attempt + 1 }));
+          }
+        }}
         draggable={false}
         className="w-full h-full object-contain block pointer-events-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.32)]"
       />
