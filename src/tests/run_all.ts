@@ -9,6 +9,7 @@ import { runFriendsTests } from './friends_test';
 import { runWalletTests } from './wallet_test';
 import { runBalloonTests } from './balloon_test';
 import { runPresenceTests } from './presence_test';
+import { runTutorialTests } from './tutorial_test';
 
 console.log('==========================================');
 console.log('   COLOR RUN TEST SUITE VERIFICATION');
@@ -27,6 +28,7 @@ async function runAll() {
     await runWalletTests();
     await runBalloonTests();
     runPresenceTests();
+    runTutorialTests();
     console.log('==========================================');
     console.log('   ALL TEST HARNESSES PASSED GREEN! ✓');
     console.log('==========================================');

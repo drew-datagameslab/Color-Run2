@@ -18,6 +18,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ScoreBubbleAnimation, ScoreBubbleData } from './ScoreBubbleAnimation';
 import { subscribeToRoom, markPlayerLeft, updateRoomGameState, getClientSessionId, RoomGameState } from '../lib/matchmaking';
 import { useRoomHeartbeat, useRoomPresence } from '../lib/roomPresence';
+import { adjustTutorialRoll } from '../lib/tutorial';
 import { calculatePayouts } from './PickGameScreen';
 import { rollDiceOnServer } from '../lib/serverAuthoritative';
 
@@ -1145,6 +1146,20 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         playerUid: activeRoller.id,
       }
     );
+    // Tutorial battle: the new player's rolls are a little luckier, and the computer never
+    // gets ahead of them, so they win after the first elimination round
+    if (settings.tutorialBattle && !tbActive) {
+      const rolled = active.map(d => ({ ...d, value: finalValuesMap.get(d.id) ?? d.value }));
+      const savedNow = workingDice.filter(d => d.zone === 'saved');
+      const owner = units.find(u => u.isOwner);
+      const luck = activeRoller.isOwner
+        ? 'lucky'
+        : (activeRoller.score || 0) + 40 < (owner?.score || 0)
+          ? 'small'
+          : 'none';
+      adjustTutorialRoll(rolled, savedNow, luck).forEach(d => finalValuesMap.set(d.id, d.value));
+    }
+
     let nextSlot = 0;
     const finalDice = workingDice.map(d => {
       if (d.zone === 'active') {
@@ -2201,6 +2216,22 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
     (joiningCountdown === null || joiningCountdown <= 0) &&
     (!tbActive || tiebreaker?.phase === 'rolling');
 
+  // Tutorial battle hints: step by step on the first round, then at the elimination round
+  const tutorialHint = (() => {
+    if (!settings.tutorialBattle || tbActive || !curUnit) return null;
+    if (phase === 'elimination') {
+      return 'Elimination round! Everyone plays one more turn, then the lowest total is knocked out.';
+    }
+    if (round > 1) return null;
+    if (!isHumanOwner) return `${curUnit.name} is taking a turn. Watch how the computer collects sets.`;
+    const activeLeft = dice.filter(d => d.zone === 'active').length;
+    if (rollsUsed === 0) return 'Your turn! Tap ROLL to roll all 12 dice.';
+    if (rollsUsed < 3 && activeLeft > 0) {
+      return 'Tap a die to save every die with that symbol (3 or more to score), then ROLL again.';
+    }
+    return 'Tap SCORE IT to bank your points. First to 250 starts the elimination round.';
+  })();
+
   const humanPlayer = units.find(u => u.isOwner);
   const isHumanOut = humanPlayer ? !humanPlayer.active : false;
   const onlyComputersLeft = units.filter(u => u.active).every(u => u.isCPU);
@@ -2604,6 +2635,16 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
         {/* Active Roll Area - Compact, fits dice compactly */}
         <div className="shrink-0 flex flex-col justify-center">
+          {/* Tutorial battle: what to do next */}
+          {tutorialHint && (
+            <div
+              id="tutorial-battle-hint"
+              className="mb-1 rounded-xl bg-[#fcf8ef] border-2 border-[#f2c14e] px-3 py-1.5 text-center text-[12px] font-bold text-[#3e2e1e] shadow-md animate-fade-in"
+            >
+              💡 {tutorialHint}
+            </div>
+          )}
+
           {/* Battle to Survive Status Banner during Roll-Off */}
           {tiebreaker && (
             <div className="w-full bg-gradient-to-r from-red-950 via-[#750808] to-red-950 border-2 border-red-500 rounded-xl p-2 mb-1 text-center shadow-lg animate-fade-in shrink-0">

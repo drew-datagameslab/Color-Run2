@@ -233,6 +233,7 @@ export const PickGameScreen: React.FC<PickGameScreenProps> = ({
             {roomCounts.map(count => (
               <button
                 key={`standard-${count}`}
+                id={`pick-standard-${count}`}
                 onClick={() => handlePick(count, 10, 'standard')}
                 className="py-1 px-2 sm:py-1.5 sm:px-2.5 bg-gradient-to-b from-[#2f9a4f] to-[#1c6a35] hover:from-[#35ad59] hover:to-[#227b3e] text-white rounded-xl shadow-md border-b-2.5 border-[#155229] active:translate-y-0.5 active:border-b-1 transition-all flex flex-col items-center justify-center cursor-pointer min-h-[34px] sm:min-h-[38px]"
               >

@@ -43,6 +43,7 @@ export const ModeSelectScreen: React.FC<ModeSelectScreenProps> = ({
           <div className="w-full flex flex-col gap-2.5">
             {/* Mode 1: Multiplayer Online */}
             <button
+              id="mode-online"
               onClick={() => onSelectMode('online')}
               className="w-full p-2.5 sm:p-3 bg-white hover:bg-[#f9f5ea] border-2 border-[#2f9a4f] rounded-2xl shadow-md text-left transition-all active:scale-98 flex items-center gap-3 group cursor-pointer"
             >
@@ -60,6 +61,7 @@ export const ModeSelectScreen: React.FC<ModeSelectScreenProps> = ({
 
             {/* Mode 2: Play vs Computer */}
             <button
+              id="mode-cpu"
               onClick={() => onSelectMode('cpu')}
               className="w-full p-2.5 sm:p-3 bg-white hover:bg-[#f9f5ea] border-2 border-[#8e44c9] rounded-2xl shadow-md text-left transition-all active:scale-98 flex items-center gap-3 group cursor-pointer"
             >
@@ -76,6 +78,7 @@ export const ModeSelectScreen: React.FC<ModeSelectScreenProps> = ({
 
             {/* Mode 3: Friend(s) Challenge */}
             <button
+              id="mode-challenge"
               onClick={() => onSelectMode('challenge_friend')}
               className="w-full p-2.5 sm:p-3 bg-white hover:bg-[#f9f5ea] border-2 border-[#e58a1f] rounded-2xl shadow-md text-left transition-all active:scale-98 flex items-center gap-3 group cursor-pointer"
             >
@@ -93,6 +96,7 @@ export const ModeSelectScreen: React.FC<ModeSelectScreenProps> = ({
 
             {/* Mode 4: Pass & Play */}
             <button
+              id="mode-pass"
               onClick={() => onSelectMode('pass_and_play')}
               className="w-full p-2.5 sm:p-3 bg-white hover:bg-[#f9f5ea] border-2 border-[#1f7fd6] rounded-2xl shadow-md text-left transition-all active:scale-98 flex items-center gap-3 group cursor-pointer"
             >

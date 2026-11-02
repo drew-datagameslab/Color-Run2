@@ -29,6 +29,10 @@ import { Header } from './components/Header';
 import { SignInScreen } from './components/SignInScreen';
 import { AvatarScreen } from './components/AvatarScreen';
 import { MainMenuScreen } from './components/MainMenuScreen';
+import { TutorialPractice } from './components/tutorial/TutorialPractice';
+import { CoachMark } from './components/tutorial/CoachMark';
+import { TutorialStep, setTutorialStep as saveTutorialStep, shouldStartTutorial } from './lib/tutorial';
+import { calculatePayouts as payoutsFor } from './lib/economy';
 import { ModeSelectScreen } from './components/ModeSelectScreen';
 import { ChallengeFriendModal } from './components/ChallengeFriendModal';
 import { PickGameScreen } from './components/PickGameScreen';
@@ -145,6 +149,10 @@ export default function App() {
   const [isMenuModalOpen, setIsMenuModalOpen] = useState(false);
   // Balloon Pop side game: opens by itself when a game ends and today's balloon can be popped
   const [isBalloonPopOpen, setIsBalloonPopOpen] = useState(false);
+  // First-time tutorial (see src/lib/tutorial.ts); null when not running
+  const [tutorialStep, setTutorialStep] = useState<TutorialStep | null>(null);
+  const [modeTipIndex, setModeTipIndex] = useState(0);
+  const tutorialBattlePlayedRef = useRef(false);
   const [isFilesModalOpen, setIsFilesModalOpen] = useState(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -755,6 +763,88 @@ export default function App() {
     return false;
   };
 
+  // ---------- First-time tutorial ----------
+  const finishTutorial = () => {
+    saveTutorialStep(user.uid, 'done');
+    setTutorialStep(null);
+  };
+
+  // A brand-new signed-in player starts the tutorial on reaching the main menu
+  useEffect(() => {
+    if (screen === 'mainmenu' && tutorialStep === null && isSignedInAccount(user) && shouldStartTutorial(user)) {
+      setTutorialStep('welcome');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, user.uid, user.xp]);
+
+  // The tutorial battle: the new player against one computer player, free, no ad
+  const startTutorialBattle = () => {
+    tutorialBattlePlayedRef.current = false;
+    setTutorialStep('battle');
+    const diceColors: [DiceColor, DiceColor] = user.diceColors || ['blue', 'red'];
+    handleStartGame({
+      playersCount: 2,
+      mode: 'cpu',
+      threshold: 250,
+      buyIn: 0,
+      tier: 'standard',
+      payoutMultiplier: 1,
+      payouts: payoutsFor(2, 'standard', 0),
+      colorA: diceColors[0],
+      colorB: diceColors[1],
+      adPlayedDuringMatchmaking: true,
+      tutorialBattle: true,
+      slots: [
+        { name: user.name, type: 'human', color: user.avatar.color, image: user.avatar.image, diceColors },
+        { name: 'Ava', type: 'cpu', color: '#3b82f6', diceColors: ['blue', 'red'] },
+      ],
+    });
+  };
+
+  useEffect(() => {
+    if (tutorialStep === 'battle') {
+      if (screen === 'play') tutorialBattlePlayedRef.current = true;
+      if (!tutorialBattlePlayedRef.current) return;
+      // After the battle everyone goes back to the main menu (Balloon Pop opens on the way)
+      if (screen === 'pickgame' || screen === 'modeselect') setScreen('mainmenu');
+      if (screen !== 'mainmenu' || isBalloonPopOpen) return;
+      // Give Balloon Pop a moment to open before the next tip, and wait for it to close
+      const timer = setTimeout(() => setTutorialStep('menu'), 1500);
+      return () => clearTimeout(timer);
+    }
+    if (tutorialStep === 'menu' && screen === 'modeselect') {
+      setModeTipIndex(0);
+      setTutorialStep('modes');
+    }
+    if (tutorialStep === 'modes' && screen === 'pickgame') setTutorialStep('pick');
+    // The guided 4-player game started: the tutorial is complete
+    if (tutorialStep === 'pick' && (screen === 'play' || isFullScreenAdActive)) finishTutorial();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tutorialStep, screen, isBalloonPopOpen, isFullScreenAdActive]);
+
+  const MODE_TIPS = [
+    {
+      targetId: 'mode-online',
+      title: 'Multiplayer Online',
+      text: 'Play live against other players for coins. Pick how many players and a buy-in; empty seats are filled by computer players.',
+    },
+    {
+      targetId: 'mode-cpu',
+      title: 'Play vs Computer',
+      text: 'Play against computer players anytime. Great for practicing new strategies.',
+    },
+    {
+      targetId: 'mode-challenge',
+      title: 'Friend(s) Challenge',
+      text: 'Invite your friends to a private table and roll head-to-head for coins.',
+    },
+    {
+      targetId: 'mode-pass',
+      title: 'Pass & Play',
+      text: 'Everyone plays on one device. Pass it around the table each turn, no internet needed.',
+    },
+  ];
+
   const handleStartGame = async (settings: GameSettings) => {
     // The server charges the buy-in and issues the ticket the prize is claimed with
     const buyIn = settings.buyIn && settings.buyIn > 0 ? settings.buyIn : 0;
@@ -1285,6 +1375,71 @@ export default function App() {
         onToast={triggerToast}
         onOpenRules={handleOpenRules}
       />
+
+      {/* ---------- First-time tutorial ---------- */}
+      {tutorialStep === 'welcome' && (
+        <div className="fixed inset-0 z-[250] bg-black/70 flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-3xl bg-[#fcf8ef] border-2 border-[#f2c14e] shadow-2xl p-5 text-center" role="dialog" aria-label="Welcome">
+            <div className="text-5xl">🎲</div>
+            <h2 className="mt-1 text-2xl font-black text-[#1c6a35]">Welcome to Color Run, {user.name}!</h2>
+            <p className="mt-2 text-sm text-[#3e2e1e] leading-relaxed">
+              Roll 12 dice, collect matching symbols, and earn bonus points for matching colors. Let's learn with a
+              quick practice turn, then take on a computer player.
+            </p>
+            <button
+              onClick={() => setTutorialStep('practice')}
+              className="mt-4 w-full py-3 rounded-xl bg-[#2f9a4f] text-white font-black shadow-md cursor-pointer active:scale-98"
+            >
+              Let's Go!
+            </button>
+            <button onClick={finishTutorial} className="mt-2 text-xs font-bold text-[#8c745e] underline cursor-pointer">
+              Skip tutorial
+            </button>
+          </div>
+        </div>
+      )}
+      {tutorialStep === 'practice' && (
+        <TutorialPractice
+          playerName={user.name}
+          diceColors={user.diceColors || ['blue', 'red']}
+          onFinished={startTutorialBattle}
+          onSkip={finishTutorial}
+        />
+      )}
+      {tutorialStep === 'menu' && screen === 'mainmenu' && !isBalloonPopOpen && (
+        <CoachMark
+          targetId="play-game-button"
+          title="You won your first battle! 🏆"
+          text="Now let's look at all the ways to play. Tap PLAY GAME."
+          onSkip={finishTutorial}
+        />
+      )}
+      {tutorialStep === 'modes' && screen === 'modeselect' && (
+        modeTipIndex < MODE_TIPS.length ? (
+          <CoachMark
+            {...MODE_TIPS[modeTipIndex]}
+            progress={`${modeTipIndex + 1} of ${MODE_TIPS.length}`}
+            nextLabel={modeTipIndex === MODE_TIPS.length - 1 ? 'Got it' : 'Next'}
+            onNext={() => setModeTipIndex(i => i + 1)}
+            onSkip={finishTutorial}
+          />
+        ) : (
+          <CoachMark
+            targetId="mode-cpu"
+            title="Your first full game"
+            text="Let's play against the computer. Tap Play vs Computer."
+            onSkip={finishTutorial}
+          />
+        )
+      )}
+      {tutorialStep === 'pick' && screen === 'pickgame' && (
+        <CoachMark
+          targetId="pick-standard-4"
+          title="Standard game, 4 players"
+          text="Take on 3 computer players in a Standard game. Tap 4 Player. Good luck!"
+          onSkip={finishTutorial}
+        />
+      )}
 
       {/* Return to an online game that was interrupted (app closed or reloaded mid-game) */}
       {rejoinOffer && screen === 'mainmenu' && (

@@ -38,6 +38,7 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
         <div className="w-full flex flex-col gap-2 sm:gap-2.5">
           {/* Play Button */}
           <button
+            id="play-game-button"
             onClick={onPlay}
             className="w-full py-2.5 sm:py-3.5 px-4 bg-[#2f9a4f] hover:bg-[#268a48] text-white font-black text-base sm:text-lg rounded-xl sm:rounded-2xl shadow-lg transition-all active:scale-98 flex items-center justify-center gap-2 border-b-4 border-[#1b6b33] cursor-pointer"
           >
