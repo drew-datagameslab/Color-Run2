@@ -92,6 +92,8 @@ export interface GameRoom {
   finalPayouts?: number[];
   leftPlayers?: string[];
   gameState?: RoomGameState;
+  /** Heartbeats from each player's device (session id or uid -> ms), see roomPresence.ts */
+  presence?: Record<string, number>;
   updatedAt: number;
   hostUid?: string;
   hostName?: string;
@@ -578,6 +580,18 @@ export async function joinRoomByCode(
 }
 
 /**
+ * Reads a game room once (null if it's gone or can't be read)
+ */
+export async function getRoom(roomId: string): Promise<GameRoom | null> {
+  try {
+    const snap = await getDoc(doc(db, 'rooms', roomId));
+    return snap.exists() ? ({ ...(snap.data() as GameRoom), id: snap.id }) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Subscribes to real-time changes of a game room document
  */
 export function subscribeToRoom(
@@ -610,23 +624,44 @@ export async function finalizeAndStartRoom(
   finalSlots: GameSettings['slots'],
   finalPayouts?: number[],
   actualPlayerCount?: number
-): Promise<void> {
+): Promise<{ slots: GameSettings['slots']; payouts?: number[] }> {
+  // In a transaction, so when several devices start the game at the same moment they all
+  // play with the same seats: the first one wins and the others get its seats back
   try {
     const roomRef = doc(db, 'rooms', roomId);
-    const updateData: Record<string, any> = {
-      status: 'in_progress',
-      finalSlots,
-      updatedAt: Date.now(),
-    };
-    if (finalPayouts && finalPayouts.length > 0) {
-      updateData.finalPayouts = finalPayouts;
-    }
-    if (actualPlayerCount) {
-      updateData.playerCount = actualPlayerCount;
-    }
-    await updateDoc(roomRef, sanitizeForFirestore(updateData));
+    return await runTransaction(db, async transaction => {
+      const snap = await transaction.get(roomRef);
+      const existing = snap.exists() ? (snap.data() as GameRoom) : null;
+      if (existing?.finalSlots && existing.finalSlots.length > 0) {
+        return { slots: existing.finalSlots, payouts: existing.finalPayouts };
+      }
+      const updateData: Record<string, any> = {
+        status: 'in_progress',
+        finalSlots,
+        updatedAt: Date.now(),
+      };
+      if (finalPayouts && finalPayouts.length > 0) {
+        updateData.finalPayouts = finalPayouts;
+      }
+      if (actualPlayerCount) {
+        updateData.playerCount = actualPlayerCount;
+      }
+      transaction.update(roomRef, sanitizeForFirestore(updateData));
+      return { slots: finalSlots, payouts: finalPayouts };
+    });
   } catch (err) {
     console.warn('Could not finalize room slots:', err);
+    return { slots: finalSlots, payouts: finalPayouts };
+  }
+}
+
+/** Reuses a device session id (rejoining a game: the room knows this player by it) */
+export function adoptClientSessionId(id: string) {
+  cachedSessionId = id;
+  try {
+    sessionStorage.setItem('cr_session_id', id);
+  } catch {
+    // ignore
   }
 }
 

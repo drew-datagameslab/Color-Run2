@@ -17,6 +17,7 @@ import { Loader2, Swords } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ScoreBubbleAnimation, ScoreBubbleData } from './ScoreBubbleAnimation';
 import { subscribeToRoom, markPlayerLeft, updateRoomGameState, getClientSessionId, RoomGameState } from '../lib/matchmaking';
+import { useRoomHeartbeat, useRoomPresence } from '../lib/roomPresence';
 import { calculatePayouts } from './PickGameScreen';
 import { rollDiceOnServer } from '../lib/serverAuthoritative';
 
@@ -121,6 +122,8 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
   // Immediate start since matchmaking screen already handled the 15-second lobby sync
   const [joiningCountdown, setJoiningCountdown] = useState<number | null>(null);
+  // Heartbeats of everyone in the online room (see roomPresence.ts)
+  const [roomPresence, setRoomPresence] = useState<Record<string, number> | undefined>(undefined);
 
   // Initialize players from settings slots
   const [units, setUnits] = useState<PlayerUnit[]>(() => {
@@ -420,22 +423,30 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
   const humanUnits = units.filter(u => !u.isCPU && (u.isOwner || u.isOnlinePlayer));
   const mySessionId = getClientSessionId();
-  const sortedHumanTokens = humanUnits.map(u => u.sessionId || u.uid).filter(Boolean).sort() as string[];
-  const turnAuthorityToken = sortedHumanTokens.length > 0 ? sortedHumanTokens[0] : (humanUnits[0]?.sessionId || humanUnits[0]?.uid || user.uid);
-  const otherHumanTokens = humanUnits
+  const myToken = mySessionId || user.uid;
+  const unitToken = (u?: PlayerUnit) => u?.sessionId || u?.uid;
+
+  // Online: keep this device's heartbeat going, and notice players who switched away (Home
+  // button, another app). The device that runs the computer players is chosen only from players
+  // who are present, so one player leaving can't freeze the game for everyone else.
+  useRoomHeartbeat(isMultiplayer ? settings.roomId : undefined, myToken);
+  const isAway = useRoomPresence(roomPresence, isMultiplayer && !!settings.roomId);
+  const presentHumanUnits = humanUnits.filter(u => unitToken(u) === myToken || !isAway(unitToken(u)));
+  const sortedHumanTokens = presentHumanUnits.map(u => u.sessionId || u.uid).filter(Boolean).sort() as string[];
+  const turnAuthorityToken = sortedHumanTokens.length > 0 ? sortedHumanTokens[0] : myToken;
+  const otherHumanTokens = presentHumanUnits
     .filter(u => (u.sessionId || u.uid) !== (curUnit?.sessionId || curUnit?.uid))
     .map(u => u.sessionId || u.uid)
     .filter(Boolean)
     .sort() as string[];
   const fallbackAuthorityToken = otherHumanTokens.length > 0 ? otherHumanTokens[0] : turnAuthorityToken;
-  const myToken = mySessionId || user.uid;
   const isTurnAuthority =
     !isMultiplayer ||
     myToken === turnAuthorityToken ||
     (isRemoteHuman && myToken === fallbackAuthorityToken);
 
   const tbNameOf = (unitId: string) => units.find(u => u.id === unitId)?.name || 'Player';
-  const otherTiedHumanTokens = humanUnits
+  const otherTiedHumanTokens = presentHumanUnits
     .filter(u => (u.sessionId || u.uid) !== (tiedCurrentUnit?.sessionId || tiedCurrentUnit?.uid))
     .map(u => u.sessionId || u.uid)
     .filter(Boolean)
@@ -633,6 +644,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
   const lastActionTimestampRef = useRef(0);
   const lastActionIdRef = useRef<string>('');
+  const rejoinSyncedRef = useRef(false);
   const lastActionRef = useRef<string>('');
   const qIdxRef = useRef<number>(-1);
   const rollsUsedRef = useRef<number>(-1);
@@ -660,6 +672,7 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
   useEffect(() => {
     if (!settings.roomId) return;
     const unsub = subscribeToRoom(settings.roomId, updatedRoom => {
+      setRoomPresence(updatedRoom.presence);
       // 1. Sync players who disconnected or stepped away
       const leftUids: string[] = updatedRoom.leftPlayers || [];
       if (leftUids.length > 0) {
@@ -741,9 +754,15 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
 
         const mySessionId = getClientSessionId();
         // Action is from self only if executed by this specific device/session
-        const isFromSelf = (gs.lastActionSessionId && mySessionId)
-          ? gs.lastActionSessionId === mySessionId
-          : gs.lastActionBy === user.uid;
+        // Returning to a game in progress: take the room's state as-is the first time, even if
+        // this player's device made the last move before the app was closed
+        const isRejoinSync = !!settings.rejoin && !rejoinSyncedRef.current;
+        rejoinSyncedRef.current = true;
+        const isFromSelf = isRejoinSync
+          ? false
+          : (gs.lastActionSessionId && mySessionId)
+            ? gs.lastActionSessionId === mySessionId
+            : gs.lastActionBy === user.uid;
 
         // Action was performed by another peer
         if (!isFromSelf) {
@@ -929,6 +948,28 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
       }
     }
   }, [curUnit, round, ROLL_1_TIME, userDiceColors]);
+
+  // A player who switched away (Home button, another app) has their turn played by the computer
+  // right away instead of after the full turn timer; they take over again when they come back
+  const curUnitAway = isRemoteHuman && isAway(unitToken(curUnit));
+  useEffect(() => {
+    if (!tbActive && curUnitAway && isTurnAuthority && !isAutoPilotTurn) setIsAutoPilotTurn(true);
+  }, [tbActive, curUnitAway, isTurnAuthority, isAutoPilotTurn]);
+
+  // Let everyone know when a player steps away or comes back
+  const awayNames = units
+    .filter(u => !u.isCPU && u.isOnlinePlayer && !u.isOwner && u.active && isAway(unitToken(u)))
+    .map(u => u.name)
+    .join('|');
+  const prevAwayNamesRef = useRef('');
+  useEffect(() => {
+    const before = prevAwayNamesRef.current ? prevAwayNamesRef.current.split('|') : [];
+    const now = awayNames ? awayNames.split('|') : [];
+    prevAwayNamesRef.current = awayNames;
+    now.filter(n => !before.includes(n)).forEach(n => showToast(`${n} stepped away. The computer will play for them.`));
+    before.filter(n => !now.includes(n)).forEach(n => showToast(`${n} is back!`));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [awayNames]);
 
   // Turn countdown timer (active when additional users are in the room):
   // 30s on roll 1, 20s on rolls 2 & 3 in multiplayer

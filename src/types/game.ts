@@ -94,6 +94,8 @@ export interface GameSettings {
   matchId?: string;
   adPlayedDuringMatchmaking?: boolean;
   roomId?: string;
+  /** Returning to an online game already in progress (after the app was closed or reloaded) */
+  rejoin?: boolean;
   slots: Array<{
     name: string;
     type: 'human' | 'cpu';

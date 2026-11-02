@@ -94,6 +94,7 @@ import {
 import { triggerButtonHaptic } from './lib/haptics';
 import { BalloonPopModal } from './components/BalloonPopModal';
 import { loadBalloonBoard, recordGamePlayedForBalloons } from './lib/balloonPop';
+import { abandonGame, clearActiveGame, findGameToRejoin, prepareRejoin, saveActiveGame } from './lib/activeGame';
 
 export default function App() {
   const [user, setUser] = useState<UserAccount>(() => getInitialUser());
@@ -306,6 +307,33 @@ export default function App() {
     setSignInPrompt(feature);
     return false;
   };
+
+  // Online games are remembered while they're being played, so a player whose app closed or
+  // reloaded mid-game (Home button, phone locked) can return to it from the main menu
+  const [rejoinOffer, setRejoinOffer] = useState<GameSettings | null>(null);
+  const prevScreenForRejoinRef = useRef(screen);
+  useEffect(() => {
+    const prev = prevScreenForRejoinRef.current;
+    prevScreenForRejoinRef.current = screen;
+    const roomId = currentGameSettings?.roomId;
+    if (screen === 'play' && roomId && !roomId.endsWith('_local') && isSignedInAccount(user)) {
+      saveActiveGame(user.uid, currentGameSettings!);
+    } else if (prev === 'play' && screen !== 'play') {
+      clearActiveGame();
+    }
+    if (screen !== 'mainmenu' || !isSignedInAccount(user)) {
+      setRejoinOffer(null);
+      return;
+    }
+    let cancelled = false;
+    findGameToRejoin(user.uid).then(settings => {
+      if (!cancelled) setRejoinOffer(settings);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, user.uid, currentGameSettings]);
 
   // Balloon Pop: when a player leaves a finished game (results screen or elimination exit) and
   // today's balloon is ready (their first game today unlocked it), open the side game over the
@@ -1257,6 +1285,41 @@ export default function App() {
         onToast={triggerToast}
         onOpenRules={handleOpenRules}
       />
+
+      {/* Return to an online game that was interrupted (app closed or reloaded mid-game) */}
+      {rejoinOffer && screen === 'mainmenu' && (
+        <div className="fixed inset-0 z-[210] bg-black/70 flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-[#fcf8ef] rounded-3xl border-2 border-[#f2c14e] shadow-2xl p-5 text-center" role="dialog" aria-label="Return to your game">
+            <div className="text-4xl">🎲</div>
+            <h2 className="mt-1 text-lg font-black text-[#1c1c1c]">Your game is still going!</h2>
+            <p className="mt-1 text-sm text-[#5e4933]">
+              You left an online game in progress. The computer has been playing your turns. Jump back in?
+            </p>
+            <button
+              onClick={() => {
+                const settings = prepareRejoin(user.uid, rejoinOffer);
+                setRejoinOffer(null);
+                setCurrentGameSettings(settings);
+                setScreen('play');
+              }}
+              className="mt-4 w-full py-3 rounded-xl bg-[#2f9a4f] text-white font-black text-sm shadow-md cursor-pointer active:scale-98"
+            >
+              Return to Game
+            </button>
+            <button
+              onClick={() => {
+                const settings = rejoinOffer;
+                setRejoinOffer(null);
+                abandonGame(user.uid, settings);
+                triggerToast('You left the game. The computer will finish it for you.');
+              }}
+              className="mt-2 w-full py-2.5 rounded-xl bg-[#ebdcb9] text-[#5e4933] font-black text-sm cursor-pointer"
+            >
+              Leave Game
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Balloon Pop bonus board */}
       <BalloonPopModal

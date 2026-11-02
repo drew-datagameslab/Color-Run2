@@ -11,6 +11,7 @@ import {
   UserPresence,
 } from '../lib/presence';
 import { sendChallengeInvites } from '../lib/invites';
+import { useRoomHeartbeat, useRoomPresence } from '../lib/roomPresence';
 import {
   findOrCreateRoom,
   LEVEL_MATCHING_ENABLED,
@@ -144,6 +145,12 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
   const [copied, setCopied] = useState(false);
   const userDiceColors: [DiceColor, DiceColor] = user.diceColors || equippedColors;
   const currentSessionId = getClientSessionId();
+
+  // Heartbeat while waiting at the table, so players who switch away (Home button) can be
+  // left out when the game starts instead of joining as a player nobody controls
+  useRoomHeartbeat(room?.id, currentSessionId);
+  const isAway = useRoomPresence(room?.presence, !!room?.id);
+  const finalizingRef = useRef(false);
 
   // Check if current user is the host
   const isHost = room?.hostUid ? room.hostUid === user.uid : (isChallengeMode || !initialRoom);
@@ -443,7 +450,11 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
         return;
       }
 
-      const humanPlayers: RoomPlayer[] = (curRoom?.players && curRoom.players.length > 0) ? curRoom.players : [
+      // Players who switched away from the table are left out (computer players fill their seats)
+      const presentPlayers = (curRoom?.players || []).filter(
+        p => (p.sessionId ? p.sessionId === currentSessionId : p.uid === user.uid) || !isAway(p.sessionId || p.uid)
+      );
+      const humanPlayers: RoomPlayer[] = presentPlayers.length > 0 ? presentPlayers : [
         {
           uid: user.uid,
           sessionId: currentSessionId,
@@ -488,7 +499,13 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({
 
       const targetRoomId = curRoom?.id || `room_${Date.now()}_local`;
       if (curRoom?.id) {
-        finalizeAndStartRoom(curRoom.id, canonicalSlots, dynamicPayouts, actualStartingCount as any);
+        // Whichever device starts the game first decides the seats; the others use those
+        if (finalizingRef.current) return;
+        finalizingRef.current = true;
+        finalizeAndStartRoom(curRoom.id, canonicalSlots, dynamicPayouts, actualStartingCount as any).then(result =>
+          launchMatchWithSlots(result.slots, targetRoomId, result.payouts)
+        );
+        return;
       }
 
       launchMatchWithSlots(canonicalSlots, targetRoomId, dynamicPayouts);
