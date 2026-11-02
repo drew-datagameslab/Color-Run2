@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Store, ClipboardList, BookOpen, Trophy, Clock } from 'lucide-react';
+import { Play, Store, ClipboardList, GraduationCap, Trophy, Clock } from 'lucide-react';
 import { ColorRunLogo, DGLogo } from './Logo';
 import { MissionsData, getUnclaimedMissionsCount } from '../lib/missions';
 
@@ -9,7 +9,8 @@ interface MainMenuScreenProps {
   onPlay: () => void;
   onOpenShop: () => void;
   onOpenScoreboard: () => void;
-  onOpenRules: () => void;
+  /** Starts the first-time tutorial again (How to Play & Rules is in the ☰ menu) */
+  onReplayTutorial: () => void;
   onOpenTournament: () => void;
 }
 
@@ -19,7 +20,7 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
   onPlay,
   onOpenShop,
   onOpenScoreboard,
-  onOpenRules,
+  onReplayTutorial,
   onOpenTournament,
 }) => {
   const { dailyUnclaimed, weeklyUnclaimed } = getUnclaimedMissionsCount(missionsData);
@@ -66,11 +67,11 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
 
           {/* Rules */}
           <button
-            onClick={onOpenRules}
+            onClick={onReplayTutorial}
             className="w-full py-1.5 sm:py-2 px-3.5 bg-[#eae0c5] hover:bg-[#ded1af] text-[#4a3622] font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
           >
-            <BookOpen className="w-4 h-4" />
-            <span>How to Play &amp; Rules</span>
+            <GraduationCap className="w-4 h-4" />
+            <span>Replay Tutorial</span>
           </button>
 
           {/* Tournament Mode (Coming Soon) */}
@@ -125,7 +126,7 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
 
           {/* App Version */}
           <div id="app-version-display" className="text-center text-[8.5px] sm:text-[9.5px] font-medium text-[#7d654c] tracking-wider pt-0.5 select-text">
-            Version 6.6.5
+            Version 6.7.1
           </div>
         </div>
       </div>

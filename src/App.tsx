@@ -1123,7 +1123,7 @@ export default function App() {
             onPlay={() => setScreen('modeselect')}
             onOpenShop={() => setScreen('shop')}
             onOpenScoreboard={() => setScreen('scoreboard')}
-            onOpenRules={() => handleOpenRules('rules')}
+            onReplayTutorial={() => setTutorialStep('welcome')}
             onOpenTournament={() => triggerToast('🏆 Tournament Mode arriving in next update!')}
           />
         )}
