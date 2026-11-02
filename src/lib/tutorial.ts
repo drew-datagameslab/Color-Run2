@@ -1,4 +1,6 @@
 import { Die, UserAccount } from '../types/game';
+import { decideCPUSaves } from './cpu';
+import { scoreDice } from './scoring';
 
 /**
  * First-time player tutorial:
@@ -67,6 +69,9 @@ export function practiceRollValues(rollIndex: number, active: Die[], colorA: str
   return values;
 }
 
+/** Extra dice that join the new player's biggest group on each roll in the tutorial battle */
+export const LUCKY_EXTRA_DICE = 1;
+
 function counts(dice: Array<{ value: number }>): Record<number, number> {
   const c: Record<number, number> = {};
   for (const d of dice) c[d.value] = (c[d.value] || 0) + 1;
@@ -74,58 +79,49 @@ function counts(dice: Array<{ value: number }>): Record<number, number> {
 }
 
 /**
- * Tutorial battle luck. `rolled` are the dice just rolled (with their new values), `saved` the
- * dice already saved this turn.
- *  - 'lucky' (the new player): two more dice join the biggest group, preferring its main color
- *  - 'small' (computer, behind): at most one set of exactly 3 per turn
- *  - 'none'  (computer, close to the player): no sets at all this roll
+ * The new player's luck in the tutorial battle: after each roll, LUCKY_EXTRA_DICE more dice join
+ * the biggest group (counting what's already saved), preferring its main color.
+ * `rolled` are the dice just rolled (with their new values), `saved` the dice saved this turn.
  */
-export function adjustTutorialRoll(rolled: Die[], saved: Die[], luck: 'lucky' | 'small' | 'none'): Die[] {
+export function luckyTutorialRoll(rolled: Die[], saved: Die[]): Die[] {
   const result = rolled.map(d => ({ ...d }));
   if (result.length === 0) return result;
-
-  if (luck === 'lucky') {
-    const all = counts([...saved, ...result]);
-    const fromRoll = counts(result);
-    // Grow the symbol that's already biggest (counting saved dice), using this roll's dice
-    const target = Number(
-      Object.keys(fromRoll).sort((a, b) => (all[+b] || 0) - (all[+a] || 0) || (fromRoll[+b] || 0) - (fromRoll[+a] || 0))[0]
-    );
-    const mainColor = result.filter(d => d.value === target).map(d => d.color)[0];
-    const others = result
-      .filter(d => d.value !== target)
-      .sort((a, b) => (a.color === mainColor ? -1 : 0) - (b.color === mainColor ? -1 : 0));
-    others.slice(0, 2).forEach(d => (d.value = target));
-    return result;
-  }
-
-  // Computer: cap how many of each symbol it can collect
-  const savedCounts = counts(saved);
-  const hasSavedSet = Object.values(savedCounts).some(n => n >= 3);
-  const capFor = (value: number) => {
-    const s = savedCounts[value] || 0;
-    if (s >= 3) return s; // no more of a set it already has
-    return 2; // no new sets by default
-  };
-  // 'small': one value may reach exactly 3, if the computer has no set yet this turn
-  let allowedSet: number | null = null;
-  if (luck === 'small' && !hasSavedSet) {
-    const c = counts([...saved, ...result]);
-    const best = Object.keys(c).map(Number).sort((a, b) => c[b] - c[a])[0];
-    if (c[best] >= 3) allowedSet = best;
-  }
-  const total = counts(saved);
-  for (const d of result) {
-    const cap = d.value === allowedSet ? 3 : capFor(d.value);
-    if ((total[d.value] || 0) < cap) {
-      total[d.value] = (total[d.value] || 0) + 1;
-      continue;
-    }
-    // Move this die to the symbol with the most room
-    const options = [1, 2, 3, 4, 5, 6].filter(v => v !== allowedSet && (total[v] || 0) < capFor(v));
-    const next = options.sort((a, b) => (total[a] || 0) - (total[b] || 0))[0] ?? d.value;
-    d.value = next;
-    total[next] = (total[next] || 0) + 1;
-  }
+  const all = counts([...saved, ...result]);
+  const fromRoll = counts(result);
+  const target = Number(
+    Object.keys(fromRoll).sort((a, b) => (all[+b] || 0) - (all[+a] || 0) || (fromRoll[+b] || 0) - (fromRoll[+a] || 0))[0]
+  );
+  const mainColor = result.filter(d => d.value === target).map(d => d.color)[0];
+  const others = result
+    .filter(d => d.value !== target)
+    .sort((a, b) => (a.color === mainColor ? -1 : 0) - (b.color === mainColor ? -1 : 0));
+  others.slice(0, LUCKY_EXTRA_DICE).forEach(d => (d.value = target));
   return result;
+}
+
+/**
+ * The computer's roll in the tutorial battle. It rolls and saves sets like in any game; a roll
+ * is only re-rolled (up to 40 times) when the sets it would save would put its turn over
+ * `budget` points, which keeps it just behind the new player. Returns die id -> value.
+ */
+export function tutorialComputerRoll(
+  active: Die[],
+  saved: Die[],
+  budget: number,
+  random: () => number = Math.random
+): Map<number, number> {
+  let best: Map<number, number> | null = null;
+  let bestPoints = Infinity;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const values = new Map(active.map(d => [d.id, 1 + Math.floor(random() * 6)]));
+    const dice = [...saved, ...active.map(d => ({ ...d, value: values.get(d.id)! }))];
+    const toSave = decideCPUSaves(dice);
+    const points = scoreDice(dice.filter(d => d.zone === 'saved' || toSave.includes(d.id))).total;
+    if (points <= budget) return values;
+    if (points < bestPoints) {
+      bestPoints = points;
+      best = values;
+    }
+  }
+  return best!;
 }

@@ -1,7 +1,7 @@
 import { Die } from '../types/game';
 import { scoreDice } from '../lib/scoring';
 import { decideCPUSaves } from '../lib/cpu';
-import { DIAMOND, SPADE, adjustTutorialRoll, practiceRollValues } from '../lib/tutorial';
+import { DIAMOND, SPADE, luckyTutorialRoll, practiceRollValues, tutorialComputerRoll } from '../lib/tutorial';
 
 function assert(condition: boolean, msg: string) {
   if (!condition) throw new Error(`Assertion failed: ${msg}`);
@@ -58,58 +58,72 @@ function runPracticeTest() {
   console.log('✓ Tutorial practice turn: 6 blue spades (Color Run) + 4 red diamonds = 180 points');
 }
 
-/** One turn: 3 rolls, saving sets each time (the computer's strategy), with tutorial luck */
-function playTurn(luck: 'lucky' | 'small' | 'none', random: () => number): number {
+/** One turn: 3 rolls, saving sets after each (the computer's strategy). Returns points and saving rolls. */
+function playTurn(
+  roll: (active: Die[], saved: Die[]) => Map<number, number>
+): { points: number; savingRolls: number } {
   let dice = freshDice();
-  for (let roll = 0; roll < 3; roll++) {
+  let savingRolls = 0;
+  for (let r = 0; r < 3; r++) {
     const active = dice.filter(d => d.zone === 'active');
     if (active.length === 0) break;
-    const rolled = active.map(d => ({ ...d, value: 1 + Math.floor(random() * 6) }));
-    const adjusted = adjustTutorialRoll(rolled, dice.filter(d => d.zone === 'saved'), luck);
-    const byId = new Map(adjusted.map(d => [d.id, d.value]));
-    dice = dice.map(d => (d.zone === 'active' ? { ...d, value: byId.get(d.id)! } : d));
+    const values = roll(active, dice.filter(d => d.zone === 'saved'));
+    dice = dice.map(d => (d.zone === 'active' ? { ...d, value: values.get(d.id)! } : d));
     const toSave = decideCPUSaves(dice);
+    if (toSave.length > 0) savingRolls++;
     dice = dice.map(d => (toSave.includes(d.id) ? { ...d, zone: 'saved' } : d)) as Die[];
   }
-  return scoreDice(saveSets(dice).filter(d => d.zone === 'saved')).total;
+  return { points: scoreDice(saveSets(dice).filter(d => d.zone === 'saved')).total, savingRolls };
 }
 
 function runBattleTest() {
-  // 'none' never lets the computer form a new set
   let seed = 7;
   const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 300; i++) {
-    const rolled = Array.from({ length: 12 }, (_, k) => ({
-      ...freshDice()[k],
-      value: 1 + Math.floor(random() * 6),
-    }));
-    const out = adjustTutorialRoll(rolled, [], 'none');
-    assert(Object.values(counts(out)).every(n => n <= 2), "'none' leaves no set of 3");
-    const small = adjustTutorialRoll(rolled, [], 'small');
-    assert(Object.values(counts(small)).filter(n => n >= 3).every(n => n === 3), "'small' allows at most sets of 3");
-    assert(Object.values(counts(small)).filter(n => n >= 3).length <= 1, "'small' allows at most one set");
-  }
+  const lucky = (active: Die[], saved: Die[]) =>
+    new Map(
+      luckyTutorialRoll(
+        active.map(d => ({ ...d, value: 1 + Math.floor(random() * 6) })),
+        saved
+      ).map(d => [d.id, d.value] as [number, number])
+    );
 
-  // Simulated tutorial battles to 250: the computer is never ahead after its turn
   let playerWins = 0;
+  let computerTurns = 0;
+  let computerTurnsWithSets = 0;
+  let playerPoints = 0;
+  let computerPoints = 0;
   const games = 200;
   for (let g = 0; g < games; g++) {
     let player = 0;
     let cpu = 0;
     let rounds = 0;
-    while (player < 250 && rounds < 30) {
+    let elimination = false;
+    while (rounds < 30) {
       rounds++;
-      player += playTurn('lucky', random);
-      cpu += playTurn(cpu + 40 < player ? 'small' : 'none', random);
-      assert(cpu < player || player === 0, `Computer never pulls ahead (game ${g}: ${cpu} vs ${player})`);
+      const p = playTurn(lucky);
+      player += p.points;
+      playerPoints += p.points;
+      const budget = Math.max(0, player - cpu - 5);
+      const c = playTurn((active, saved) => tutorialComputerRoll(active, saved, budget, random));
+      cpu += c.points;
+      computerPoints += c.points;
+      computerTurns++;
+      if (c.savingRolls > 0) computerTurnsWithSets++;
+      assert(cpu < player, `Computer never pulls ahead (game ${g}: ${cpu} vs ${player})`);
+      // First to 250 starts the elimination round: everyone plays one more full round
+      if (elimination) break;
+      if (player >= 250 || cpu >= 250) elimination = true;
     }
-    // Elimination round: one more turn each, lowest total is knocked out
-    player += playTurn('lucky', random);
-    cpu += playTurn(cpu + 40 < player ? 'small' : 'none', random);
     if (player > cpu) playerWins++;
   }
   assert(playerWins === games, `New player wins every tutorial battle (${playerWins}/${games})`);
-  console.log(`✓ Tutorial battle: new player wins ${playerWins}/${games} simulated games after the elimination round`);
+  // The computer plays a real game: it collects sets in (nearly) every turn
+  const withSetsPct = Math.round((100 * computerTurnsWithSets) / computerTurns);
+  assert(withSetsPct >= 95, `Computer saves sets in its turns (${withSetsPct}%)`);
+  console.log(
+    `✓ Tutorial battle: new player wins ${playerWins}/${games}; computer saves sets in ${withSetsPct}% of turns ` +
+      `(avg ${Math.round(computerPoints / computerTurns)} vs player ${Math.round(playerPoints / computerTurns)} per turn)`
+  );
 }
 
 export function runTutorialTests() {

@@ -18,7 +18,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ScoreBubbleAnimation, ScoreBubbleData } from './ScoreBubbleAnimation';
 import { subscribeToRoom, markPlayerLeft, updateRoomGameState, getClientSessionId, RoomGameState } from '../lib/matchmaking';
 import { useRoomHeartbeat, useRoomPresence } from '../lib/roomPresence';
-import { adjustTutorialRoll } from '../lib/tutorial';
+import { luckyTutorialRoll, tutorialComputerRoll } from '../lib/tutorial';
 import { calculatePayouts } from './PickGameScreen';
 import { rollDiceOnServer } from '../lib/serverAuthoritative';
 
@@ -1146,18 +1146,18 @@ export const PlayScreen: React.FC<PlayScreenProps> = ({
         playerUid: activeRoller.id,
       }
     );
-    // Tutorial battle: the new player's rolls are a little luckier, and the computer never
-    // gets ahead of them, so they win after the first elimination round
+    // Tutorial battle: the new player's rolls are a little luckier, and the computer plays
+    // normally but never gets ahead of them, so they win after the first elimination round
     if (settings.tutorialBattle && !tbActive) {
-      const rolled = active.map(d => ({ ...d, value: finalValuesMap.get(d.id) ?? d.value }));
       const savedNow = workingDice.filter(d => d.zone === 'saved');
-      const owner = units.find(u => u.isOwner);
-      const luck = activeRoller.isOwner
-        ? 'lucky'
-        : (activeRoller.score || 0) + 40 < (owner?.score || 0)
-          ? 'small'
-          : 'none';
-      adjustTutorialRoll(rolled, savedNow, luck).forEach(d => finalValuesMap.set(d.id, d.value));
+      if (activeRoller.isOwner) {
+        const rolled = active.map(d => ({ ...d, value: finalValuesMap.get(d.id) ?? d.value }));
+        luckyTutorialRoll(rolled, savedNow).forEach(d => finalValuesMap.set(d.id, d.value));
+      } else {
+        const owner = units.find(u => u.isOwner);
+        const budget = Math.max(0, (owner?.score || 0) - (activeRoller.score || 0) - 5);
+        tutorialComputerRoll(active, savedNow, budget).forEach((value, id) => finalValuesMap.set(id, value));
+      }
     }
 
     let nextSlot = 0;
